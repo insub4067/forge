@@ -18,6 +18,7 @@ from ..config import settings
 from ..db import store
 from .. import errors as error_log
 from .. import metrics as metrics_calc
+from .. import skills as skills_lib
 from ..runtime.agent import AgentRuntime
 from ..tools.registry import _resolve
 
@@ -702,22 +703,19 @@ async def update_model_policy(role: str, req: Request):
 @router.get("/rooms/{session_id}/skills")
 async def list_skills(session_id: str):
     ws = await _room_workspace(session_id)
-    sdir = Path(ws) / ".forge" / "skills"
-    skills = []
-    if sdir.is_dir():
-        for p in sorted(sdir.glob("*.md")):
-            try:
-                skills.append({"name": p.stem, "content": p.read_text(encoding="utf-8")})
-            except OSError:
-                continue
-    return {"skills": skills}
+    # global + workspace 병합(같은 이름은 workspace 우선), 각 항목에 scope 포함.
+    return {"skills": skills_lib.iter_skills(ws)}
 
 
 @router.delete("/rooms/{session_id}/skills/{name}")
-async def delete_skill(session_id: str, name: str):
+async def delete_skill(session_id: str, name: str, scope: str = "workspace"):
     ws = await _room_workspace(session_id)
     safe = re.sub(r"[^a-zA-Z0-9_-]+", "-", name).strip("-").lower()
-    p = Path(ws) / ".forge" / "skills" / f"{safe}.md"
+    scope = "global" if scope == "global" else "workspace"
+    try:
+        p = skills_lib.resolve_path(scope, ws, name, safe)
+    except PermissionError:
+        return {"deleted": False}
     if p.is_file():
         p.unlink()
         return {"deleted": True}

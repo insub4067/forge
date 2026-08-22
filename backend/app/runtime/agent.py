@@ -15,6 +15,7 @@ from typing import Any, Awaitable, Callable
 from ..config import settings
 from .. import errors as error_log
 from .. import eventlog
+from .. import skills as skills_lib
 from ..db import store
 from ..llm.factory import create_adapter
 from ..orchestrator.model_router import ModelRouter
@@ -146,24 +147,19 @@ def _select_skills(workspace: str, query: str) -> str:
     모든 skill을 읽어 요청 키워드와의 겹침으로 점수를 매기고 상위 N개만,
     문자 예산 안에서 삽입한다. 제목 일치는 가중치 3, 본문 일치는 1.
     한글 교착어를 흡수하려고 부분 문자열 포함으로 매칭한다.
-    관련 skill이 없으면 빈 문자열(아무것도 삽입하지 않음)."""
-    sdir = Path(workspace) / ".forge" / "skills"
-    if not sdir.is_dir():
-        return ""
+    global(~/.forge/skills) + workspace 2-tier를 병합해 대상으로 삼는다(같은 이름은
+    workspace 우선). 관련 skill이 없으면 빈 문자열(아무것도 삽입하지 않음)."""
     terms = set(_skill_terms(query))
     if not terms:
         return ""
     scored: list[tuple[int, str, str]] = []
-    for p in sorted(sdir.glob("*.md")):
-        try:
-            body = p.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        stem_l = p.stem.lower()
+    for sk in skills_lib.iter_skills(workspace):
+        stem, body = sk["name"], sk["content"]
+        stem_l = stem.lower()
         body_l = body.lower()
         score = sum(3 for t in terms if t in stem_l) + sum(1 for t in terms if t in body_l)
         if score > 0:
-            scored.append((score, p.stem, body))
+            scored.append((score, stem, body))
     if not scored:
         return ""
     scored.sort(key=lambda x: (-x[0], x[1]))

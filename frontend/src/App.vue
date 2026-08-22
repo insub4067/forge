@@ -102,11 +102,11 @@ async function openSkills() {
   } catch {}
 }
 
-async function deleteSkill(name) {
+async function deleteSkill(name, scope = 'workspace') {
   const id = currentRoomId.value
   if (!id || !confirm(`skill '${name}'을 삭제할까요?`)) return
   try {
-    await fetch(`/api/rooms/${id}/skills/${encodeURIComponent(name)}`, { method: 'DELETE' })
+    await fetch(`/api/rooms/${id}/skills/${encodeURIComponent(name)}?scope=${scope}`, { method: 'DELETE' })
     await openSkills()
   } catch {}
 }
@@ -2481,7 +2481,8 @@ document.addEventListener('visibilitychange', () => {
           <div class="skill-head" @click="skillOpen[s.name] = !skillOpen[s.name]">
             <svg class="skill-chevron" :class="{ open: skillOpen[s.name] }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
             <span class="skill-name">{{ s.name }}</span>
-            <button class="skill-del" @click.stop="deleteSkill(s.name)">삭제</button>
+            <span class="skill-scope" :class="s.scope">{{ s.scope === 'global' ? '전역' : '프로젝트' }}</span>
+            <button class="skill-del" @click.stop="deleteSkill(s.name, s.scope)">삭제</button>
           </div>
           <pre v-show="skillOpen[s.name]" class="skill-content">{{ s.content }}</pre>
         </div>

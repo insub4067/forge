@@ -166,6 +166,7 @@ TOOL_SCHEMAS: list[dict] = [
                 "properties": {
                     "name": {"type": "string", "description": "skill 식별자 (예: fastapi-sse-debug)"},
                     "content": {"type": "string", "description": "절차를 담은 마크다운. 언제 쓰는지, 확인 순서, 명령/체크포인트."},
+                    "scope": {"type": "string", "enum": ["workspace", "global"], "description": "workspace(기본, 이 프로젝트 전용) | global(모든 workspace 재사용). 여러 프로젝트에서 검증된 일반 절차만 global."},
                 },
                 "required": ["name", "content"],
             },
@@ -277,13 +278,15 @@ async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]
         return "\n".join(out[:100]) or "검색 결과 없음", ""
     if name == "save_skill":
         import re as _re
+        from .. import skills as skills_lib
+
         raw = str(args.get("name", "")).strip()
         safe = _re.sub(r"[^a-zA-Z0-9_-]+", "-", raw).strip("-").lower() or "skill"
-        sdir = Path(workspace) / ".forge" / "skills"
-        sdir.mkdir(parents=True, exist_ok=True)
-        path = sdir / f"{safe}.md"
+        scope = "global" if str(args.get("scope", "")).strip() == "global" else "workspace"
+        path = skills_lib.resolve_path(scope, workspace, raw, safe)  # 경계 밖이면 PermissionError
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(str(args.get("content", "")), encoding="utf-8")
-        return f"skill을 저장했습니다: {safe}", ""
+        return f"skill을 저장했습니다: {safe} ({scope})", ""
     if name == "write_file":
         p = _resolve(workspace, str(args["path"]))
         old_text = p.read_text(encoding="utf-8", errors="replace") if p.exists() else ""
