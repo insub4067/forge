@@ -1135,6 +1135,9 @@ async function send() {
   } finally {
     busy.value = false
     scrollBottom()
+    // 스트림이 done 없이 끊겼을 수도 있으므로 서버 상태를 확인 → 아직 돌면 폴링 시작.
+    // (모바일에서 스트림이 조용히 끊기면 sessionRunning이 false로 남아 '끝난 것처럼' 보이던 문제)
+    checkRunning()
     // '중단 후 새로 시작' 모드로 대기된 메시지가 있으면 현재 스트림 종료 후 전송
     if (pendingSend.value) {
       const t = pendingSend.value
