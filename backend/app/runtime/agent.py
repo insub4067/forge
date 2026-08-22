@@ -281,13 +281,16 @@ class AgentRuntime:
         - terminal(잘못된 요청·인증 등): 전파
         긴 실행이 네트워크 블립이나 일시적 API 장애로 통째로 죽지 않게 한다."""
         stripped = False
+        no_think = False
         transient_attempts = 0
         while True:
             msgs = self._strip_reasoning(messages) if stripped else messages
+            call_thinking = False if no_think else thinking
+            call_effort = None if no_think else effort
             produced = False
             try:
                 async for delta in self._adapter_for(model).stream_chat(
-                    msgs, tool_schemas, thinking=thinking, reasoning_effort=effort
+                    msgs, tool_schemas, thinking=call_thinking, reasoning_effort=call_effort
                 ):
                     produced = True
                     yield delta
@@ -297,11 +300,14 @@ class AgentRuntime:
                 if produced:
                     raise
                 kind = self._classify_error(err)
-                if kind == "reasoning" and not stripped:
+                # reasoning_content 400: reasoning을 벗기고 thinking을 꺼서 재시도.
+                # non-thinking 호출은 reasoning_content 계약 자체가 없어 확실히 회피된다.
+                if kind == "reasoning" and not (stripped and no_think):
                     stripped = True
+                    no_think = True
                     if session_id:
                         self._strip_reasoning_sessions.add(session_id)
-                    error_log.record("llm_recovered", f"reasoning 벗겨 재시도: {err}", session_id)
+                    error_log.record("llm_recovered", f"thinking 끄고 재시도: {err}", session_id)
                     continue
                 if kind == "transient" and transient_attempts < 3:
                     transient_attempts += 1
