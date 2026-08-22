@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import shutil
 import sys
 import tempfile
 import uuid
@@ -439,6 +440,42 @@ async def caffeinate_toggle(req: Request):
         killer = await asyncio.create_subprocess_exec("pkill", "-f", _CAFFEINATE_MARK)
         await killer.wait()
     return {"on": on}
+
+
+@router.get("/mac/camera")
+async def camera_frame(max_px: int = 960):
+    """맥 웹캠 단일 프레임 — imagesnap으로 캡처('카메라' 권한 필요).
+
+    imagesnap이 필요하다: `brew install imagesnap`. avfoundation(ffmpeg)은
+    이 맥에서 프레임을 안정적으로 내보내지 못해 전용 CLI를 쓴다.
+    """
+    if sys.platform != "darwin":
+        return Response(content=b"unsupported", status_code=501)
+    if not shutil.which("imagesnap"):
+        return Response(content="imagesnap 미설치: brew install imagesnap".encode(), status_code=501)
+    tmp = Path(tempfile.gettempdir()) / "forge_cam.jpg"
+    try:
+        # -w: 웜업(자동 노출), -q: 조용히. 단일 프레임을 파일로.
+        proc = await asyncio.create_subprocess_exec(
+            "imagesnap", "-w", "0.4", "-q", str(tmp),
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=8)
+        if not tmp.exists() or tmp.stat().st_size == 0:
+            msg = stderr.decode(errors="ignore").strip() or "capture failed"
+            return Response(content=f"카메라 권한 필요: {msg}".encode(), status_code=403)
+        resize = await asyncio.create_subprocess_exec(
+            "sips", "-Z", str(max_px), str(tmp),
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await resize.wait()
+        return Response(
+            content=tmp.read_bytes(),
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception as err:
+        return Response(content=str(err).encode(), status_code=500)
 
 
 @router.websocket("/terminals/ws")

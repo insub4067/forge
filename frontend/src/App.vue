@@ -135,6 +135,11 @@ const screenSrc = ref('')
 const screenErr = ref('')
 let screenSeq = 0
 const caffeineOn = ref(false)
+const camOn = ref(false)
+const camSrc = ref('')
+const camErr = ref('')
+let camSeq = 0
+let camWarmup = 0
 const tasks = ref([])
 // 칸반 카드 상태 변경을 채팅에 알리기 위한 직전 상태 스냅샷(title→status).
 let lastTaskStatus = {}
@@ -1175,6 +1180,7 @@ function onScreenError() {
 function closeMacView() {
   stopScreen()
   stopTerminal()
+  stopCamera()
   macView.value = ''
   macControls.value = true // 다음에 열 때 컨트롤 보이게
   try {
@@ -1227,6 +1233,31 @@ function stopTerminal() {
   if (termWs) { try { termWs.close() } catch {} termWs = null }
   if (term) { try { term.dispose() } catch {} term = null }
   termFit = null
+}
+
+// ─── 맥: 카메라 보기 (ffmpeg avfoundation 폴링) ───
+function openMacCamera() {
+  macView.value = 'camera'
+  macControls.value = true
+  camOn.value = true
+  camErr.value = ''
+  camTick()
+}
+function camTick() {
+  if (!camOn.value) return
+  camSrc.value = `/api/mac/camera?t=${Date.now()}_${camSeq++}`
+}
+function onCamLoad() {
+  camErr.value = ''
+  if (camOn.value) setTimeout(camTick, 400)
+}
+function onCamError() {
+  camErr.value = '카메라를 가져오지 못했습니다. imagesnap 설치(brew install imagesnap) 및 시스템 설정 › 개인정보 보호 › 카메라 권한을 확인하세요.'
+  camOn.value = false
+}
+function stopCamera() {
+  camOn.value = false
+  camSrc.value = ''
 }
 
 async function deleteRoom(id) {
@@ -1985,7 +2016,7 @@ document.addEventListener('visibilitychange', () => {
               <button class="mac-tile" @click="openMacTerminal">
                 <span class="mac-ico">⌨️</span><span>터미널 연결</span>
               </button>
-              <button class="mac-tile" @click="macView = 'camera'">
+              <button class="mac-tile" @click="openMacCamera">
                 <span class="mac-ico">📷</span><span>카메라 보기</span>
               </button>
               <div class="mac-tile mac-toggle" @click="toggleCaffeine">
@@ -2064,9 +2095,18 @@ document.addEventListener('visibilitychange', () => {
           <button @click="termKey('\x1b[C')">→</button>
         </div>
       </div>
-      <div v-else class="mac-placeholder">
-        카메라 보기 — 곧 지원됩니다.
-      </div>
+      <template v-else-if="macView === 'camera'">
+        <div v-if="camErr" class="mac-screen-err">{{ camErr }}</div>
+        <div v-else-if="!camSrc" class="mac-placeholder">카메라 준비 중…</div>
+        <img
+          v-show="!camErr && camSrc"
+          :src="camSrc"
+          class="mac-screen-video"
+          alt="맥 카메라"
+          @load="onCamLoad"
+          @error="onCamError"
+        />
+      </template>
       <button class="mac-ov-close" :class="{ top: macView === 'terminal' }" @click="closeMacView" aria-label="닫기">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
