@@ -133,7 +133,10 @@ async def get_room(session_id: str):
 @router.patch("/rooms/{session_id}")
 async def update_room(session_id: str, req: Request):
     body = await req.json()
+    title = str(body.get("title", "")).strip()
     workspace_path = str(body.get("workspace_path", "")).strip()
+    if title:
+        await store.update_room_title(session_id, title)
     if workspace_path:
         await store.update_room_workspace(session_id, workspace_path)
     return {"ok": True}

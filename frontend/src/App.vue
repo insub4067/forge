@@ -303,6 +303,20 @@ async function deleteRoom(id) {
   } catch {}
 }
 
+async function renameRoom(id) {
+  const room = rooms.value.find((r) => r.id === id)
+  const name = prompt('새 방 이름', room?.title || '')
+  if (!name || !name.trim()) return
+  try {
+    await fetch(`/api/rooms/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: name.trim() }),
+    })
+    await loadRooms()
+  } catch {}
+}
+
 async function openWorkspacePicker(roomId) {
   pickerRoomId.value = roomId || null
   showWorkspacePicker.value = true
@@ -641,7 +655,12 @@ onMounted(async () => {
               />
             </svg>
             <div class="room-info">
-              <div class="room-title">{{ r.title }}</div>
+              <div class="room-title-row">
+                <span class="room-title">{{ r.title }}</span>
+                <button class="room-edit" @click.stop="renameRoom(r.id)" aria-label="이름 변경">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></svg>
+                </button>
+              </div>
               <div class="room-path" @click.stop="openWorkspacePicker(r.id)">
                 {{ r.workspace_path || '워크스페이스 설정' }}
               </div>

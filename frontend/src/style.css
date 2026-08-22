@@ -223,6 +223,25 @@ header .todo-btn {
   white-space: nowrap;
 }
 
+.room-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.room-edit {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 2px;
+  display: flex;
+  flex-shrink: 0;
+}
+
+.room-edit:active {
+  color: var(--accent);
+}
+
 .room-path {
   font-size: 12px;
   color: var(--muted);

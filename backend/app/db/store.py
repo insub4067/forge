@@ -48,6 +48,14 @@ async def update_room_workspace(session_id: str, workspace_path: str) -> None:
             await s.commit()
 
 
+async def update_room_title(session_id: str, title: str) -> None:
+    async with async_session() as s:
+        sess = await s.get(Session, session_id)
+        if sess:
+            sess.title = title
+            await s.commit()
+
+
 async def get_room(session_id: str) -> dict | None:
     async with async_session() as s:
         sess = await s.get(Session, session_id)
