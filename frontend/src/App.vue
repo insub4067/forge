@@ -47,53 +47,14 @@ function diffClass(line) {
   if (line.startsWith('@@')) return 'hunk'
   return ''
 }
-
-let flushRaf = null
-let thinkingBuf = ''
-let textBuf = ''
-
-function flush(assistant) {
-  if (flushRaf) return
-  flushRaf = requestAnimationFrame(() => {
-    flushRaf = null
-    if (thinkingBuf) {
-      assistant.thinking += thinkingBuf
-      thinkingBuf = ''
-    }
-    if (textBuf) {
-      assistant.text += textBuf
-      textBuf = ''
-    }
-    scrollBottom()
-  })
-}
-
-function flushNow(assistant) {
-  if (flushRaf) {
-    cancelAnimationFrame(flushRaf)
-    flushRaf = null
-  }
-  if (thinkingBuf) {
-    assistant.thinking += thinkingBuf
-    thinkingBuf = ''
-  }
-  if (textBuf) {
-    assistant.text += textBuf
-    textBuf = ''
-  }
-  scrollBottom()
-}
-
 function handleEvent(evt, assistant) {
   const d = evt.data || {}
   switch (evt.type) {
     case 'thinking_delta':
-      thinkingBuf += d.content || ''
-      flush(assistant)
+      assistant.thinking += d.content || ''
       break
     case 'text_delta':
-      textBuf += d.content || ''
-      flush(assistant)
+      assistant.text += d.content || ''
       break
     case 'tool_call':
       assistant.tools.push({ name: d.name, args: d.args, status: 'running', result: '' })
@@ -125,8 +86,6 @@ function handleEvent(evt, assistant) {
       break
     case 'done':
       if (d.content) {
-        thinkingBuf = ''
-        textBuf = ''
         assistant.text = d.content
       }
       break
@@ -182,7 +141,6 @@ async function send() {
   } catch (err) {
     assistant.text += '\n\n오류: ' + (err.message || err)
   } finally {
-    flushNow(assistant)
     busy.value = false
     scrollBottom()
   }
