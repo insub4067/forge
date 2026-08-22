@@ -116,6 +116,9 @@ async def chat(req: Request):
     async def emit(evt: dict) -> None:
         await queue.put(evt)
 
+    # run 진행을 DB에 표시 — 서버 재시작으로 중단되면 시작 시 감지·정리된다.
+    await store.mark_running(session_id, True)
+
     async def run_and_close() -> None:
         try:
             new_history = await runtime.run(history, emit, session_id, workspace_path)
@@ -132,6 +135,7 @@ async def chat(req: Request):
                 {"seq": 0, "type": "error", "data": {"message": str(err)}}
             )
         finally:
+            await store.mark_running(session_id, False)
             runtime.cleanup_session(session_id)
             await queue.put(None)
 

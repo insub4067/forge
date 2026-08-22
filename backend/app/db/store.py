@@ -175,6 +175,36 @@ async def update_context_usage(session_id: str, used_tokens: int) -> None:
             await s.commit()
 
 
+async def mark_running(session_id: str, running: bool) -> None:
+    async with async_session() as s:
+        sess = await s.get(Session, session_id)
+        if sess:
+            sess.running = running
+            await s.commit()
+
+
+async def reconcile_interrupted_runs() -> int:
+    """서버 시작 시, running=True로 남은 세션은 재시작으로 중단된 run이다.
+    복구 안내 메시지를 히스토리에 남기고 플래그를 내린다. 정리한 세션 수를 반환."""
+    async with async_session() as s:
+        result = await s.execute(select(Session).where(Session.running == True))  # noqa: E712
+        stuck = result.scalars().all()
+        ids = [sess.id for sess in stuck]
+        for sess in stuck:
+            sess.running = False
+        await s.commit()
+    note = {
+        "role": "assistant",
+        "content": "서버가 재시작되어 진행 중이던 작업이 중단되었습니다. 필요하면 다시 요청해주세요.",
+    }
+    for sid in ids:
+        history = await load_history(sid)
+        if history and history[-1].get("role") == "user":
+            history.append(note)
+            await save_history(sid, history)
+    return len(ids)
+
+
 async def save_checkpoint(session_id: str, step_no: int, git_sha: str) -> None:
     async with async_session() as s:
         s.add(Checkpoint(session_id=session_id, step_no=step_no, git_sha=git_sha))

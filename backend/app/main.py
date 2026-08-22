@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from .api.routes import router
+from .db import store
 from .db.models import Base
 from .db.session import engine
 
@@ -16,6 +17,7 @@ from .db.session import engine
 _COLUMN_PATCHES = [
     "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS cache_hit_tokens INTEGER DEFAULT 0",
     "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS cache_miss_tokens INTEGER DEFAULT 0",
+    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS running BOOLEAN DEFAULT FALSE",
 ]
 
 
@@ -26,6 +28,8 @@ async def lifespan(app: FastAPI):
             await conn.run_sync(Base.metadata.create_all)
             for stmt in _COLUMN_PATCHES:
                 await conn.execute(text(stmt))
+        # 재시작으로 중단된 run 정리(복구 메시지 + 플래그 해제).
+        await store.reconcile_interrupted_runs()
     except Exception:
         pass
     yield
