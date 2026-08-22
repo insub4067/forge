@@ -92,15 +92,17 @@
 
 ### 큐 2 — Durable Runtime / 세션 재개
 
-- [ ] **Durable Event Log** — append-only 실행 이벤트 영속화(Redis Streams). harness §4 / hermes H4
-- [ ] Model Surface 분리 — 저장 로그 ≠ 모델 전달 메시지
-- [ ] 서버 재시작·모바일 재접속 후 세션 재개/replay
-- [ ] Agent Core ↔ PWA lifecycle 분리(브라우저 끊겨도 Core 지속). hermes §7
+- [x] 경량 재접속 인지 — 앱 종료 후에도 서버 run은 계속, 재접속 시 실행 여부 표시 + 완료 자동 갱신
+- [x] Model Surface 분리(부분) — compaction/pruning으로 저장 원본 ≠ 모델 전달 메시지
+- [ ] **Durable Event Log** — append-only 실행 이벤트 영속화(Redis Streams) + 재접속 LIVE replay. harness §4 / hermes H4
+- [ ] 서버 재시작 후 세션 재개(인메모리 상태라 재시작엔 아직 미복구)
+- [ ] Agent Core ↔ PWA lifecycle 완전 분리. hermes §7
 
 ### 큐 3 — Tool 효율
 
+- [x] read-only 병렬 실행 — 한 응답의 다중 read_file/grep를 병렬 prefetch(3개 0.9s→0.3s). harness §9 / hermes H3
 - [ ] **Tool Script/RPC Mode** — 탐색성 다중 도구를 한 번에 묶어 model round-trip 감소(제한된 executor, mutation은 승인 통과). hermes §5
-- [ ] ToolExecutor 분리 + read-only 병렬 실행. harness §8 / hermes H3
+- [ ] ToolExecutor 분리(agent.py에서 tool 정책 코드 분리). harness §8
 
 ### 큐 4 — 학습 (Self-Improving Skills)
 
