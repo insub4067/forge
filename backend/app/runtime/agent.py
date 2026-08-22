@@ -21,6 +21,9 @@ from ..sandbox.executor import DockerSandbox
 MAX_STEPS = 30
 MAX_REPEATED_CALLS = 3
 CONTEXT_BLOCK_RATIO = 0.95
+# 이 비율을 넘으면 오래된 대화를 요약해 모델 컨텍스트를 압축한다(비파괴 — 표시/저장용 원본은 유지).
+CONTEXT_COMPACT_RATIO = 0.75
+COMPACT_KEEP_RECENT = 8
 # Reviewer↔Debugger 자기수정 루프의 최대 검증 사이클.
 # ModelRouter의 debugger Pro 승격 임계(retry_count>=3)와 맞물려,
 # 마지막(3번째) Debugger 시도가 Pro로 승격된다.
@@ -139,11 +142,90 @@ class AgentRuntime:
         # reasoning_content 400을 한 번 겪은 세션 — 이후 호출은 미리 reasoning을 벗긴다.
         self._strip_reasoning_sessions: set[str] = set()
         self._auto_approve_sessions: set[str] = set()
+        # 세션별 컨텍스트 압축 상태: {session_id: {"summary": str, "covered": int}}
+        # summary가 all_messages[:covered]를 대체(모델 전송 시에만).
+        self._compaction: dict[str, dict] = {}
 
     def _adapter_for(self, model: str):
         if model not in self._adapters:
             self._adapters[model] = create_adapter(model)
         return self._adapters[model]
+
+    @staticmethod
+    def _safe_split(all_messages: list[dict], keep_recent: int) -> int:
+        """최근 keep_recent개를 보존하되, 투영본이 orphan tool 메시지나
+        결과 없는 tool_calls로 시작하지 않도록 안전한 경계를 찾는다.
+        경계는 user 메시지 또는 tool_calls 없는 assistant 앞이어야 한다.
+        압축할 수 없으면 0을 반환."""
+        split = len(all_messages) - keep_recent
+        while split > 1:
+            m = all_messages[split]
+            role = m.get("role")
+            if role == "user" or (role == "assistant" and not m.get("tool_calls")):
+                return split
+            split -= 1
+        return 0
+
+    @staticmethod
+    def _plain_transcript(messages: list[dict]) -> str:
+        lines: list[str] = []
+        for m in messages:
+            role = m.get("role", "")
+            content = m.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(
+                    c.get("text", "") for c in content
+                    if isinstance(c, dict) and c.get("type") == "text"
+                ) or "[이미지]"
+            text = str(content).strip()
+            if m.get("tool_calls"):
+                names = ", ".join(tc.get("function", {}).get("name", "") for tc in m["tool_calls"])
+                text = (text + f" [도구 호출: {names}]").strip()
+            if text:
+                lines.append(f"{role}: {text[:800]}")
+        return "\n".join(lines)
+
+    async def _compact(self, all_messages: list[dict], session_id: str) -> bool:
+        """오래된 대화를 flash로 요약해 self._compaction에 저장한다(비파괴).
+        압축이 실제로 일어났으면 True."""
+        prev = self._compaction.get(session_id)
+        base = prev["covered"] if prev else 0
+        split = self._safe_split(all_messages, COMPACT_KEEP_RECENT)
+        if split <= base + 2:  # 새로 요약할 구간이 거의 없음
+            return False
+        old = all_messages[base:split]
+        prior = ("이전 요약:\n" + prev["summary"] + "\n\n") if prev else ""
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "다음 에이전트 작업 기록을 요약하라. 목표, 확인한 사실, 변경한 파일, "
+                    "남은 작업, 주요 오류를 간결한 한국어 불릿으로. 이후 작업에 필요한 정보를 보존한다."
+                ),
+            },
+            {"role": "user", "content": prior + self._plain_transcript(old)},
+        ]
+        parts: list[str] = []
+        try:
+            async for delta in self._adapter_for(self.router.triage_model).stream_chat(messages):
+                if delta.get("content"):
+                    parts.append(delta["content"])
+        except Exception as err:
+            error_log.record("compaction_failed", str(err), session_id)
+            return False
+        summary = "".join(parts).strip()
+        if not summary:
+            return False
+        self._compaction[session_id] = {"summary": summary, "covered": split}
+        return True
+
+    def _project(self, all_messages: list[dict], session_id: str) -> list[dict]:
+        """모델에 보낼 메시지 투영: 압축된 구간은 요약본으로 대체(원본은 유지)."""
+        comp = self._compaction.get(session_id)
+        if not comp:
+            return list(all_messages)
+        checkpoint = {"role": "user", "content": "[이전 작업 요약 — 컨텍스트 압축됨]\n" + comp["summary"]}
+        return [checkpoint, *all_messages[comp["covered"]:]]
 
     @staticmethod
     def _strip_reasoning(messages: list[dict]) -> list[dict]:
@@ -237,6 +319,7 @@ class AgentRuntime:
         self._running_sessions.discard(session_id)
         self._injections.pop(session_id, None)
         self._cancel_sessions.discard(session_id)
+        self._compaction.pop(session_id, None)
 
     @staticmethod
     async def _git_sha(workspace: str) -> str:
@@ -445,7 +528,7 @@ class AgentRuntime:
             usage: dict[str, int] = {}
             last_emit = 0.0
 
-            call_messages = [system_msg, *all_messages]
+            call_messages = [system_msg, *self._project(all_messages, session_id)]
             if session_id in self._strip_reasoning_sessions:
                 call_messages = self._strip_reasoning(call_messages)
             async for delta in self._stream_with_recovery(
@@ -507,6 +590,11 @@ class AgentRuntime:
                 used = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
                 if session_id:
                     await store.update_context_usage(session_id, used)
+                # 압축 임계 초과 → 오래된 대화를 요약해 컨텍스트를 줄이고 계속(비파괴)
+                if session_id and used > settings.logical_budget * CONTEXT_COMPACT_RATIO:
+                    if await self._compact(all_messages, session_id):
+                        await send("compaction", {"covered": self._compaction[session_id]["covered"]})
+                # 압축 후에도(또는 압축 불가) 95%를 넘으면 최후의 안전장치로 중단
                 if used > settings.logical_budget * CONTEXT_BLOCK_RATIO:
                     return "context_blocked", total_prompt, total_completion, route
 
