@@ -90,6 +90,8 @@ const showCreateRoom = ref(false)
 const newRoomName = ref('')
 const newRoomPath = ref('')
 const tasks = ref([])
+// 칸반 카드 상태 변경을 채팅에 알리기 위한 직전 상태 스냅샷(title→status).
+let lastTaskStatus = {}
 const showKanban = ref(false)
 const showWorkspacePicker = ref(false)
 const fsPath = ref('')
@@ -135,12 +137,12 @@ const attachedImage = ref(null)
 const attachedText = ref(null) // { name, content, truncated }
 const fileInput = ref(null)
 const kanbanOpen = ref({
-  todo: true,
-  planning: true,
-  in_progress: true,
-  review: true,
-  debug: true,
-  done: true,
+  todo: false,
+  planning: false,
+  in_progress: false,
+  review: false,
+  debug: false,
+  done: false,
 })
 
 let touchStartX = 0
@@ -584,6 +586,7 @@ async function loadMessages(isNew = false) {
 
 async function selectRoom(id, isNew = false) {
   stopRunningPoll()
+  lastTaskStatus = {}
   sessionRunning.value = false
   searchQuery.value = ''
   searchResults.value = []
@@ -610,6 +613,11 @@ async function loadTasks() {
 async function createRoom() {
   const name = newRoomName.value.trim()
   if (!name) return
+  // 워크스페이스는 필수 — 미선택 시 홈으로 잘못 잡혀 git·skills가 깨진다.
+  if (!newRoomPath.value.trim()) {
+    alert('워크스페이스 폴더를 선택하세요.')
+    return
+  }
   try {
     const res = await fetch('/api/rooms', {
       method: 'POST',
@@ -884,9 +892,26 @@ function handleEvent(evt, assistant) {
       activeQuestion.value = { id: d.id, question: d.question, options: d.options || [] }
       questionAnswer.value = ''
       break
-    case 'task_update':
-      tasks.value = d.tasks || []
+    case 'task_update': {
+      const newTasks = d.tasks || []
+      const labels = { todo: '할 일', planning: '계획', 'in-progress': '진행', in_progress: '진행', review: '검토', debug: '디버그', done: '완료' }
+      if (!assistant.taskNotes) assistant.taskNotes = []
+      for (const t of newTasks) {
+        const prev = lastTaskStatus[t.title]
+        if (prev !== t.status) {
+          assistant.taskNotes.push({
+            title: t.title,
+            from: prev ? (labels[prev] || prev) : '',
+            to: labels[t.status] || t.status,
+            done: t.status === 'done',
+          })
+        }
+      }
+      lastTaskStatus = {}
+      for (const t of newTasks) lastTaskStatus[t.title] = t.status
+      tasks.value = newTasks
       break
+    }
     case 'user_injected':
       activePhase(assistant).tools.push({
         name: '사용자 메시지', args: {}, status: 'done', result: d.content || '', diff: '',
@@ -1350,6 +1375,14 @@ document.addEventListener('visibilitychange', () => {
             <div v-if="(busy || sessionRunning) && i === messages.length - 1" class="typing">
               <span class="typing-label">{{ busy ? '작성 중' : 'Mac에서 작업 중' }}</span>
               <span class="typing-dots"><i></i><i></i><i></i></span>
+            </div>
+
+            <div v-if="m.taskNotes && m.taskNotes.length" class="task-notes">
+              <div v-for="(tn, ti) in m.taskNotes" :key="ti" class="task-note" :class="{ done: tn.done }">
+                <span class="task-note-icon">{{ tn.done ? '✓' : '•' }}</span>
+                <span class="task-note-title">{{ tn.title }}</span>
+                <span class="task-note-status">{{ tn.from ? tn.from + ' → ' : '' }}{{ tn.to }}</span>
+              </div>
             </div>
 
             <div v-if="(m.state && (m.state.files_changed?.length || m.state.errors?.length)) || m.compacted" class="state-summary">
