@@ -2674,3 +2674,30 @@ button {
   padding: 0;
   color: #e6edf3;
 }
+
+/* 파일 뷰어 미디어(이미지/영상/오디오/PDF) */
+.media-view {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+.media-view img {
+  max-width: 100%;
+  border-radius: 10px;
+  cursor: zoom-in;
+}
+.media-view video {
+  max-width: 100%;
+  border-radius: 10px;
+}
+.media-view audio {
+  width: 100%;
+}
+.pdf-frame {
+  width: 100%;
+  height: 78vh;
+  border: none;
+  border-radius: 10px;
+  background: #fff;
+}

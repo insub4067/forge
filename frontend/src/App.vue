@@ -146,6 +146,8 @@ const fileParent = ref(null)
 const fileEntries = ref([])
 const fileContent = ref('')
 const viewingFile = ref('')
+const viewerKind = ref('text') // text | image | video | audio | pdf
+const mediaUrl = ref('')
 const showMenu = ref(false)
 const showAdmin = ref(false)
 const showPush = ref(false)
@@ -606,7 +608,27 @@ function toggleHidden() {
   navigateFiles(filePath.value)
 }
 
+const _MEDIA = {
+  image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'],
+  video: ['mp4', 'webm', 'mov', 'm4v'],
+  audio: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'],
+  pdf: ['pdf'],
+}
+function _mediaKind(path) {
+  const ext = (path.split('.').pop() || '').toLowerCase()
+  for (const [kind, exts] of Object.entries(_MEDIA)) if (exts.includes(ext)) return kind
+  return 'text'
+}
 async function openFile(path) {
+  const kind = _mediaKind(path)
+  viewerKind.value = kind
+  viewingFile.value = path
+  if (kind !== 'text') {
+    // 미디어는 원본 URL로 직접 재생/표시(텍스트로 읽지 않음)
+    mediaUrl.value = `/api/fs/raw?path=${encodeURIComponent(path)}&session_id=${currentRoomId.value}`
+    fileContent.value = ''
+    return
+  }
   try {
     const res = await fetch(`/api/fs/read?path=${encodeURIComponent(path)}&session_id=${currentRoomId.value}`)
     if (res.ok) {
@@ -2037,7 +2059,7 @@ document.addEventListener('visibilitychange', () => {
           <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19M1 1l22 22"/></svg>
           숨김
         </button>
-        <button v-if="viewingFile" @click="viewingFile = ''; fileContent = ''">목록</button>
+        <button v-if="viewingFile" @click="viewingFile = ''; fileContent = ''; viewerKind = 'text'; mediaUrl = ''">목록</button>
       </div>
       <div v-if="!viewingFile" class="fs-list">
         <button v-if="fileParent" class="fs-item parent" @click="navigateFiles(fileParent)">
@@ -2060,6 +2082,18 @@ document.addEventListener('visibilitychange', () => {
           </span>
           {{ e.name }}
         </button>
+      </div>
+      <div v-else-if="viewerKind === 'image'" class="media-view">
+        <img :src="mediaUrl" :alt="viewingFile" @click="openViewer(mediaUrl)" />
+      </div>
+      <div v-else-if="viewerKind === 'video'" class="media-view">
+        <video :src="mediaUrl" controls playsinline />
+      </div>
+      <div v-else-if="viewerKind === 'audio'" class="media-view">
+        <audio :src="mediaUrl" controls />
+      </div>
+      <div v-else-if="viewerKind === 'pdf'" class="media-view">
+        <iframe :src="mediaUrl" class="pdf-frame" />
       </div>
       <div v-else class="code-view">
         <div class="code-gutter"><span v-for="n in fileLineCount" :key="n">{{ n }}</span></div>

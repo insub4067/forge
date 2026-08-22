@@ -8,6 +8,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, File, Request, UploadFile
+from fastapi.responses import FileResponse, Response
 from sse_starlette.sse import EventSourceResponse
 
 from ..config import settings
@@ -89,6 +90,22 @@ async def fs_read(path: str = "", session_id: str = ""):
         return {"path": p, "content": content[:50_000]}
     except Exception as err:
         return {"path": p, "content": f"오류: {err}"}
+
+
+@router.get("/fs/raw")
+async def fs_raw(path: str = "", session_id: str = ""):
+    """워크스페이스 내 파일 원본 서빙(이미지/영상/PDF 미리보기용). 경계 밖은 차단."""
+    if session_id:
+        ws = await _room_workspace(session_id)
+        try:
+            p = str(_resolve(ws, path))
+        except PermissionError:
+            return Response(status_code=403)
+    else:
+        p = os.path.expanduser(path) if path else ""
+    if not p or not os.path.isfile(p):
+        return Response(status_code=404)
+    return FileResponse(p)
 
 
 @router.post("/upload")
