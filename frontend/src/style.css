@@ -740,6 +740,11 @@ header .todo-btn {
 .fs-item.parent {
   color: var(--accent);
   font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
 }
 .fs-item.parent .fs-icon { color: var(--accent); }
 

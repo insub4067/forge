@@ -629,7 +629,7 @@ async function renderPdf(url) {
   if (!el) return
   el.innerHTML = ''
   try {
-    const pdf = await pdfjsLib.getDocument(url).promise
+    const pdf = await pdfjsLib.getDocument({ url }).promise
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
     const cssWidth = Math.min(el.clientWidth || 360, 900)
     for (let n = 1; n <= pdf.numPages; n++) {
