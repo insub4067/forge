@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, nextTick } from 'vue'
+import { ref, reactive, nextTick, onMounted } from 'vue'
 
 const messages = ref([])
 const input = ref('')
@@ -124,6 +124,11 @@ function handleEvent(evt, assistant) {
       assistant.context = d
       break
     case 'done':
+      if (d.content) {
+        thinkingBuf = ''
+        textBuf = ''
+        assistant.text = d.content
+      }
       break
   }
   scrollBottom()
@@ -223,6 +228,37 @@ function resetSession() {
   localStorage.setItem('forge_session', id)
   location.reload()
 }
+
+onMounted(async () => {
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/messages`)
+    if (!res.ok) return
+    const data = await res.json()
+    if (!Array.isArray(data)) return
+    for (const m of data) {
+      if (m.role === 'user') {
+        messages.value.push({ role: 'user', content: m.content })
+      } else if (m.role === 'assistant') {
+        const am = reactive({
+          role: 'assistant',
+          thinking: m.reasoning_content || '',
+          text: m.content || '',
+          tools: [],
+          approval: null,
+        })
+        for (const tc of m.tool_calls || []) {
+          let args = {}
+          try {
+            args = JSON.parse(tc.function.arguments || '{}')
+          } catch {}
+          am.tools.push({ name: tc.function.name, args, status: 'done', result: '' })
+        }
+        messages.value.push(am)
+      }
+    }
+    scrollBottom()
+  } catch {}
+})
 </script>
 
 <template>
@@ -245,7 +281,7 @@ function resetSession() {
           <div v-if="m.role === 'user'" class="user-text">{{ m.content }}</div>
 
           <template v-if="m.role === 'assistant'">
-            <details v-if="m.thinking" class="thinking" open>
+            <details v-if="m.thinking" class="thinking">
               <summary>추론</summary>
               <div class="thinking-body">{{ m.thinking }}</div>
             </details>
