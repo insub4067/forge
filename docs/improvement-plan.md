@@ -13,6 +13,15 @@ RSI 세션 실측: model 호출 159회 · tool 120회 · cache 적중 91.6% · �
 
 ---
 
+> 이 문서는 **전술**(구체 버그·구현 단계). **전략 로드맵은 [roadmap-priority.md](roadmap-priority.md)** (P0~P9). 둘을 함께 본다.
+
+## 진행 상황 (2026-08-22)
+
+- [x] **P0-1 중복 응답 저장** — reviewer 진전 없음 가드로 해결(`5f54450`, Case G).
+- [x] **P0-2 자기검증 불가** — host 모드 활성화 + 파괴적 명령 denylist(`1ca2c10`).
+      RSI가 node·npm·backend import 실제 실행 가능 확인. review_limit 근본 해소.
+- [ ] P0-3 durable resume / P0-4 Web Push / P1(비용) / P2(스킬) — 아래.
+
 ## P0 — 신뢰를 깨는 결함 (이것부터)
 
 ### 1. 중복 응답 저장 버그
@@ -112,3 +121,31 @@ benchmark.md A~F를 실제로 돌려 수치 기록 → 변경 전/후 비교가 
 
 각 단계 후 benchmark로 전/후 수치 비교. 판단 기준은 언제나
 **cost per successfully completed task**.
+
+---
+
+## docs 전수 검토로 추가된 할일 (roadmap-priority와 연동)
+
+roadmap-priority.md(P0~P9)·proposal 검토에서 나온, 위에 없던 실행 항목:
+
+- [ ] **Benchmark 스위트 실물화 (roadmap P0)** — 지금은 benchmark.md 양식만 존재.
+      실제 task 50→100개 구축, FORGE 자체 개발 이력을 task로 재사용,
+      변경 전/후 자동 비교 스크립트. **이게 없으면 모든 최적화가 "느낌".**
+- [ ] **Authoritative replay stream (proposal: deepseek-harness)** — JSONL 로그는
+      추적 계층일 뿐. 재접속 시 진행 중 turn을 실제 재구성(모바일 라이브 복원).
+- [ ] **Parallel Coordinator/Worker (roadmap P2)** — 독립 workstream만 병렬,
+      Worker엔 self-contained packet만(컨텍스트 복제 금지 = 토큰 폭증 방지).
+      durable worker 이후.
+- [ ] **ExecutionBackend 추상화 (roadmap P6)** — Local/Host(구현됨)→Docker→SSH.
+      향후 DGX/원격 서버를 worker로. 실제 필요 시.
+- [ ] **보안 하드닝 (roadmap P8)** — path traversal 테스트, command policy 테스트,
+      secret redaction, API 키 안전 저장, audit 무결성, host 모드 위험 경고 문서화.
+      (파괴적 명령 denylist는 1차 완료.)
+- [ ] **Tauri Desktop Host (proposal, roadmap P9)** — sidecar PoC로만 우선 검증.
+      Rust 재작성·PWA 제거 금지. Agent 성능보다 후순위.
+- [ ] **모델 라우팅 데이터화 (roadmap P4)** — Planner Flash 실패율·Pro 개선율 등을
+      benchmark로 측정해 정책 개선(자동 튜닝은 데이터 축적 후).
+
+우선순위 원칙은 roadmap-priority.md를 따른다: **P0 benchmark → P1 durable
+worker → P2 parallel → P3 tool RPC → …**. 단, 신뢰를 깨는 P0 버그(위 1~4)는
+로드맵과 무관하게 즉시 처리한다.
