@@ -111,6 +111,40 @@ async def save_history(session_id: str, history: list[dict]) -> None:
         await s.commit()
 
 
+async def search_messages(query: str, limit: int = 30) -> list[dict]:
+    """메시지 내용에서 query를 검색해 세션별 첫 매칭 스니펫을 반환한다."""
+    q = query.strip()
+    if not q:
+        return []
+    async with async_session() as s:
+        result = await s.execute(
+            select(Message.session_id, Message.role, Message.content_json)
+            .where(Message.content_json.ilike(f"%{q}%"))
+            .order_by(Message.session_id, Message.seq)
+            .limit(300)
+        )
+        seen: dict[str, dict] = {}
+        for sid, role, cj in result.all():
+            if sid in seen:
+                continue
+            try:
+                content = json.loads(cj).get("content", "")
+            except Exception:
+                content = cj
+            if isinstance(content, list):
+                content = " ".join(
+                    c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"
+                )
+            text = str(content)
+            idx = text.lower().find(q.lower())
+            start = max(0, idx - 30)
+            snippet = ("…" if start > 0 else "") + text[start:start + 100].strip()
+            seen[sid] = {"session_id": sid, "role": role, "snippet": snippet}
+            if len(seen) >= limit:
+                break
+        return list(seen.values())
+
+
 async def list_rooms() -> list[dict]:
     async with async_session() as s:
         result = await s.execute(

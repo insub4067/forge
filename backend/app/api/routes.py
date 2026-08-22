@@ -191,6 +191,11 @@ async def list_sessions():
     return await store.list_rooms()
 
 
+@router.get("/search")
+async def search(q: str = ""):
+    return {"results": await store.search_messages(q)}
+
+
 @router.get("/sessions/{session_id}/messages")
 async def get_messages(session_id: str):
     history = await store.load_history(session_id)

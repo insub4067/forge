@@ -22,6 +22,24 @@ const autoApprove = ref(localStorage.getItem('forge_auto_approve') === '1')
 const sessionRunning = ref(false)
 const showSkills = ref(false)
 const skills = ref([])
+const searchQuery = ref('')
+const searchResults = ref([])
+let searchTimer = null
+
+function onSearch() {
+  clearTimeout(searchTimer)
+  const q = searchQuery.value.trim()
+  if (!q) {
+    searchResults.value = []
+    return
+  }
+  searchTimer = setTimeout(async () => {
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`)
+      if (res.ok) searchResults.value = (await res.json()).results || []
+    } catch {}
+  }, 250)
+}
 
 async function openSkills() {
   showSkills.value = true
@@ -534,6 +552,8 @@ async function loadMessages() {
 async function selectRoom(id) {
   stopRunningPoll()
   sessionRunning.value = false
+  searchQuery.value = ''
+  searchResults.value = []
   currentRoomId.value = id
   localStorage.setItem('forge_room', id)
   showRooms.value = false
@@ -1159,7 +1179,21 @@ document.addEventListener('visibilitychange', () => {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
           </button>
         </div>
-        <div class="rooms-scroll">
+        <div class="drawer-search">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+          <input v-model="searchQuery" @input="onSearch" placeholder="세션·대화 검색" />
+          <button v-if="searchQuery" class="drawer-search-x" @click="searchQuery=''; searchResults=[]">✕</button>
+        </div>
+        <div v-if="searchQuery && searchResults.length" class="rooms-scroll">
+          <div v-for="r in searchResults" :key="r.session_id" class="search-result" @click="selectRoom(r.session_id)">
+            <div class="search-title">{{ roomTitle(r.session_id) }}</div>
+            <div class="search-snippet">{{ r.snippet }}</div>
+          </div>
+        </div>
+        <div v-else-if="searchQuery" class="rooms-scroll">
+          <div class="admin-sub" style="padding:16px">검색 결과가 없습니다.</div>
+        </div>
+        <div v-else class="rooms-scroll">
         <div v-for="r in rooms" :key="r.id" class="room-swipe">
           <button class="room-swipe-del" @click.stop="deleteRoom(r.id)">삭제</button>
           <div
