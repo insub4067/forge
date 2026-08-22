@@ -369,6 +369,14 @@ header .todo-btn {
   text-decoration: none;
 }
 
+.admin-version {
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 8px 0 12px;
+}
+
 .admin-policy {
   border-bottom: 1px solid var(--border);
   padding: 4px 0;
@@ -1224,4 +1232,18 @@ textarea:focus {
   color: #fff;
   font-size: 14px;
   font-weight: 600;
+}
+
+.git-error {
+  margin: 8px 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #3a1e22;
+  color: #ff9aa2;
+  font-size: 13px;
+}
+.git-empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 4px 0;
 }

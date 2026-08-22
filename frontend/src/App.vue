@@ -38,6 +38,8 @@ const gitCurrent = ref('')
 const gitBranches = ref([])
 const gitStatus = ref('')
 const gitDiff = ref('')
+const gitError = ref('')
+const gitLoading = ref(false)
 const showFiles = ref(false)
 const filePath = ref('')
 const fileParent = ref(null)
@@ -137,18 +139,31 @@ async function selectModel(model) {
 
 async function loadGit() {
   const id = currentRoomId.value
-  if (!id) return
-  try {
-    const [b, s, d] = await Promise.all([
-      fetch(`/api/rooms/${id}/git/branches`).then((r) => r.json()),
-      fetch(`/api/rooms/${id}/git/status`).then((r) => r.json()),
-      fetch(`/api/rooms/${id}/git/diff`).then((r) => r.json()),
-    ])
-    gitCurrent.value = b.current
+  if (!id) {
+    gitError.value = '방을 먼저 선택하세요.'
+    return
+  }
+  gitError.value = ''
+  gitLoading.value = true
+  const get = async (path) => {
+    try {
+      const r = await fetch(`/api/rooms/${id}/${path}`)
+      if (!r.ok) throw new Error('HTTP ' + r.status)
+      return await r.json()
+    } catch (e) {
+      gitError.value = 'Git 정보를 불러오지 못했습니다: ' + (e.message || e)
+      return null
+    }
+  }
+  // 각 요청을 독립 처리 — 하나 실패해도 나머지는 표시한다.
+  const [b, s, d] = await Promise.all([get('git/branches'), get('git/status'), get('git/diff')])
+  if (b) {
+    gitCurrent.value = b.current || ''
     gitBranches.value = b.branches || []
-    gitStatus.value = s.output
-    gitDiff.value = d.output
-  } catch {}
+  }
+  if (s) gitStatus.value = s.output || ''
+  if (d) gitDiff.value = d.output || ''
+  gitLoading.value = false
 }
 
 async function checkoutBranch(branch) {
@@ -878,12 +893,17 @@ onMounted(async () => {
 
     <div v-if="showGit" class="kanban-overlay">
       <div class="kanban-head">
-        <span class="kanban-title">Git — {{ gitCurrent || '브랜치 없음' }}</span>
-        <button @click="showGit = false">닫기</button>
+        <span class="kanban-title">Git — {{ gitLoading ? '불러오는 중…' : (gitCurrent || '브랜치 없음') }}</span>
+        <div>
+          <button @click="loadGit">새로고침</button>
+          <button @click="showGit = false">닫기</button>
+        </div>
       </div>
       <div class="git-body">
+        <div v-if="gitError" class="git-error">{{ gitError }}</div>
         <div class="git-section">
           <div class="git-section-title">브랜치 (탭하여 전환)</div>
+          <div v-if="!gitBranches.length" class="git-empty">(브랜치 없음)</div>
           <div
             v-for="b in gitBranches"
             :key="b"
@@ -960,6 +980,8 @@ onMounted(async () => {
           </div>
           <div v-if="!adminStats.rooms.length" class="admin-sub">기록 없음</div>
         </div>
+
+        <div class="admin-version">v{{ version }}</div>
       </div>
     </div>
 
