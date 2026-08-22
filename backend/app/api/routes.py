@@ -15,6 +15,7 @@ from ..db import store
 from .. import errors as error_log
 from .. import metrics as metrics_calc
 from ..runtime.agent import AgentRuntime
+from ..tools.registry import _resolve
 
 router = APIRouter()
 runtime = AgentRuntime()
@@ -41,10 +42,18 @@ async def _room_workspace(session_id: str) -> str:
 
 
 @router.get("/fs/list")
-async def fs_list(path: str = "", show_hidden: bool = False):
-    target = os.path.expanduser(path) if path else os.path.expanduser("~")
+async def fs_list(path: str = "", show_hidden: bool = False, session_id: str = ""):
+    # 세션이 지정되면 해당 방의 워크스페이스 안으로만 탐색을 제한한다.
+    if session_id:
+        ws = await _room_workspace(session_id)
+        try:
+            target = str(_resolve(ws, path)) if path else ws
+        except PermissionError:
+            target = ws
+    else:
+        target = os.path.expanduser(path) if path else os.path.expanduser("~")
     if not os.path.isdir(target):
-        target = os.path.expanduser("~")
+        target = ws if session_id else os.path.expanduser("~")
     entries = []
     try:
         names = sorted(os.listdir(target))
@@ -61,8 +70,17 @@ async def fs_list(path: str = "", show_hidden: bool = False):
 
 
 @router.get("/fs/read")
-async def fs_read(path: str = ""):
-    p = os.path.expanduser(path) if path else ""
+async def fs_read(path: str = "", session_id: str = ""):
+    if session_id:
+        ws = await _room_workspace(session_id)
+        if not path:
+            return {"path": "", "content": "파일이 아닙니다."}
+        try:
+            p = str(_resolve(ws, path))
+        except PermissionError:
+            return {"path": path, "content": "작업 영역 밖 파일은 열 수 없습니다."}
+    else:
+        p = os.path.expanduser(path) if path else ""
     if not p or not os.path.isfile(p):
         return {"path": p, "content": "파일이 아닙니다."}
     try:
@@ -257,6 +275,19 @@ async def cancel_session(session_id: str):
 @router.get("/sessions/{session_id}/running")
 async def session_running(session_id: str):
     return {"running": runtime.is_running(session_id)}
+
+
+@router.get("/sessions/{session_id}/status")
+async def session_status(session_id: str):
+    """에이전트 라이브 상태 — 스트림이 끊겨도 언제나 조회 가능.
+    running / role / last_event / idle_seconds / waiting_for(승인·질문) / pending."""
+    return runtime.get_status(session_id)
+
+
+@router.get("/admin/action-log")
+async def action_log(session_id: str = "", limit: int = 200):
+    from .. import eventlog
+    return {"events": eventlog.tail(session_id, limit)}
 
 
 @router.post("/sessions/{session_id}/auto-approve")

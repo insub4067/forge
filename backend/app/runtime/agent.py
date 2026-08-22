@@ -14,6 +14,7 @@ from typing import Any, Awaitable, Callable
 
 from ..config import settings
 from .. import errors as error_log
+from .. import eventlog
 from ..db import store
 from ..llm.factory import create_adapter
 from ..orchestrator.model_router import ModelRouter
@@ -218,6 +219,30 @@ class AgentRuntime:
         # 세션별 컨텍스트 압축 상태: {session_id: {"summary": str, "covered": int}}
         # summary가 all_messages[:covered]를 대체(모델 전송 시에만).
         self._compaction: dict[str, dict] = {}
+        # 세션별 라이브 상태 — 스트림이 끊겨도 언제나 조회 가능해야 한다.
+        # {role, last_event, ts(monotonic), waiting_for, pending}
+        self._status: dict[str, dict] = {}
+        # 대기 중인 승인/질문 future의 메타 — 세션별 취소·복구 조회용.
+        # {id: {"session_id", "kind": "approval"|"question", ...detail}}
+        self._pending_meta: dict[str, dict] = {}
+
+    # 대기 중인 승인/질문 future의 타임아웃(초). 이 시간 무응답이면 무한 매달림
+    # 대신 안전 기본값으로 진행한다(승인→거부, 질문→시간초과 표시).
+    PENDING_TIMEOUT = 600
+
+    def _status_update(self, session_id: str, **fields) -> None:
+        if not session_id:
+            return
+        st = self._status.setdefault(session_id, {})
+        st.update(fields)
+        st["ts"] = time.monotonic()
+
+    def get_status(self, session_id: str) -> dict:
+        st = dict(self._status.get(session_id, {}))
+        st["running"] = session_id in self._running_sessions
+        if "ts" in st:
+            st["idle_seconds"] = round(time.monotonic() - st.pop("ts"), 1)
+        return st
 
     def _adapter_for(self, model: str):
         if model not in self._adapters:
@@ -402,6 +427,19 @@ class AgentRuntime:
 
     def cancel(self, session_id: str) -> None:
         self._cancel_sessions.add(session_id)
+        # 승인/질문 future에 매달린 run은 cancel 플래그만으론 안 깨어난다.
+        # 대기 future를 resolve해 await를 반환시키면, 다음 스텝에서 cancel을 보고 종료한다.
+        for pid, meta in list(self._pending_meta.items()):
+            if meta.get("session_id") != session_id:
+                continue
+            if meta.get("kind") == "approval":
+                fut = self.pending_approvals.get(pid)
+                if fut and not fut.done():
+                    fut.set_result("reject")
+            else:
+                fut = self.pending_questions.get(pid)
+                if fut and not fut.done():
+                    fut.set_result("(취소됨)")
 
     def inject(self, session_id: str, text: str) -> bool:
         """실행 중인 세션에 사용자 메시지를 큐잉한다. 다음 스텝에서 반영된다."""
@@ -426,6 +464,10 @@ class AgentRuntime:
         self._injections.pop(session_id, None)
         self._cancel_sessions.discard(session_id)
         self._compaction.pop(session_id, None)
+        self._status.pop(session_id, None)
+        for pid, meta in list(self._pending_meta.items()):
+            if meta.get("session_id") == session_id:
+                self._pending_meta.pop(pid, None)
 
     @staticmethod
     async def _git_sha(workspace: str) -> str:
@@ -464,35 +506,49 @@ class AgentRuntime:
             await send("approval_auto", {"tool": name})
             return "approve"
         approval_id = uuid.uuid4().hex
-        await send(
-            "approval_request",
-            {"id": approval_id, "tool": name, "args": args},
-        )
+        detail = {"id": approval_id, "tool": name, "args": args}
+        await send("approval_request", detail)
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self.pending_approvals[approval_id] = fut
+        self._pending_meta[approval_id] = {"session_id": session_id, "kind": "approval", **detail}
+        self._status_update(session_id, waiting_for="approval", pending=detail)
         try:
-            return await fut
+            try:
+                return await asyncio.wait_for(fut, self.PENDING_TIMEOUT)
+            except asyncio.TimeoutError:
+                # 무응답이면 무한 매달림 대신 안전하게 거부하고 진행한다.
+                error_log.record("approval_timeout", f"{name} 승인 {self.PENDING_TIMEOUT}s 무응답 → 거부", session_id)
+                return "reject"
         finally:
             self.pending_approvals.pop(approval_id, None)
+            self._pending_meta.pop(approval_id, None)
+            self._status_update(session_id, waiting_for=None, pending=None)
 
     async def _ask_user(
-        self, args: dict, send: Callable[[str, dict], Awaitable[None]]
+        self, args: dict, send: Callable[[str, dict], Awaitable[None]],
+        session_id: str = "",
     ) -> str:
         question_id = uuid.uuid4().hex
-        await send(
-            "question_request",
-            {
-                "id": question_id,
-                "question": args.get("question", ""),
-                "options": args.get("options", []),
-            },
-        )
+        detail = {
+            "id": question_id,
+            "question": args.get("question", ""),
+            "options": args.get("options", []),
+        }
+        await send("question_request", detail)
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self.pending_questions[question_id] = fut
+        self._pending_meta[question_id] = {"session_id": session_id, "kind": "question", **detail}
+        self._status_update(session_id, waiting_for="question", pending=detail)
         try:
-            return await fut
+            try:
+                return await asyncio.wait_for(fut, self.PENDING_TIMEOUT)
+            except asyncio.TimeoutError:
+                error_log.record("question_timeout", f"질문 {self.PENDING_TIMEOUT}s 무응답 → 진행", session_id)
+                return "(응답 시간 초과)"
         finally:
             self.pending_questions.pop(question_id, None)
+            self._pending_meta.pop(question_id, None)
+            self._status_update(session_id, waiting_for=None, pending=None)
 
     async def _triage(self, all_messages: list[dict]) -> tuple[str, str, int, int]:
         """마지막 요청이 코드 작업인지(agent) 일반 대화·질문인지(chat) 분류한다.
@@ -804,7 +860,7 @@ class AgentRuntime:
                 await send("tool_call", {"name": name, "args": args})
 
                 if name == "ask_user":
-                    answer = await self._ask_user(args, send)
+                    answer = await self._ask_user(args, send, session_id)
                     result = answer if answer else "(응답 없음)"
                     await send("tool_result", {"name": name, "result": result})
                     all_messages.append(
@@ -876,6 +932,12 @@ class AgentRuntime:
         async def send(event_type: str, data: dict[str, Any]) -> None:
             nonlocal seq
             seq += 1
+            # 라이브 상태 갱신(스트림이 끊겨도 /status로 조회 가능) + durable 이벤트 로그.
+            fields: dict[str, Any] = {"last_event": event_type}
+            if event_type == "role_start":
+                fields["role"] = data.get("role", "")
+            self._status_update(session_id, **fields)
+            eventlog.record(session_id, seq, event_type, data)
             await emit({"seq": seq, "type": event_type, "data": data})
 
         self._cancel_sessions.discard(session_id)

@@ -20,6 +20,7 @@ const busy = ref(false)
 const isAtBottom = ref(true)
 const autoApprove = ref(localStorage.getItem('forge_auto_approve') === '1')
 const sessionRunning = ref(false)
+const agentStatus = ref(null)
 const showSkills = ref(false)
 const skills = ref([])
 const searchQuery = ref('')
@@ -150,15 +151,39 @@ let touchStartY = 0
 let runningPoll = null
 
 // 앱을 껐다 켰을 때 서버에서 세션이 아직 실행 중인지 확인 → 완료 시 자동 갱신
+// 스트림이 끊겨도 에이전트 상태를 언제나 조회한다(running/role/대기/idle).
+// 대기 중(승인·질문)이면 프롬프트를 복구해 사용자가 답할 수 있게 한다.
+async function fetchStatus(id) {
+  const res = await fetch(`/api/sessions/${id}/status`)
+  if (!res.ok) return null
+  const st = await res.json()
+  agentStatus.value = st
+  sessionRunning.value = !!st.running
+  // 스트림이 끊긴 사이 뜬 질문을 복구(모달 재노출)
+  if (st.waiting_for === 'question' && st.pending && !activeQuestion.value) {
+    activeQuestion.value = { id: st.pending.id, question: st.pending.question, options: st.pending.options || [] }
+    questionAnswer.value = ''
+  }
+  return st
+}
+
+// 실행 중 배너 문구 — 승인/질문 대기 중이면 그 사실을 알려 사용자가 응답하게 유도한다.
+function runningBannerText() {
+  if (agentStatus.value && agentStatus.value.waiting_for === 'approval') {
+    return '승인 대기 중 — 위험한 작업 실행 전 확인이 필요합니다'
+  }
+  if (agentStatus.value && agentStatus.value.waiting_for === 'question') {
+    return '질문 대기 중 — 답변을 기다리고 있습니다'
+  }
+  return 'Mac에서 작업 진행 중 — 완료되면 자동으로 표시됩니다'
+}
+
 async function checkRunning() {
   const id = currentRoomId.value
   if (!id || busy.value) return
   try {
-    const res = await fetch(`/api/sessions/${id}/running`)
-    if (!res.ok) return
-    const { running } = await res.json()
-    sessionRunning.value = running
-    if (running) startRunningPoll()
+    const st = await fetchStatus(id)
+    if (st && st.running) startRunningPoll()
   } catch {}
 }
 
@@ -168,11 +193,11 @@ function startRunningPoll() {
     const id = currentRoomId.value
     if (!id) return stopRunningPoll()
     try {
-      const res = await fetch(`/api/sessions/${id}/running`)
-      const { running } = await res.json()
-      if (!running) {
+      const st = await fetchStatus(id)
+      if (!st || !st.running) {
         stopRunningPoll()
         sessionRunning.value = false
+        agentStatus.value = null
         await loadMessages(true) // 완료 결과 반영 — 이미 열린 방 새로고침이라 skeleton 생략
       } else {
         // 실행 중엔 태스크를 폴링해 칸반이 살아있게 한다(SSE 스트림이 끊겨도 최신).
@@ -1301,8 +1326,8 @@ document.addEventListener('visibilitychange', () => {
       </div>
     </div>
 
-    <div v-if="sessionRunning && !busy" class="running-banner">
-      <span class="running-dot"></span>Mac에서 작업 진행 중 — 완료되면 자동으로 표시됩니다
+    <div v-if="sessionRunning && !busy" class="running-banner" :class="{ waiting: agentStatus && agentStatus.waiting_for }">
+      <span class="running-dot"></span>{{ runningBannerText() }}
     </div>
 
     <main ref="chatEl" @scroll.passive="onChatScroll" @touchstart.passive="onMainTouchStart" @touchend.passive="onMainTouchEnd">

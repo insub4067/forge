@@ -189,5 +189,8 @@ node_modules/
 # 업로드 이미지
 backend/app/uploads/
 
+# 런타임 이벤트 로그 (eventlog.py 산출물)
+backend/logs/
+
 # 환경변수 템플릿은 커밋 허용
 !.env.example
