@@ -17,7 +17,15 @@ from .db.session import engine
 _COLUMN_PATCHES = [
     "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS cache_hit_tokens INTEGER DEFAULT 0",
     "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS cache_miss_tokens INTEGER DEFAULT 0",
+    "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS model_calls INTEGER DEFAULT 0",
+    "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS tool_calls INTEGER DEFAULT 0",
+    "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS retries INTEGER DEFAULT 0",
+    "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS compactions INTEGER DEFAULT 0",
+    "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS elapsed_ms INTEGER DEFAULT 0",
+    "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS selected_skill_count INTEGER DEFAULT 0",
+    "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS selected_skills VARCHAR DEFAULT ''",
     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS running BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS final_status VARCHAR DEFAULT ''",
 ]
 
 

@@ -129,6 +129,7 @@ const adminErrors = ref([])
 const adminErrorsOpen = ref(false)
 const showSessionDetail = ref(false)
 const sessionRuns = ref([])
+const sessionMetrics = ref(null)
 const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
 const attachedImage = ref(null)
 const attachedText = ref(null) // { name, content, truncated }
@@ -263,9 +264,12 @@ async function openSessionDetail() {
   if (!id) return
   showSessionDetail.value = true
   sessionRuns.value = []
+  sessionMetrics.value = null
   try {
     const res = await fetch(`/api/rooms/${id}/runs`)
     if (res.ok) sessionRuns.value = await res.json()
+    const mres = await fetch(`/api/rooms/${id}/metrics`)
+    if (mres.ok) sessionMetrics.value = await mres.json()
   } catch {}
 }
 
@@ -1262,6 +1266,7 @@ document.addEventListener('visibilitychange', () => {
     <div v-if="roomMenuId" class="menu-overlay" @click="roomMenuId = null">
       <div class="menu-panel" @click.stop>
         <div class="menu-item" @click="renameRoom(roomMenuId); roomMenuId = null">이름 변경</div>
+        <div v-if="menuRoom() && menuRoom().count === 0" class="menu-item" @click="openWorkspacePicker(roomMenuId); roomMenuId = null">워크스페이스 변경</div>
         <div class="menu-item danger" @click="deleteRoom(roomMenuId); roomMenuId = null">삭제</div>
       </div>
     </div>
@@ -1715,6 +1720,21 @@ document.addEventListener('visibilitychange', () => {
           <div class="admin-sub">
             prompt {{ formatTokens(sessionTokenTotals().prompt) }} · completion {{ formatTokens(sessionTokenTotals().completion) }}
           </div>
+        </div>
+
+        <div v-if="sessionMetrics" class="admin-section">
+          <div class="admin-stat-title">효율 계측</div>
+          <div class="metric-grid">
+            <div class="metric-cell"><span class="metric-num">{{ Math.round((sessionMetrics.cache_hit_ratio || 0) * 100) }}%</span><span class="metric-lbl">cache 적중</span></div>
+            <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_model_calls || 0 }}</span><span class="metric-lbl">model 호출</span></div>
+            <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_tool_calls || 0 }}</span><span class="metric-lbl">tool 호출</span></div>
+            <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.pro_calls || 0 }}</span><span class="metric-lbl">Pro 호출</span></div>
+            <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_compactions || 0 }}</span><span class="metric-lbl">압축</span></div>
+            <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_retries || 0 }}</span><span class="metric-lbl">재시도</span></div>
+          </div>
+          <div v-if="sessionMetrics.estimated_cost != null" class="admin-sub">추정 비용 ${{ sessionMetrics.estimated_cost.toFixed(4) }} · 상태 {{ sessionMetrics.final_status || '—' }}</div>
+          <div v-if="sessionMetrics.selected_skills" class="admin-sub">skill: {{ sessionMetrics.selected_skills }}</div>
+          <div v-for="(b, bi) in (sessionMetrics.bottlenecks || [])" :key="bi" class="metric-warn">⚠ {{ b }}</div>
         </div>
 
         <div class="admin-section">

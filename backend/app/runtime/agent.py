@@ -338,7 +338,7 @@ class AgentRuntime:
             return "transient"
         return "terminal"
 
-    async def _stream_with_recovery(self, model, messages, tool_schemas, thinking, effort, session_id):
+    async def _stream_with_recovery(self, model, messages, tool_schemas, thinking, effort, session_id, counters=None):
         """LLM 스트림을 호출하되 요청 시점 오류를 유형별로 회복한다.
 
         - reasoning_content 400: reasoning을 벗겨 즉시 재시도(이후 스텝도 학습)
@@ -372,10 +372,14 @@ class AgentRuntime:
                     no_think = True
                     if session_id:
                         self._strip_reasoning_sessions.add(session_id)
+                    if counters is not None:
+                        counters["retries"] = counters.get("retries", 0) + 1
                     error_log.record("llm_recovered", f"thinking 끄고 재시도: {err}", session_id)
                     continue
                 if kind == "transient" and transient_attempts < 3:
                     transient_attempts += 1
+                    if counters is not None:
+                        counters["retries"] = counters.get("retries", 0) + 1
                     delay = 2 ** (transient_attempts - 1)  # 1, 2, 4초
                     error_log.record("llm_retry", f"{delay}s 후 재시도({transient_attempts}): {err}", session_id)
                     await asyncio.sleep(delay)
@@ -408,6 +412,14 @@ class AgentRuntime:
 
     def is_running(self, session_id: str) -> bool:
         return session_id in self._running_sessions
+
+    def try_begin(self, session_id: str) -> bool:
+        """세션 run을 원자적으로 선점한다(단일 스레드 asyncio라 await 없이 원자적).
+        이미 실행 중이면 False — 호출부는 새 run 대신 기존 run에 메시지를 주입한다."""
+        if session_id in self._running_sessions:
+            return False
+        self._running_sessions.add(session_id)
+        return True
 
     def cleanup_session(self, session_id: str) -> None:
         self._running_sessions.discard(session_id)
@@ -612,6 +624,12 @@ class AgentRuntime:
         total_completion = 0
         total_hit = 0
         total_miss = 0
+        # 작업 단위 성능 계측 — route에 실어 record()로 전달(반환 경로가 여럿이라 route에 누적).
+        route["_start"] = time.monotonic()
+        route["model_calls"] = 0
+        route["tool_calls"] = 0
+        route["compactions"] = 0
+        counters = {"retries": 0}
 
         for step in range(step_base, step_base + MAX_STEPS):
             if session_id in self._cancel_sessions:
@@ -636,6 +654,7 @@ class AgentRuntime:
             call_messages = [system_msg, *self._project(all_messages, session_id)]
             if session_id in self._strip_reasoning_sessions:
                 call_messages = self._strip_reasoning(call_messages)
+            route["model_calls"] += 1
             async for delta in self._stream_with_recovery(
                 route["model"],
                 call_messages,
@@ -643,6 +662,7 @@ class AgentRuntime:
                 route["thinking"],
                 route["reasoning_effort"],
                 session_id,
+                counters,
             ):
                 if delta.get("reasoning_content"):
                     reasoning.append(delta["reasoning_content"])
@@ -712,6 +732,7 @@ class AgentRuntime:
                 if session_id and self._should_compact(measured_input, settings.logical_budget):
                     compacted = await self._compact(all_messages, session_id)
                     if compacted:
+                        route["compactions"] += 1
                         await send("compaction", {"covered": self._compaction[session_id]["covered"]})
                 # 최후의 안전장치: 압축으로도 못 줄이는데 한도를 넘을 때만 중단.
                 # 압축이 방금 성공했다면 다음 호출에서 실측으로 재검증되므로 차단하지 않는다.
@@ -734,6 +755,8 @@ class AgentRuntime:
                 )
             if tool_calls:
                 assistant_msg["tool_calls"] = tool_calls
+                route["tool_calls"] += len(tool_calls)
+            route["retries"] = counters["retries"]
 
             all_messages.append(assistant_msg)
 
@@ -871,6 +894,9 @@ class AgentRuntime:
         room_memory = _load_room_memory(ws)
         # 요청과 관련된 skill만 선택 삽입(전량 삽입 금지 — skill이 많아질수록 절감).
         skills = _select_skills(ws, goal)
+        skill_names = re.findall(r"### skill: (.+)", skills)
+        skill_count = len(skill_names)
+        skill_csv = ", ".join(skill_names)
 
         # 이미지가 포함된 요청이면 Vision 에이전트로 먼저 분석
         last_user = history[-1] if history and history[-1].get("role") == "user" else None
@@ -881,22 +907,40 @@ class AgentRuntime:
         step_base = 0
 
         async def record(role: str, p: int, c: int, route: dict) -> None:
+            if not session_id:
+                return
+            elapsed_ms = int((time.monotonic() - route.get("_start", time.monotonic())) * 1000)
+            await store.save_agent_run(
+                session_id,
+                role,
+                route.get("model", ""),
+                p,
+                c,
+                route.get("thinking", False),
+                route.get("reasoning_effort", ""),
+                route.get("cache_hit", 0),
+                route.get("cache_miss", 0),
+                route.get("model_calls", 0),
+                route.get("tool_calls", 0),
+                route.get("retries", 0),
+                route.get("compactions", 0),
+                elapsed_ms,
+                skill_count,
+                skill_csv,
+            )
+
+        async def finish(status: str, content: str = "") -> None:
+            # done 이벤트를 보내면서 세션 final_status를 영속화(성공 정의·집계 기준).
             if session_id:
-                await store.save_agent_run(
-                    session_id,
-                    role,
-                    route.get("model", ""),
-                    p,
-                    c,
-                    route.get("thinking", False),
-                    route.get("reasoning_effort", ""),
-                    route.get("cache_hit", 0),
-                    route.get("cache_miss", 0),
-                )
+                await store.set_session_final_status(session_id, status)
+            data = {"status": status}
+            if content:
+                data["content"] = content
+            await send("done", data)
 
         # 0. Triage — 코드 작업 여부 + 복잡도(planner 모델 승격 판단)
         triage_route, complexity, tp, tc = await self._triage(all_messages)
-        await record("triage", tp, tc, {"model": self.router.triage_model})
+        await record("triage", tp, tc, {"model": self.router.triage_model, "model_calls": 1})
         if triage_route == "chat":
             status, p, c, route = await self._run_role(
                 "chat", all_messages, send, session_id, ws, state, recent_calls,
@@ -904,9 +948,9 @@ class AgentRuntime:
             )
             await record("chat", p, c, route)
             if status != "done":
-                await send("done", {"content": self._finish_message(status), "status": _STATUS_CODES.get(status, "failed")})
+                await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
             else:
-                await send("done", {"status": "completed"})
+                await finish("completed")
             return all_messages
 
         # 1. Planner — flash 기본, 복잡한 작업이면 pro 승격
@@ -917,7 +961,7 @@ class AgentRuntime:
         await record("planner", p, c, route)
         step_base += MAX_STEPS
         if status != "done":
-            await send("done", {"content": self._finish_message(status), "status": _STATUS_CODES.get(status, "failed")})
+            await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
             return all_messages
 
         # 2. Coder
@@ -927,7 +971,7 @@ class AgentRuntime:
         await record("coder", p, c, route)
         step_base += MAX_STEPS
         if status != "done":
-            await send("done", {"content": self._finish_message(status), "status": _STATUS_CODES.get(status, "failed")})
+            await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
             return all_messages
 
         # 3. Reviewer ↔ Debugger 자기수정 루프 (상태 기반 반복)
@@ -944,7 +988,7 @@ class AgentRuntime:
             await record("reviewer", p, c, route)
             step_base += MAX_STEPS
             if status != "done":
-                await send("done", {"content": self._finish_message(status), "status": _STATUS_CODES.get(status, "failed")})
+                await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
                 return all_messages
 
             tasks = await store.list_tasks(session_id) if session_id else []
@@ -969,17 +1013,14 @@ class AgentRuntime:
                 await record("debugger", p, c, route)
                 step_base += MAX_STEPS
                 if status != "done":
-                    await send("done", {"content": self._finish_message(status), "status": _STATUS_CODES.get(status, "failed")})
+                    await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
                     return all_messages
             # debug는 없지만 아직 done이 아니면(review 등) 루프 재진입 → Reviewer 재실행
 
         if final_status == "review_limit":
-            await send("done", {
-                "content": self._review_limit_message(tasks, state, debug_attempts),
-                "status": "review_limit",
-            })
+            await finish("review_limit", self._review_limit_message(tasks, state, debug_attempts))
         else:
-            await send("done", {"content": "모든 작업을 완료했습니다.", "status": "completed"})
+            await finish("completed", "모든 작업을 완료했습니다.")
         return all_messages
 
     @staticmethod

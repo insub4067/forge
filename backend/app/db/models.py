@@ -22,6 +22,8 @@ class Session(Base):
     used_tokens: Mapped[int] = mapped_column(Integer, default=0)
     # run이 실행 중인지 영속화한다 — 서버 재시작으로 중단된 run을 시작 시 감지하기 위함.
     running: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 마지막 run의 종료 상태 — 성공 정의(completed)와 세션 집계의 기준.
+    final_status: Mapped[str] = mapped_column(String, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -62,6 +64,14 @@ class AgentRun(Base):
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cache_hit_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cache_miss_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    # 작업 단위 성능 계측 — role 실행 1회당 집계.
+    model_calls: Mapped[int] = mapped_column(Integer, default=0)
+    tool_calls: Mapped[int] = mapped_column(Integer, default=0)
+    retries: Mapped[int] = mapped_column(Integer, default=0)
+    compactions: Mapped[int] = mapped_column(Integer, default=0)
+    elapsed_ms: Mapped[int] = mapped_column(Integer, default=0)
+    selected_skill_count: Mapped[int] = mapped_column(Integer, default=0)
+    selected_skills: Mapped[str] = mapped_column(String, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

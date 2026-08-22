@@ -13,6 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 from ..config import settings
 from ..db import store
 from .. import errors as error_log
+from .. import metrics as metrics_calc
 from ..runtime.agent import AgentRuntime
 
 router = APIRouter()
@@ -90,6 +91,21 @@ async def chat(req: Request):
     session_id = body.get("session_id") or uuid.uuid4().hex
     message = str(body.get("message", ""))
     runtime.set_auto_approve(session_id, bool(body.get("auto_approve", False)))
+
+    # 이미 실행 중인 세션이면 새 run을 띄우지 않고 기존 run에 주입한다 —
+    # 같은 세션에 run이 겹쳐 돌며 상태를 밟아 멈추는 것을 방지(동시 run 레이스).
+    if body.get("session_id") and not runtime.try_begin(session_id):
+        runtime.inject(session_id, message)
+
+        async def queued_gen():
+            yield {"event": "user_injected",
+                   "data": json.dumps({"type": "user_injected", "data": {"content": message}}, ensure_ascii=False)}
+            yield {"event": "done",
+                   "data": json.dumps({"type": "done", "data": {
+                       "status": "queued",
+                       "content": "이미 실행 중인 작업에 메시지를 추가했습니다."}}, ensure_ascii=False)}
+
+        return EventSourceResponse(queued_gen())
 
     room = await store.get_room(session_id)
     workspace_path = room["workspace_path"] if room else None
@@ -413,3 +429,30 @@ async def delete_skill(session_id: str, name: str):
 @router.get("/rooms/{session_id}/runs")
 async def room_runs(session_id: str):
     return await store.session_agent_runs(session_id)
+
+
+@router.get("/metrics/summary")
+async def metrics_summary():
+    """전체 세션의 성공률·토큰·캐시·비용 집계 + 병목 진단."""
+    agg = await store.metrics_summary()
+    runs = await store.all_runs_for_cost()
+    cost, priced, total = metrics_calc.sum_cost(runs)
+    agg["estimated_cost"] = cost
+    agg["priced_runs"] = priced
+    agg["total_runs"] = total
+    if total:
+        agg["cost_per_success"] = round(cost / agg["successful"], 6) if agg.get("successful") else None
+    agg["bottlenecks"] = metrics_calc.bottlenecks(agg)
+    return agg
+
+
+@router.get("/rooms/{session_id}/metrics")
+async def room_metrics(session_id: str):
+    """세션 하나의 비용 집계 + role 실행 상세 + 비용."""
+    agg = await store.session_metrics(session_id)
+    runs = await store.session_agent_runs(session_id)
+    cost, priced, total = metrics_calc.sum_cost(runs)
+    agg["estimated_cost"] = cost
+    agg["runs"] = runs
+    agg["bottlenecks"] = metrics_calc.bottlenecks(agg)
+    return agg
