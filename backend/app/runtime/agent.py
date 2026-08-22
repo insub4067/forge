@@ -1,6 +1,7 @@
 import asyncio
 import json
 import subprocess
+import time
 import uuid
 from typing import Any, Awaitable, Callable
 
@@ -142,16 +143,19 @@ class AgentRuntime:
 
             reasoning: list[str] = []
             content: list[str] = []
+            reasoning_buf: list[str] = []
+            content_buf: list[str] = []
             tool_acc: dict[int, dict[str, Any]] = {}
             usage: dict[str, int] = {}
+            last_emit = 0.0
 
             async for delta in self.adapter.stream_chat(messages, TOOL_SCHEMAS):
                 if delta.get("reasoning_content"):
                     reasoning.append(delta["reasoning_content"])
-                    await send("thinking_delta", {"content": delta["reasoning_content"]})
+                    reasoning_buf.append(delta["reasoning_content"])
                 if delta.get("content"):
                     content.append(delta["content"])
-                    await send("text_delta", {"content": delta["content"]})
+                    content_buf.append(delta["content"])
                 for tc in delta.get("tool_calls", []):
                     idx = tc["index"]
                     acc = tool_acc.setdefault(
@@ -166,6 +170,21 @@ class AgentRuntime:
                         acc["arguments"] += fn["arguments"]
                 if delta.get("usage"):
                     usage = delta["usage"]
+
+                now = time.monotonic()
+                if now - last_emit >= 0.15:
+                    if reasoning_buf:
+                        await send("thinking_delta", {"content": "".join(reasoning_buf)})
+                        reasoning_buf.clear()
+                    if content_buf:
+                        await send("text_delta", {"content": "".join(content_buf)})
+                        content_buf.clear()
+                    last_emit = now
+
+            if reasoning_buf:
+                await send("thinking_delta", {"content": "".join(reasoning_buf)})
+            if content_buf:
+                await send("text_delta", {"content": "".join(content_buf)})
 
             if usage:
                 await send(

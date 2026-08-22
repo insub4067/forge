@@ -48,14 +48,52 @@ function diffClass(line) {
   return ''
 }
 
+let flushRaf = null
+let thinkingBuf = ''
+let textBuf = ''
+
+function flush(assistant) {
+  if (flushRaf) return
+  flushRaf = requestAnimationFrame(() => {
+    flushRaf = null
+    if (thinkingBuf) {
+      assistant.thinking += thinkingBuf
+      thinkingBuf = ''
+    }
+    if (textBuf) {
+      assistant.text += textBuf
+      textBuf = ''
+    }
+    scrollBottom()
+  })
+}
+
+function flushNow(assistant) {
+  if (flushRaf) {
+    cancelAnimationFrame(flushRaf)
+    flushRaf = null
+  }
+  if (thinkingBuf) {
+    assistant.thinking += thinkingBuf
+    thinkingBuf = ''
+  }
+  if (textBuf) {
+    assistant.text += textBuf
+    textBuf = ''
+  }
+  scrollBottom()
+}
+
 function handleEvent(evt, assistant) {
   const d = evt.data || {}
   switch (evt.type) {
     case 'thinking_delta':
-      assistant.thinking += d.content || ''
+      thinkingBuf += d.content || ''
+      flush(assistant)
       break
     case 'text_delta':
-      assistant.text += d.content || ''
+      textBuf += d.content || ''
+      flush(assistant)
       break
     case 'tool_call':
       assistant.tools.push({ name: d.name, args: d.args, status: 'running', result: '' })
@@ -139,6 +177,7 @@ async function send() {
   } catch (err) {
     assistant.text += '\n\n오류: ' + (err.message || err)
   } finally {
+    flushNow(assistant)
     busy.value = false
     scrollBottom()
   }
