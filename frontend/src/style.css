@@ -295,11 +295,27 @@ header .todo-btn {
 }
 
 .ctx-btn {
+  position: relative;
   background: none;
   border: none;
   padding: 0;
   display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+}
+.ctx-pct {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .admin-body {
@@ -1738,4 +1754,62 @@ footer {
   border-top: 1px solid var(--border);
   padding: 16px calc(16px);
   padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
+/* ===== 전역 애니메이션 (부드럽게, 멀미 방지) ===== */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes sheet-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+.menu-overlay,
+.rooms-overlay,
+.modal-overlay,
+.kanban-overlay,
+.gh-overlay,
+.fs-overlay {
+  animation: fade-in 0.16s ease-out;
+}
+
+.menu-panel {
+  animation: sheet-up 0.16s ease-out;
+}
+
+.modal {
+  animation: sheet-up 0.18s ease-out;
+}
+
+.msg {
+  animation: msg-in 0.2s ease-out;
+}
+
+/* 상태 전환을 부드럽게 */
+.quick-action,
+.gh-file,
+.gh-commit,
+.room-item,
+.menu-item,
+.steer-chip,
+.gh-tabs button,
+button {
+  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+/* 접근성: 모션 최소화 설정 시 애니메이션 제거 (멀미·전정기관 민감) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

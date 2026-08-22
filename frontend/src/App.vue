@@ -807,6 +807,21 @@ onMounted(async () => {
         </span>
       </button>
       <button v-if="busy" class="stop-btn" @click="cancelSession">중단</button>
+      <button class="ctx-btn" @click="openAdmin" aria-label="컨텍스트 사용량">
+        <svg class="ctx" viewBox="0 0 36 36">
+          <circle class="ctx-bg" cx="18" cy="18" r="15" pathLength="100" />
+          <circle
+            class="ctx-fg"
+            cx="18"
+            cy="18"
+            r="15"
+            pathLength="100"
+            :stroke-dasharray="`${ctxPct(currentRoom())} 100`"
+            :class="ctxClass(ctxPct(currentRoom()))"
+          />
+        </svg>
+        <span class="ctx-pct">{{ ctxPct(currentRoom()) }}</span>
+      </button>
       <button class="todo-btn" @click="showMenu = !showMenu" aria-label="메뉴">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
       </button>
@@ -829,7 +844,6 @@ onMounted(async () => {
         <div class="menu-item" @click="openAdmin(); showMenu = false">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           <span>관리자</span>
-          <span class="menu-ctx">Context {{ ctxPct(currentRoom()) }}%</span>
         </div>
         <div v-if="busy" class="menu-item danger" @click="cancelSession(); showMenu = false">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
