@@ -29,6 +29,10 @@ if ('serviceWorker' in navigator) {
       window.__forgeUpdateReady = true
       return
     }
+    // 무한 리로드 차단: refreshing은 리로드마다 초기화돼 루프를 못 막는다.
+    // 리로드를 건너 살아남는 sessionStorage로 한 탭 세션당 업데이트 리로드를 1회로 제한한다.
+    if (sessionStorage.getItem('forge_sw_reloaded')) return
+    sessionStorage.setItem('forge_sw_reloaded', '1')
     refreshing = true
     window.location.reload()
   }
