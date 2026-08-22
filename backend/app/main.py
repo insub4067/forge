@@ -9,6 +9,8 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from .api.routes import router
+from .auth import TokenAuthMiddleware
+from .config import settings
 from .db import store
 from .db.models import Base
 from .db.session import engine
@@ -47,6 +49,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="FORGE", lifespan=lifespan)
+
+# 토큰 게이트를 CORS보다 바깥(먼저)에 둔다. 토큰 미설정이면 무동작.
+if settings.auth_token:
+    app.add_middleware(TokenAuthMiddleware, token=settings.auth_token)
 
 app.add_middleware(
     CORSMiddleware,

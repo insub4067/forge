@@ -3,6 +3,12 @@ import { registerSW } from 'virtual:pwa-register'
 import './style.css'
 import App from './App.vue'
 
+// 앱 토큰(백엔드 FORGE_AUTH_TOKEN 활성화 시). localStorage에 넣어두면 same-origin
+// 쿠키로 실려 fetch·<img>·WebSocket에 자동 첨부된다. 미설정이면 아무 일도 없다.
+// 설정: 브라우저 콘솔에서 localStorage.setItem('forge_token', '토큰') 후 새로고침.
+const _forgeToken = localStorage.getItem('forge_token')
+if (_forgeToken) document.cookie = `forge_token=${_forgeToken}; path=/; SameSite=Strict; max-age=31536000`
+
 createApp(App).mount('#app')
 
 // autoUpdate: 새 버전이 배포되면 서비스워커가 자동 교체되고 페이지가 리로드된다(항상 최신).
