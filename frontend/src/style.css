@@ -762,10 +762,10 @@ header button {
 main {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 18px 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 20px;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -836,11 +836,12 @@ main {
 .msg.user .bubble {
   background: var(--accent);
   color: #fff;
-  border-radius: 18px 18px 4px 18px;
-  padding: 10px 14px;
-  max-width: 85%;
+  border-radius: 20px 20px 6px 20px;
+  padding: 11px 16px;
+  max-width: 82%;
   word-break: break-word;
-  font-size: 15px;
+  font-size: 15.5px;
+  line-height: 1.5;
 }
 
 .user-text {
@@ -851,19 +852,20 @@ main {
   align-items: flex-start;
 }
 
+/* 어시스턴트는 버블 없이 배경 위에 흐르게(클로드/GPT식). 활동 카드가 스스로 구분됨 */
 .msg.assistant .bubble {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 18px 18px 18px 4px;
-  padding: 12px 14px;
-  max-width: 92%;
-  min-width: 60px;
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  max-width: 100%;
+  width: 100%;
 }
 
 .text {
   word-break: break-word;
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: 15.5px;
+  line-height: 1.72;
 }
 
 .role-badge {
@@ -1928,16 +1930,20 @@ button {
 
 /* ===== Agent Activity 카드 ===== */
 .activity {
-  margin: 8px 0;
+  margin: 0;
+}
+/* 도구/추론이 있는 phase만 카드로 감싼다. 단순 텍스트 응답은 배경 위에 흐른다 */
+.activity.card {
+  margin: 10px 0;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
   overflow: hidden;
   background: var(--panel);
 }
-.activity.running {
+.activity.card.running {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
 }
-.activity.error {
+.activity.card.error {
   border-color: color-mix(in srgb, #f87171 45%, var(--border));
 }
 .activity-head {
@@ -1981,11 +1987,12 @@ button {
   transition: transform 0.15s ease;
 }
 .activity-chevron.open { transform: rotate(180deg); }
-.activity .text {
-  padding: 0 12px 10px;
+/* 카드일 때만 안쪽 여백. 단순 텍스트는 배경 위에 그대로 흐른다 */
+.activity.card .text {
+  padding: 10px 12px 12px;
 }
-.activity .thinking,
-.activity .tool {
+.activity.card .thinking,
+.activity.card .tool {
   margin: 0 10px 8px;
 }
 .tool-dot {

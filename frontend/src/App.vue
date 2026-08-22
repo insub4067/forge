@@ -1103,7 +1103,7 @@ onMounted(async () => {
           <div v-if="m.role === 'user'" class="user-text">{{ m.content }}</div>
 
           <template v-if="m.role === 'assistant'">
-            <div v-for="(p, pi) in m.phases" :key="pi" class="activity" :class="phaseStatus(p)">
+            <div v-for="(p, pi) in m.phases" :key="pi" class="activity" :class="[phaseStatus(p), { card: p.tools.length || p.thinking }]">
               <div
                 v-if="p.tools.length || p.thinking"
                 class="activity-head"
