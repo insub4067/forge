@@ -1,69 +1,148 @@
 # FORGE 트러블슈팅 기록
 
-실제 운영에서 겪은 문제와 해결. 같은 증상 재발 시 참고.
+> 실제 운영에서 겪은 문제와 해결. 기준: 2026-08-22 `main`.
 
 ## LLM / DeepSeek
 
-### DeepSeek 400 — "tool_calls must be followed by tool messages"
-- **증상**: 도구 호출 다음 스텝마다 400. 모든 role에서 발생.
-- **원인**: 도구 결과를 `all_messages`에만 append하고 LLM에는 별도 `messages`를 보내, tool 응답이 빠진 채 전송.
-- **해결**: 매 호출 `[system_msg, *all_messages]`로 통일(`agent.py`). 도구 결과가 항상 포함됨.
+### 400 — tool_calls 뒤 tool message 누락
 
-### DeepSeek 400 — "reasoning_content in the thinking mode must be passed back"
-- **증상**: thinking 모드 긴 tool-loop에서 스텝 하나가 400 → run이 계획 단계에서 멈춤/응답 유실.
-- **1차 시도**: reasoning_content를 벗겨 재시도 → 재시도도 같은 400(불충분).
-- **해결**: reasoning 400 시 **thinking을 꺼서 재시도**(`_stream_with_recovery`). non-thinking 호출은 reasoning_content 계약이 없어 확실히 회피. 세션별로 학습(`_strip_reasoning_sessions`).
-- **주의**: 통제 실험(단발 호출)으로는 재현이 안 됨 — 실제 실패 세션/에러로그로 확인.
+원인: 도구 결과가 다음 LLM request에 포함되지 않음.  
+해결: 매 호출을 `[system_msg, *projected/all_messages]` 구조로 통일해 tool call/result pairing 보존.
 
-### 일시적 API 오류(429/5xx/timeout)
-- `_classify_error`로 reasoning/transient/terminal 분류. transient는 1·2·4초 백오프로 최대 3회 재시도.
+### 400 — reasoning_content 계약 오류
 
-### 응답이 짧다 / "추론은 하는데 말이 없다"
-- thinking 모드 role(planner 등)은 reasoning이 길고 최종 content가 짧을 수 있음. 대화형 질문이 planner로 triage되면 답변 대신 계획/탐색만 함.
+thinking role의 긴 tool loop에서 `reasoning_content` 재전송 계약 때문에 400이 날 수 있었다.
 
-## 대화 유실
+현재 recovery:
 
-### 앱 껐다 켜면 대화가 끊겨 있음
-- **원인**: 히스토리를 run 완료 시에만 저장 → run 크래시(위 400 등)나 앱 종료 시 그 턴이 통째로 유실.
-- **해결**:
-  1. 사용자 메시지를 **수신 즉시 저장**(`/chat` 엔드포인트).
-  2. run 크래시 시 **"작업 중 오류" 어시스턴트 메시지를 저장**해 조용히 사라지지 않게(`run_and_close`).
-  3. 앱은 닫혀도 서버 run은 계속 → 재접속 시 실행 여부 표시 + 완료 자동 갱신.
+1. reasoning 관련 오류 분류
+2. reasoning_content 제거
+3. thinking off
+4. 재시도
+5. 해당 session은 이후 호출에서도 strip 정책 기억
 
-### 메시지 0인데 컨텍스트 가득(유령)
-- 과거 크래시로 대화는 유실됐는데 `used_tokens`만 남음.
-- **해결**: 메시지 로드 시 히스토리가 비면 `used_tokens`를 0으로 자가 치유(`get_messages`).
+단발 테스트보다 실제 실패 세션 로그를 우선 확인한다.
 
-## Git 화면
+### 429 / 5xx / timeout / connection
 
-### 파일 경로 앞 글자 잘림("ackend/...")
-- **원인**: `_git`이 출력 전체에 `.strip()`을 걸어 status 첫 줄의 앞 공백을 먹음 → `slice(3)` 정렬이 밀림.
-- **해결**: 프론트 `parseStatus`에서 구분 공백이 없으면 복원.
+transient 오류는 1/2/4초 backoff로 최대 3회 재시도한다. 이미 stream delta가 사용자에게 전달된 뒤 실패한 요청은 중복 생성 위험 때문에 자동 retry하지 않는다.
 
-### git API 중복 정의
-- 병렬 작업으로 log/file-diff/commit이 두 번씩 정의 → 견고한 버전만 남김.
+## Context / 비용
 
-## 비용
+### Planner가 전체 토큰의 67%를 소비
 
-### planner가 토큰의 67% 소비
-- pro+thinking high로 과탐색.
-- **해결**: planner를 flash 기본으로, triage가 COMPLEX 판정할 때만 pro 승격. + 도구 결과 pruning(20k→~4k) + 최소 탐색 지침.
+원인: Planner를 항상 Pro + thinking high로 사용하고 탐색 범위가 넓었음.
+
+해결:
+
+- Planner Flash + medium 기본
+- Triage가 COMPLEX일 때만 Pro + high
+- 최소 탐색 지침
+- tool result pruning
+- read-only 병렬 prefetch
+
+### Compaction 후 바로 context_blocked
+
+과거 로직은 `prompt + completion`을 pressure로 보고, compaction 성공 후에도 압축 전 usage로 95% block을 검사했다.
+
+현재는 provider 실측 `prompt_tokens`만 사용하고, compaction 성공 시 다음 model call에서 줄어든 context를 재측정한다.
+
+### cache token 의미 오류
+
+과거 `hit + miss`를 `cached_tokens`라고 표시했는데 이는 사실상 전체 prompt였다.
+
+현재는 `cache_hit_tokens`, `cache_miss_tokens`, `cache_hit_ratio`를 분리한다.
+
+## Run / 세션 지속성
+
+### 앱을 닫으면 진행이 사라져 보임
+
+사용자 메시지는 run 시작 즉시 DB에 저장한다. 브라우저 SSE가 끊겨도 서버 run은 계속될 수 있고 PWA는 `/sessions/{id}/status`를 polling해 `running`, `role`, `activity`, `waiting_for`를 표시한다.
+
+### 동일 세션에 요청을 다시 보내면 run이 겹침
+
+현재 `try_begin`으로 run을 원자적으로 선점한다. 이미 실행 중이면 새 AgentRuntime을 겹쳐 띄우지 않고 기존 run에 메시지를 injection한다.
+
+### 서버 재시작 후 running=true가 남음
+
+startup `reconcile_interrupted_runs()`가 중단된 run을 감지해 복구 안내 메시지를 남기고 flag를 정리한다.
+
+주의: 이것은 실제 execution stack resume이 아니다. durable worker/resume은 아직 미구현.
+
+### run exception이 나면 응답이 조용히 사라짐
+
+현재 run crash 시 오류 assistant message를 history에 저장한다.
+
+## 승인 / 질문
+
+### 앱을 떠난 동안 approval/question에서 영원히 대기
+
+approval/question future는 600초 timeout을 가진다. cancel도 pending future를 해제해 run이 매달리지 않게 한다.
+
+재접속 시 `/status`의 `waiting_for`로 현재 대기 상태를 확인한다.
+
+## Workspace / 파일 브라우저
+
+### 새 방이 홈 디렉터리를 workspace로 잡아 Git/Skill이 안 보임
+
+신규 session은 workspace 선택을 필수화했다.
+
+### 파일 브라우저로 workspace 밖 파일 조회 가능
+
+`/fs/list`, `/fs/read`는 `session_id`의 workspace boundary를 확인한다. 경계 밖 path는 차단한다.
+
+## Git / Kanban
+
+### git status 파일 경로 첫 글자 손실
+
+과거 `_git` 출력 전체 `.strip()` 때문에 status 정렬이 밀린 케이스가 있었다. status parsing 시 prefix 공백을 고려한다.
+
+### 실행 중 Kanban이 0개로 보임
+
+Kanban open 시 task를 다시 읽고 running polling 중에도 task를 갱신한다. task status 변화는 채팅에도 인라인 표시한다.
 
 ## 모바일 / PWA
 
-### safe-area 브라우저 vs PWA 차이
-- iOS가 두 컨텍스트에서 다르게 보고(브라우저 0, standalone은 노치 inset). 각 환경에선 정상. 타깃은 홈화면 PWA.
+### Service Worker 업데이트 무한 reload
 
-### 리소스 업데이트가 앱 껐다 켜야 반영
-- **해결**: SW `controllerchange` → 자동 리로드(작업 중이면 유휴 때까지 미룸) + 포그라운드 복귀 시 `update()`.
+원인: reload guard가 module 변수라 reload마다 초기화되어 `controllerchange → reload` 루프가 반복됨.
 
-### 홈화면 이름이 "에이전트"로 남음
-- manifest name·`<title>`·`apple-mobile-web-app-title` 모두 FORGE로. iOS가 이름을 캐시하면 홈화면 아이콘 삭제 후 재추가.
+해결: `sessionStorage` 기반 탭 세션당 1회 reload guard.
+
+### 서버는 일하는데 화면은 멈춘 것처럼 보임
+
+SSE `busy`만 보던 UI를 `sessionRunning`까지 확장했다. `/status.activity`를 배너/typing indicator에 표시해 `bash · ...`, `추론 중`, `작성 중` 같은 현재 활동을 보여준다.
+
+### history 열 때 welcome 화면이 깜빡임
+
+기존 세션은 message loading 동안 skeleton을 표시하고 새 session만 welcome placeholder를 바로 보여준다.
+
+### iOS safe-area
+
+홈화면 PWA를 기준으로 header/footer/drawer/overlay safe-area를 적용한다. Safari browser와 standalone의 inset 값은 다를 수 있다.
+
+## 로그 / 관측
+
+- Agent의 `send()` 이벤트는 JSONL event/action log에 기록
+- `GET /api/metrics/summary` — 전체 효율
+- `GET /api/rooms/{id}/metrics` — session 효율
+- `/status` — live run 상태
+
+JSONL 로그는 현재 감사/장애 추적용이다. 재시작 후 실행을 이어가는 authoritative event replay 계층은 아니다.
 
 ## 배포
-- 이 Mac이 production(cloudflared 터널 → agent.smarttradecorp.com → localhost:8790).
-- 프론트: `npm --prefix frontend run build`로 dist 갱신 → 즉시 반영.
-- 백엔드: uvicorn 재시작.
 
-## 협업 주의
-- 병렬 세션(다른 Claude Code 창)이 같은 파일을 동시 편집하면 서로 덮어씀. push 전 `git fetch` + rebase.
+- frontend: `npm --prefix frontend run build`
+- backend 변경: uvicorn 재시작 필요
+- backend 재시작은 진행 중 run을 중단시키므로 배포 전 running session을 확인하는 것이 안전하다.
+
+## 병렬 개발 주의
+
+여러 코딩 agent가 같은 branch/file을 동시에 수정하면 충돌·중복 선언이 발생할 수 있다. 실제로 병합 후 Vue 함수/상수가 중복 선언되어 build가 깨진 사례가 있었다.
+
+원칙:
+
+1. 작업 전 최신 main 확인
+2. 동일 파일 병렬 수정 최소화
+3. 병합 후 frontend build + runtime tests 실행
+4. commit/push 전 최신 diff 재검토
