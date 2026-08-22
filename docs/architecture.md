@@ -1,122 +1,127 @@
 # FORGE — 시스템 아키텍처
 
+> 기준: 2026-08-22 `main`
+
 ## 전체 구조
 
-```
-┌───────────────┐
-│ Vue3 PWA      │  Desktop / Mobile
-│ (web)         │
-└───────┬───────┘
-        │ SSE + REST
-┌───────▼────────┐
-│ FastAPI Gateway│  (api)
-│ - 인증/라우팅   │
-└───────┬────────┘
+```text
+Vue3 PWA (Mobile/Desktop)
+        │ SSE + REST + status polling
+        ▼
+FastAPI
         │
-┌───────▼──────────┐
-│ Agent Worker     │  (worker)
-│ Runtime Engine   │  Planner → Tool Loop → Observation
-└───┬─────────┬────┘
-    │         │
-┌───▼───┐ ┌───▼────────┐
-│DeepSeek│ │ Tool Runner│  (executor)
-│Adapter │ │ Sandbox    │  Docker Container
-└────────┘ └────┬───────┘
-                │
-┌───────▼────────┐
-│ PostgreSQL     │  세션·감사 데이터
-│ Redis Streams  │  작업 큐·이벤트 스트림
-└────────────────┘
+        ▼
+AgentRuntime (현재 API 프로세스 내부)
+  ├─ Triage
+  ├─ Planner
+  ├─ Coder
+  ├─ Reviewer ↔ Debugger
+  ├─ Context/Compaction/Recovery
+  └─ Tool Executor
+        │
+        ├─ DeepSeek V4 Adapter
+        ├─ Docker Sandbox / Local Workspace
+        └─ PostgreSQL
+
+보조 지속성:
+- JSONL durable event/action log
+- sessions.running 플래그
+- metrics/agent_runs
 ```
 
-## 서비스 구성
+Redis 컨테이너는 존재하지만 현재 Agent event replay/worker queue의 authoritative 경로로 사용하지 않는다. Worker 분리와 Redis Streams 기반 durable resume은 미래 과제다.
 
-| 서비스 | 역할 | 상태 |
-|---|---|---|
-| web | Vue3 PWA (Desktop/Mobile) | ✅ Phase 1 기본 UI |
-| api | FastAPI Gateway + SSE | ✅ |
-| worker | Agent 실행 엔진 | ✅ (api와 동일 프로세스, Phase 3에서 분리) |
-| executor | Docker 기반 코드 실행 환경 | ⬜ executor 클래스 구현, bash 연결은 Phase 2 |
-| redis | 작업 큐·이벤트 스트림 | ⬜ docker-compose만 구성, Phase 3 연결 |
-| postgres | 세션·감사 데이터 | ⬜ 모델/스키마 구현, 영속화 연결 예정 |
+## 실행 흐름
 
-## Agent Runtime 실행 흐름
-
-```
-User Request
-    ↓
-Triage ──(chat)──→ 단일 Chat 패스
-    │ (agent)
-    ↓
-Planner → Coder → [ Reviewer ↔ Debugger 자기수정 루프 ] → Report
-```
-
-- Triage가 일반 대화(chat)와 코드 작업(agent)을 분리한다.
-- Reviewer가 DB task 상태(`done`/`debug`)로 성공/결함을 판정하고, 결함이 있으면
-  Debugger가 수정 후 `review`로 되돌려 Reviewer가 재검증한다. 모든 task가 `done`이 될
-  때까지 최대 `MAX_REVIEW_CYCLES`(3)회 반복하고, 초과하면 남은 문제를 보고한다.
-- Debugger는 마지막 복구 시도에서만 Pro로 승격(`retry_count >= 3`)해 비용을 억제한다.
-
-자세한 흐름·종료 상태: [`agent-loop.md`](agent-loop.md).
-
-필수 기능: Planning, Tool Loop, Self-Correction, Retry, Step/Cycle Limit, State 저장, Interrupt.
-
-## LLM Adapter 구조
-
-```
-Agent Runtime → Model Router → LLM Adapter Interface → Provider (DeepSeek 등)
+```text
+Request
+ ↓
+Triage ── CHAT → Chat Flash → Done
+ │
+ AGENT + SIMPLE/COMPLEX
+ ↓
+Planner
+  SIMPLE  → Flash + thinking medium
+  COMPLEX → Pro + thinking high
+ ↓
+Coder Flash
+ ↓
+Reviewer Flash
+ ↓
+all tasks done? ── yes → completed
+ ↓ no
+Debugger Flash
+ ↓ 반복 실패 마지막 복구
+Debugger Pro
+ ↓
+Reviewer 재검증
 ```
 
-- DeepSeek 최적화: Streaming, Thinking Mode, Effort Control, Prefix Cache
-- Prefix Cache 고정 순서: System Prompt → Agent Policy → Tool Schema → Project Rules
-- 금지: Timestamp, Random ID, Dynamic Prompt
+DB task 상태가 성공 판정의 authority다. 최대 자기수정 사이클은 3회다.
 
-## Model Router
+## Context / 비용 구조
 
-`orchestrator/model_router.py` — 역할별 모델·thinking·effort를 선택한다.
+- context pressure는 provider 실측 `prompt_tokens` 기준
+- 75% 초과 시 오래된 model surface를 Flash로 요약(compaction)
+- compaction 성공 직후 압축 전 usage로 차단하지 않고 다음 호출에서 재실측
+- 95% 초과이면서 더 줄일 수 없을 때 hard block
+- 긴 tool result는 head/tail/오류 중심으로 pruning
+- 원본 conversation history와 model projected context는 분리
+- stable prefix: BASE_PROMPT + role instructions
+- dynamic tail: memory + selected skills + conversation
+- cache hit/miss와 prefix hash를 계측
 
-| Agent | 모델 | Thinking | Effort |
-|---|---|---|---|
-| Planner | deepseek-v4-pro | on | high |
-| Coder | deepseek-v4-flash | off | low |
-| Reviewer | deepseek-v4-flash | on | medium |
-| Debugger | deepseek-v4-flash → pro | off → on | low → high |
+## Skill / Memory
 
-- Debugger escalation: `retry_count >= 3` 또는 `complexity == "high"`
-- 정책은 관리자 API(`/api/admin/model-policy`)로 런타임 조회·변경
-- 실행 이력은 `agent_runs`에 model·thinking·effort 포함 기록
+`.forge/skills/*.md`는 모두 prompt에 넣지 않는다. 현재 요청과 키워드 겹침으로 상위 최대 3개, 총 6000자 예산 내에서 선택한다. `save_skill`은 승인 게이트를 통과한다.
 
-## Sandbox 실행
+## Provider Recovery
 
-```
-Agent → Executor → Docker Container → Workspace
-```
+- `reasoning_content` 계약 오류: reasoning 제거 + thinking off 재시도
+- 429/5xx/timeout/connection: 1/2/4초 backoff, 최대 3회
+- 일부 delta가 이미 사용자에게 전달된 뒤 실패한 stream은 중복 생성을 막기 위해 재시도하지 않는다.
 
-정책: Non-root, Capability 제거, Resource 제한(memory/cpu/pids), Workspace만 write, Docker socket 금지.
+## Tool 실행
 
-네트워크: `Executor → Network Proxy → Whitelist` (github.com, npm registry, pypi.org)
+읽기 전용 `read_file/list_dir/grep` 다중 호출은 병렬 prefetch 가능하다. `write_file/edit_file/bash/save_skill`은 승인 대상이며 변경 전 git SHA checkpoint를 기록한다.
 
-## Streaming 아키텍처
+파일 브라우저 API는 session workspace 경계를 강제해 지정 workspace 밖 접근을 차단한다.
 
-- SSE Streaming + REST Control API
-- 이벤트: `thinking_delta, text_delta, tool_call, tool_result, plan_update, approval_request, context_usage, error, done`
-- Redis Streams 저장 목적: 재접속, 모바일 복구, 다중 클라이언트
+## Remote Operation
 
-## 코드 구조
+- SSE: 실시간 thinking/text/tool/task/diff 이벤트
+- `/sessions/{id}/status`: `running`, 현재 `role`, `activity`, `waiting_for`, idle 상태 조회
+- SSE가 끊겨도 PWA는 status polling으로 진행 상황을 추적
+- 승인/질문은 최대 600초 대기 후 안전하게 종료
+- cancel 시 pending approval/question future를 해제
+- 모든 send 이벤트는 JSONL event log에 기록
 
-```
-forge/
-├── backend/
-│   └── app/
-│       ├── main.py          # FastAPI 앱, 정적 서빙
-│       ├── config.py        # pydantic-settings 설정
-│       ├── api/routes.py    # SSE + REST 엔드포인트
-│       ├── runtime/agent.py # Agent Runtime (Planner→Loop→Report)
-│       ├── llm/deepseek.py  # DeepSeek Adapter (streaming)
-│       ├── tools/registry.py# 도구 스키마 + 실행
-│       ├── sandbox/executor.py # Docker Sandbox
-│       └── db/              # SQLAlchemy 모델/세션
-├── frontend/                # Vue3 + Vite PWA
-├── sandbox/Dockerfile       # 격리 실행 이미지
-└── docker-compose.yml       # postgres + redis
-```
+### 서버 재시작
+
+`sessions.running=true`로 남은 세션을 시작 시 reconcile해 중단 사실을 메시지로 남기고 플래그를 정리한다. 이는 **중단 감지/복구 안내**이며, 실행 stack을 복원해 이어서 실행하는 durable resume은 아니다.
+
+## Telemetry
+
+`agent_runs`와 metrics 집계를 통해 role/model별 token, cache, model/tool call, retry, compaction, elapsed, selected skill, Pro 승격 등을 기록한다.
+
+API:
+
+- `GET /api/metrics/summary`
+- `GET /api/rooms/{id}/metrics`
+
+성공 정의의 기본값은 `final_status == completed`이며 핵심 최적화 지표는 `cost per successfully completed task`다.
+
+## 현재 데이터 계층
+
+- PostgreSQL: sessions/messages/tasks/checkpoints/agent_runs 및 실행 상태/metrics 영속화
+- JSONL: durable action/event log
+- Redis: 컨테이너 구성됨, durable Agent queue/replay는 미연결
+
+## 다음 구조적 과제
+
+1. Agent worker를 API 프로세스와 분리
+2. durable queue + event replay
+3. 서버 재시작 후 실제 run resume
+4. Tool Script/RPC Mode
+5. Scheduled/Condition Jobs + Web Push
+6. ExecutionBackend(Local/SSH/Docker)
