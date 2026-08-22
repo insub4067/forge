@@ -823,7 +823,14 @@ function resetSession() {
 
 onMounted(async () => {
   await loadRooms()
+  // 유효한 현재 세션이 없으면 가장 최근 세션으로 랜딩
+  const valid = rooms.value.some((r) => r.id === currentRoomId.value)
+  if (!valid && rooms.value.length) {
+    currentRoomId.value = rooms.value[0].id
+    localStorage.setItem('forge_room', currentRoomId.value)
+  }
   await loadMessages()
+  await loadTasks()
 })
 </script>
 
