@@ -91,11 +91,26 @@ textarea {
 header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
   padding: 12px 16px;
   padding-top: calc(12px + env(safe-area-inset-top));
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  position: relative;
+}
+/* 우측 아이콘 그룹(벨·메뉴) — 좌측 햄버거와 space-between으로 양끝 배치 */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+/* 타이틀은 아이콘 개수와 무관하게 화면 정중앙 고정 */
+header .room-btn {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 60%;
 }
 
 header .dot {
