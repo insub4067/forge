@@ -98,6 +98,9 @@ async def load_history(session_id: str) -> list[dict]:
 
 async def save_history(session_id: str, history: list[dict]) -> None:
     async with async_session() as s:
+        # 실행 중 세션이 삭제되면 뒤늦은 저장이 FK 위반으로 크래시한다 → 세션 없으면 skip.
+        if await s.get(Session, session_id) is None:
+            return
         await s.execute(delete(Message).where(Message.session_id == session_id))
         for i, msg in enumerate(history):
             s.add(
@@ -162,6 +165,7 @@ async def list_rooms() -> list[dict]:
                 "count": count,
                 "used_tokens": sess.used_tokens,
                 "logical_budget": sess.logical_budget,
+                "running": sess.running,
             }
             for sess, count in result.all()
         ]

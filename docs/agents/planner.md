@@ -2,8 +2,9 @@
 
 ## 사용 모델
 
-- 기본: `deepseek-v4-pro`
-- 설정: `PLANNER_MODEL` 환경변수로 변경 가능
+- 기본: `deepseek-v4-flash` (thinking medium) — 비용 효율
+- 승격: triage가 COMPLEX로 판정할 때만 `deepseek-v4-pro` + thinking high
+- 설정: `PLANNER_MODEL` / `PLANNER_PRO_MODEL` 환경변수
 
 ## 역할
 

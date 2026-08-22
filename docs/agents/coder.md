@@ -2,7 +2,7 @@
 
 ## 사용 모델
 
-- 기본: `deepseek-v4-pro`
+- 기본: `deepseek-v4-flash` (non-thinking) — 비용 효율
 - 설정: `CODER_MODEL` 환경변수로 변경 가능
 
 ## 역할

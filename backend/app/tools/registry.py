@@ -7,11 +7,17 @@ TOOL_SCHEMAS: list[dict] = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read a file's contents. Returns the file text.",
+            "description": (
+                "Read a file's contents. Returns the file text with line numbers. "
+                "For large files, pass offset/limit to read only a line range "
+                "instead of running bash sed/cat — this is faster (parallel, no approval)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Absolute or workspace-relative path"}
+                    "path": {"type": "string", "description": "Absolute or workspace-relative path"},
+                    "offset": {"type": "integer", "description": "1-based start line (optional). Read from here."},
+                    "limit": {"type": "integer", "description": "Max lines to read from offset (optional)."},
                 },
                 "required": ["path"],
             },
@@ -238,7 +244,18 @@ def _make_diff(old_text: str, new_text: str, path: str) -> str:
 async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]:
     if name == "read_file":
         p = _resolve(workspace, str(args["path"]))
-        return p.read_text(encoding="utf-8", errors="replace"), ""
+        text = p.read_text(encoding="utf-8", errors="replace")
+        offset = args.get("offset")
+        limit = args.get("limit")
+        if offset or limit:
+            # 줄 범위만 읽기 — 큰 파일을 bash sed 대신 read_file로(병렬·무승인).
+            lines = text.splitlines()
+            start = max(int(offset) - 1, 0) if offset else 0
+            end = start + int(limit) if limit else len(lines)
+            picked = lines[start:end]
+            body = "\n".join(f"{start + i + 1}\t{ln}" for i, ln in enumerate(picked))
+            return body, ""
+        return text, ""
     if name == "list_dir":
         p = _resolve(workspace, str(args["path"]))
         if p.is_file():

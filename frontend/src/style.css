@@ -1424,7 +1424,7 @@ footer .image-preview-row {
 .composer-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .composer-spacer {
@@ -1434,15 +1434,24 @@ footer .image-preview-row {
 .mode-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 32px;
-  padding: 0 12px;
+  gap: 6px;
+  height: 40px;
+  padding: 0 16px;
   border-radius: 999px;
-  border: 1px solid var(--border);
+  border: none;
   background: var(--panel-2);
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--text);
+  font-size: 14px;
   font-weight: 600;
+}
+.mode-chip.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.mode-chip.small {
+  height: 34px;
+  padding: 0 13px;
+  font-size: 13px;
 }
 
 .mode-chip.small {
@@ -1456,11 +1465,12 @@ footer .image-preview-row {
 }
 
 .attach-btn {
-  background: none;
+  background: var(--panel-2);
   border: none;
-  color: var(--muted);
-  width: 36px;
-  height: 32px;
+  color: var(--text);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1563,8 +1573,8 @@ footer .image-preview-row {
 }
 
 .composer-send {
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   border: none;
   background: var(--accent);
@@ -1573,7 +1583,9 @@ footer .image-preview-row {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  margin-bottom: 3px;
+}
+.composer-send:disabled {
+  opacity: 0.4;
 }
 
 .composer-send:disabled {
@@ -2289,6 +2301,18 @@ button {
   background: var(--accent);
   border-color: var(--accent);
   box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.room-spinner {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid var(--accent-soft);
+  border-top-color: var(--accent);
+  animation: room-spin 0.7s linear infinite;
+}
+@keyframes room-spin {
+  to { transform: rotate(360deg); }
 }
 .room-pct {
   font-size: 12px;

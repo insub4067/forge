@@ -184,13 +184,14 @@ async function fetchStatus(id) {
   return st
 }
 
+let wasRunning = false
+
+// 단일 진실 = 서버 /status. 방이 열려있는 동안 항상 폴링해 클라 상태를 서버로 수렴시킨다.
 async function checkRunning() {
   const id = currentRoomId.value
-  if (!id || busy.value) return
-  try {
-    const st = await fetchStatus(id)
-    if (st && st.running) startRunningPoll()
-  } catch {}
+  if (!id) return
+  if (!busy.value) await fetchStatus(id).catch(() => {})
+  startRunningPoll()
 }
 
 function startRunningPoll() {
@@ -198,22 +199,22 @@ function startRunningPoll() {
   runningPoll = setInterval(async () => {
     const id = currentRoomId.value
     if (!id) return stopRunningPoll()
+    if (busy.value) return // SSE 스트림이 주도 중이면 폴링 생략(중복 방지)
     try {
-      const st = await fetchStatus(id)
-      if (!st || !st.running) {
-        stopRunningPoll()
-        sessionRunning.value = false
-        agentStatus.value = null
-        await loadMessages(true) // 완료 결과 반영 — 이미 열린 방 새로고침이라 skeleton 생략
-      } else {
-        // 실행 중엔 태스크를 폴링해 칸반이 살아있게 한다(SSE 스트림이 끊겨도 최신).
-        loadTasks()
+      const st = await fetchStatus(id) // sessionRunning/agentStatus 갱신(단일 진실)
+      const running = !!(st && st.running)
+      if (running) {
+        loadTasks() // 실행 중엔 칸반 라이브 갱신(스트림 끊겨도 최신)
+      } else if (wasRunning) {
+        await loadMessages(true) // 방금 끝남 → 결과 1회 반영
       }
+      wasRunning = running
     } catch {}
   }, 3000)
 }
 
 function stopRunningPoll() {
+  wasRunning = false
   if (runningPoll) {
     clearInterval(runningPoll)
     runningPoll = null
@@ -1345,7 +1346,8 @@ document.addEventListener('visibilitychange', () => {
             @touchstart="onRoomTouchStart"
             @touchend="onRoomTouchEnd(r, $event)"
           >
-            <span class="room-status" :class="r.id === currentRoomId ? 'active' : 'idle'"></span>
+            <span v-if="r.running" class="room-spinner" title="작업 중"></span>
+            <span v-else class="room-status" :class="r.id === currentRoomId ? 'active' : 'idle'"></span>
             <div class="room-info">
               <div class="room-title">{{ r.title }}</div>
               <div class="room-path">{{ r.workspace_path || '워크스페이스 설정' }}</div>
@@ -1542,7 +1544,7 @@ document.addEventListener('visibilitychange', () => {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
             {{ autoApprove ? '자동 승인' : '수동 승인' }}
           </button>
-          <template v-if="busy">
+          <template v-if="busy || sessionRunning">
             <button class="mode-chip small" :class="{ on: steerMode === 'queue' }" @click="steerMode = 'queue'">작업 대기</button>
             <button class="mode-chip small" :class="{ on: steerMode === 'switch' }" @click="steerMode = 'switch'">계획 수정</button>
           </template>
