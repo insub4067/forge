@@ -63,6 +63,24 @@ body,
   -webkit-font-smoothing: antialiased;
 }
 
+/* UI 텍스트(라벨·파일명·버튼)는 long-press로 선택/iOS 메뉴가 뜨지 않게 한다.
+   실제로 복사할 만한 콘텐츠(메시지·코드·diff·입력)만 선택 허용. */
+#app {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.text,
+.code-body,
+.gh-diff,
+.diff,
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
 .app {
   position: fixed;
   inset: 0;
@@ -258,6 +276,17 @@ header .todo-btn {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.room-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  vertical-align: middle;
 }
 
 .room-more {
@@ -516,6 +545,8 @@ header .todo-btn {
 
 .modal-field {
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1619,6 +1650,10 @@ footer .image-preview-row {
   z-index: 100;
   padding: 24px;
 }
+/* 예약 모달은 사이드바 드로어(z-index 150) 위로 */
+.modal-overlay.job-modal {
+  z-index: 200;
+}
 
 .modal {
   background: var(--panel);
@@ -2116,6 +2151,294 @@ footer .image-preview-row {
   border-top: 1px solid var(--border);
   padding: 16px calc(16px);
   padding-bottom: max(8px, env(safe-area-inset-bottom));
+}
+
+/* ===== 드로어 헤더 액션 ===== */
+.drawer-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.drawer-add {
+  background: none;
+  border: none;
+  color: var(--accent);
+  padding: 4px;
+  display: flex;
+}
+
+/* ===== 하단 탭바 ===== */
+.sidebar-tabbar {
+  display: flex;
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--panel);
+}
+.sidebar-tabbar button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 9px 0 8px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.sidebar-tabbar button.active {
+  color: var(--accent);
+}
+
+/* ===== 예약 작업 ===== */
+.job-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--panel);
+  position: relative;
+  transition: transform 0.2s;
+}
+.job-item.swiped {
+  transform: translateX(-84px);
+}
+/* 비활성 잡은 '내용'만 흐리게 — 셀 배경까지 투명해지면 스와이프 시 삭제 버튼이 비친다 */
+.job-item.off .job-main,
+.job-item.off .job-actions {
+  opacity: 0.55;
+}
+.job-main {
+  flex: 1;
+  min-width: 0;
+}
+.job-name {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.job-result {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.job-actions button {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 7px;
+  padding: 5px 7px;
+  font-size: 12px;
+}
+.job-actions button.on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.job-actions .job-del {
+  color: #ef4444;
+}
+.job-sched-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+.job-sched-tabs button {
+  flex: 1;
+  padding: 8px 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.job-sched-tabs button.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.job-interval-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.job-interval-row .modal-field {
+  width: 90px;
+}
+.job-interval-row span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* ===== 맥 탭 ===== */
+.mac-launcher {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+.mac-tile {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: left;
+}
+.mac-ico {
+  font-size: 22px;
+}
+.mac-toggle {
+  cursor: pointer;
+}
+.mac-toggle-label {
+  flex: 1;
+}
+.mac-switch {
+  width: 44px;
+  height: 26px;
+  border-radius: 13px;
+  background: var(--border);
+  position: relative;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+.mac-switch.on {
+  background: var(--accent);
+}
+.mac-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s;
+}
+.mac-switch.on .mac-switch-knob {
+  transform: translateX(18px);
+}
+.mac-sub {
+  padding: 14px 16px;
+}
+.mac-placeholder {
+  margin-top: 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+/* 맥 상세: 유튜브형 전체화면 플레이어 */
+.mac-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  animation: fade-in 0.16s ease-out;
+}
+/* 영상처럼 화면 전체를 채움(가로에서 꽉 참, 세로에서 레터박스) */
+.mac-screen-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+/* 우측 하단 닫기 X 하나만 — 영상 위에 떠 있음 */
+.mac-ov-close {
+  position: absolute;
+  right: calc(16px + env(safe-area-inset-right));
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  border: none;
+  color: #fff;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+}
+.mac-overlay .mac-placeholder {
+  color: #999;
+}
+/* iOS는 orientation.lock 미지원 → 세로에선 '영상(이미지)만' 90° 회전해 가로로 채운다.
+   컨트롤(뒤로/정지)은 회전하지 않아 항상 정상 위치·safe-area에서 누를 수 있다. */
+@media (orientation: portrait) {
+  .mac-overlay.is-screen .mac-screen-video {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 100vh;
+    height: 100vw;
+    max-width: none;
+    max-height: none;
+    transform: translate(-50%, -50%) rotate(90deg);
+  }
+}
+.mac-screen-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.mac-screen-toggle {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.mac-screen-img {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  display: block;
+}
+.mac-screen-err {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+/* 검색 점프 하이라이트 */
+.msg-highlight {
+  animation: msg-flash 2s ease-out;
+  border-radius: 10px;
+}
+@keyframes msg-flash {
+  0%, 40% { background: rgba(255, 138, 76, 0.18); }
+  100% { background: transparent; }
 }
 
 /* ===== 전역 애니메이션 (부드럽게, 멀미 방지) ===== */

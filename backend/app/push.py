@@ -12,10 +12,9 @@ from . import errors as error_log
 
 
 def _private_key() -> str | None:
+    """pywebpush에는 PEM 내용이 아니라 파일 경로를 넘겨야 from_file로 정상 파싱된다."""
     p = Path(settings.vapid_private_key_path)
-    if p.is_file():
-        return p.read_text().strip()
-    return None
+    return str(p) if p.is_file() else None
 
 
 def send_one(subscription: dict, title: str, body: str, url: str = "/") -> bool:

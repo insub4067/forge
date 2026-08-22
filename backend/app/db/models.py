@@ -112,3 +112,24 @@ class PushDevice(Base):
     last_seen: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
     )
+
+
+class ScheduledJob(Base):
+    __tablename__ = "scheduled_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, default="")
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    workspace_path: Mapped[str] = mapped_column(String, default="")
+    session_id: Mapped[str] = mapped_column(String, default="")
+    timezone: Mapped[str] = mapped_column(String, default="Asia/Seoul")
+    # next_run_at(UTC)이 authoritative — 서버 재시작 후 이걸로 복원한다.
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    recurrence: Mapped[str] = mapped_column(String, default="")        # "" | daily | interval
+    recurrence_value: Mapped[str] = mapped_column(String, default="")  # daily "HH:MM"(local) | interval 분
+    auto_approve: Mapped[bool] = mapped_column(Boolean, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String, default="scheduled")
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_result: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

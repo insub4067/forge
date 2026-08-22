@@ -3,6 +3,8 @@ import json
 import os
 import re
 import subprocess
+import sys
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -330,6 +332,149 @@ async def push_vapid_public():
     return {"public_key": settings.vapid_public_key}
 
 
+def _parse_dt(v):
+    """ISO 문자열(±tz) → naive UTC datetime."""
+    from datetime import datetime, timezone as _tz
+    if not v:
+        return None
+    try:
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        if d.tzinfo:
+            d = d.astimezone(_tz.utc).replace(tzinfo=None)
+        return d
+    except Exception:
+        return None
+
+
+@router.get("/jobs")
+async def jobs_list():
+    return {"jobs": await store.list_jobs()}
+
+
+@router.post("/jobs")
+async def jobs_create(req: Request):
+    body = await req.json()
+    # 워크스페이스 미지정 시 전용 폴더 자동 생성 — 기존 프로젝트(forge 등)에 섞이지 않게.
+    workspace = str(body.get("workspace_path", "")).strip()
+    if not workspace:
+        safe = re.sub(r"[^\w가-힣.-]", "_", str(body.get("name", "job")))[:30] or "job"
+        workspace = str(Path.home() / "forge-jobs" / f"{safe}-{uuid.uuid4().hex[:6]}")
+        try:
+            Path(workspace).mkdir(parents=True, exist_ok=True)
+        except Exception:
+            workspace = str(Path.home() / "forge-jobs")
+            Path(workspace).mkdir(parents=True, exist_ok=True)
+    data = {
+        "name": str(body.get("name", "")),
+        "prompt": str(body.get("prompt", "")),
+        "workspace_path": workspace,
+        "session_id": str(body.get("session_id", "")),
+        "timezone": str(body.get("timezone", "Asia/Seoul")),
+        "next_run_at": _parse_dt(body.get("next_run_at")),
+        "recurrence": str(body.get("recurrence", "")),
+        "recurrence_value": str(body.get("recurrence_value", "")),
+        "auto_approve": bool(body.get("auto_approve", True)),
+    }
+    return await store.create_job(data)
+
+
+@router.patch("/jobs/{job_id}")
+async def jobs_update(job_id: int, req: Request):
+    body = await req.json()
+    fields = {}
+    if "enabled" in body:
+        fields["enabled"] = bool(body["enabled"])
+    if "next_run_at" in body:
+        fields["next_run_at"] = _parse_dt(body["next_run_at"])
+    await store.update_job(job_id, fields)
+    return {"ok": True}
+
+
+@router.delete("/jobs/{job_id}")
+async def jobs_delete(job_id: int):
+    await store.delete_job(job_id)
+    return {"deleted": True}
+
+
+@router.post("/jobs/{job_id}/run")
+async def jobs_run_now(job_id: int):
+    job = await store.get_job(job_id)
+    if not job:
+        return {"error": "not found"}
+    from .. import scheduler
+    asyncio.create_task(scheduler.run_job(job))
+    return {"started": True}
+
+
+# 재시작으로 자식이 고아가 돼도 켜고 끌 수 있게 pgrep/pkill로 상태를 판정한다.
+_CAFFEINATE_MARK = "caffeinate -dimsu"
+
+
+async def _caffeinate_running() -> bool:
+    proc = await asyncio.create_subprocess_exec(
+        "pgrep", "-f", _CAFFEINATE_MARK,
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+    )
+    return await proc.wait() == 0
+
+
+@router.get("/mac/caffeinate")
+async def caffeinate_status():
+    if sys.platform != "darwin":
+        return {"on": False}
+    return {"on": await _caffeinate_running()}
+
+
+@router.post("/mac/caffeinate")
+async def caffeinate_toggle(req: Request):
+    """맥 절전 방지 토글 — caffeinate 프로세스를 켜고/끈다."""
+    if sys.platform != "darwin":
+        return {"on": False, "error": "unsupported"}
+    on = bool((await req.json()).get("on"))
+    running = await _caffeinate_running()
+    if on and not running:
+        # -d 디스플레이, -i 유휴, -m 디스크, -s 시스템, -u 사용자활성
+        await asyncio.create_subprocess_exec("caffeinate", "-dimsu")
+    elif not on and running:
+        killer = await asyncio.create_subprocess_exec("pkill", "-f", _CAFFEINATE_MARK)
+        await killer.wait()
+    return {"on": on}
+
+
+@router.get("/mac/screen")
+async def mac_screen(display: int = 1, max_px: int = 1600):
+    """macOS 화면 캡처(view-only). '화면 기록' 권한이 필요하다."""
+    if sys.platform != "darwin":
+        return Response(content=b"unsupported", status_code=501)
+    tmp = Path(tempfile.gettempdir()) / "forge_screen.jpg"
+    try:
+        args = ["screencapture", "-x", "-t", "jpg"]
+        if display > 1:
+            args += ["-D", str(display)]  # 보조 디스플레이만 지정, 기본은 주화면
+        args.append(str(tmp))
+        proc = await asyncio.create_subprocess_exec(
+            *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=8)
+        if not tmp.exists():
+            msg = stderr.decode(errors="ignore").strip() or "capture failed"
+            # 화면 기록 권한 미허용 시 macOS가 이 에러를 반환한다.
+            return Response(content=f"화면 기록 권한 필요: {msg}".encode(), status_code=403)
+        # 대역폭 절감: 긴 변 max_px로 축소
+        resize = await asyncio.create_subprocess_exec(
+            "sips", "-Z", str(max_px), str(tmp),
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await resize.wait()
+        return Response(
+            content=tmp.read_bytes(),
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception as err:
+        return Response(content=str(err).encode(), status_code=500)
+
+
 @router.post("/push/subscribe")
 async def push_subscribe(req: Request):
     body = await req.json()
@@ -413,11 +558,12 @@ _SEP = "\x1f"
 
 
 @router.get("/rooms/{session_id}/git/log")
-async def git_log(session_id: str, limit: int = 50):
+async def git_log(session_id: str, limit: int = 50, skip: int = 0):
     ws = await _room_workspace(session_id)
     limit = max(1, min(limit, 200))
+    skip = max(0, skip)
     raw = _git(
-        ws, "-c", "core.quotepath=false", "log", "-n", str(limit),
+        ws, "-c", "core.quotepath=false", "log", "--skip", str(skip), "-n", str(limit),
         f"--pretty=format:%h{_SEP}%s{_SEP}%an{_SEP}%ar",
     )
     commits = []
@@ -427,7 +573,7 @@ async def git_log(session_id: str, limit: int = 50):
             commits.append(
                 {"hash": parts[0], "subject": parts[1], "author": parts[2], "date": parts[3]}
             )
-    return {"commits": commits}
+    return {"commits": commits, "has_more": len(commits) == limit}
 
 
 @router.get("/rooms/{session_id}/git/file-diff")

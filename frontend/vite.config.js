@@ -11,8 +11,8 @@ function buildVersion() {
 export default defineConfig({
   plugins: [
     vue(),
-    // 수제 sw.js 대신 workbox 기반 PWA — 배포마다 precache manifest가 갱신되어
-    // autoUpdate가 새 버전을 확실히 감지·교체한다(trade-bot에서 검증된 구성).
+    // autoUpdate — 새 버전이 배포되면 SW가 자동 교체되고 페이지가 리로드된다(항상 최신).
+    // sw.js/index.html은 백엔드에서 no-store로 서빙되므로 stale SW에 막히지 않는다.
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {

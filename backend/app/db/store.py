@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, select
 
-from .models import AgentRun, Checkpoint, Message, PushDevice, Session, Task, VisionAnalysis
+from .models import AgentRun, Checkpoint, Message, PushDevice, ScheduledJob, Session, Task, VisionAnalysis
 from .session import async_session
 
 
@@ -156,6 +156,12 @@ async def list_rooms() -> list[dict]:
             .group_by(Session.id)
             .order_by(Session.created_at.desc())
         )
+        # 예약 작업이 붙은 세션은 뱃지용으로 표시
+        job_sids = {
+            sid for (sid,) in (
+                await s.execute(select(ScheduledJob.session_id).where(ScheduledJob.session_id != ""))
+            ).all()
+        }
         return [
             {
                 "id": sess.id,
@@ -166,6 +172,7 @@ async def list_rooms() -> list[dict]:
                 "used_tokens": sess.used_tokens,
                 "logical_budget": sess.logical_budget,
                 "running": sess.running,
+                "scheduled": sess.id in job_sids,
             }
             for sess, count in result.all()
         ]
@@ -552,3 +559,77 @@ async def admin_stats(days: int = 7) -> dict:
             "roles": roles,
             "rooms": rooms,
         }
+
+
+def _job_dict(j) -> dict:
+    return {
+        "id": j.id, "name": j.name, "prompt": j.prompt,
+        "workspace_path": j.workspace_path, "session_id": j.session_id,
+        "timezone": j.timezone,
+        "next_run_at": j.next_run_at.isoformat() if j.next_run_at else None,
+        "recurrence": j.recurrence, "recurrence_value": j.recurrence_value,
+        "auto_approve": j.auto_approve, "enabled": j.enabled, "status": j.status,
+        "last_run_at": j.last_run_at.isoformat() if j.last_run_at else None,
+        "last_result": j.last_result,
+    }
+
+
+async def create_job(data: dict) -> dict:
+    async with async_session() as s:
+        j = ScheduledJob(
+            name=data.get("name", ""), prompt=data.get("prompt", ""),
+            workspace_path=data.get("workspace_path", ""),
+            session_id=data.get("session_id", ""),
+            timezone=data.get("timezone", "Asia/Seoul"),
+            next_run_at=data.get("next_run_at"),
+            recurrence=data.get("recurrence", ""),
+            recurrence_value=data.get("recurrence_value", ""),
+            auto_approve=bool(data.get("auto_approve", True)),
+        )
+        s.add(j)
+        await s.commit()
+        await s.refresh(j)
+        return _job_dict(j)
+
+
+async def list_jobs() -> list[dict]:
+    async with async_session() as s:
+        result = await s.execute(select(ScheduledJob).order_by(ScheduledJob.created_at.desc()))
+        return [_job_dict(j) for j in result.scalars()]
+
+
+async def get_job(job_id: int) -> dict | None:
+    async with async_session() as s:
+        j = await s.get(ScheduledJob, job_id)
+        return _job_dict(j) if j else None
+
+
+async def update_job(job_id: int, fields: dict) -> None:
+    async with async_session() as s:
+        j = await s.get(ScheduledJob, job_id)
+        if not j:
+            return
+        for k, v in fields.items():
+            if hasattr(j, k):
+                setattr(j, k, v)
+        await s.commit()
+
+
+async def delete_job(job_id: int) -> None:
+    async with async_session() as s:
+        await s.execute(delete(ScheduledJob).where(ScheduledJob.id == job_id))
+        await s.commit()
+
+
+async def due_jobs(now_utc) -> list[dict]:
+    """실행 시각이 지난 enabled 잡. next_run_at이 authoritative."""
+    async with async_session() as s:
+        result = await s.execute(
+            select(ScheduledJob).where(
+                ScheduledJob.enabled == True,  # noqa: E712
+                ScheduledJob.next_run_at.is_not(None),
+                ScheduledJob.next_run_at <= now_utc,
+                ScheduledJob.status != "running",
+            )
+        )
+        return [_job_dict(j) for j in result.scalars()]

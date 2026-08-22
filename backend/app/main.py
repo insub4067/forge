@@ -40,6 +40,9 @@ async def lifespan(app: FastAPI):
         await store.reconcile_interrupted_runs()
     except Exception:
         pass
+    # 예약 작업 스케줄러 시작(DB next_run_at이 authoritative → 재시작 복원).
+    from . import scheduler
+    scheduler.start()
     yield
 
 
@@ -70,9 +73,19 @@ if frontend_dist.exists():
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
+    # sw.js·index.html은 절대 캐시하지 않는다 — Cloudflare/브라우저가 stale SW를 붙들면
+    # 새 배포가 폰에 영원히 전달되지 않는다(구버전 고착의 근본 원인). 해시된 /assets는 불변.
+    _NO_STORE = {"Cache-Control": "no-store, no-cache, must-revalidate"}
+
+    def _needs_no_store(path: str) -> bool:
+        return path in ("sw.js", "index.html", "registerSW.js") or path.endswith((
+            "sw.js", "push-handler.js", "manifest.webmanifest",
+        ))
+
     @app.get("/{full_path:path}")
     async def spa(full_path: str):
         candidate = frontend_dist / full_path
         if full_path and candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(frontend_dist / "index.html")
+            headers = _NO_STORE if _needs_no_store(full_path) else None
+            return FileResponse(candidate, headers=headers)
+        return FileResponse(frontend_dist / "index.html", headers=_NO_STORE)

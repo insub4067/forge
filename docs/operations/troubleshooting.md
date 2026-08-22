@@ -105,9 +105,13 @@ Kanban open 시 task를 다시 읽고 running polling 중에도 task를 갱신�
 
 ### Service Worker 업데이트 무한 reload
 
-원인: reload guard가 module 변수라 reload마다 초기화되어 `controllerchange → reload` 루프가 반복됨.
+증상: 폰·브라우저가 blank → skeleton → 내용 → blank를 계속 반복. Safari에선 상단 로딩바가 끊임없이 뜬다. 서로 다른 세션방을 오가는 것처럼 보이지만, 실제로는 매 reload가 landing 상태를 다시 그리는 착시다.
 
-해결: `sessionStorage` 기반 탭 세션당 1회 reload guard.
+원인: `registerType: 'autoUpdate'`는 새 SW가 감지될 때마다 페이지를 **자동 reload**한다. 개발 중 dist를 짧은 간격으로 여러 번 rebuild하면 그때마다 새 precache manifest(=새 SW)가 생겨 reload가 연쇄된다. 배포 dist를 서빙하는 Cloudflare 터널 경유 접속도 동일하게 당한다.
+
+해결: `registerType: 'prompt'`로 전환해 SW가 페이지를 자동 reload하지 않게 하고, 적용 시점을 `main.js`가 통제한다. 자동 적용은 **브라우저 세션당 최대 1회**(`sessionStorage['forge_reloaded']`)만 허용하고, 이후 새 버전은 toast로만 안내한다. 구조적으로 루프가 불가능하다.
+
+교훈: 사용자가 라이브로 지켜보는 동안엔 rebuild 빈도를 줄이고, 변경을 모아 한 번에 build한다. `prompt` 모드에선 새 버전이 새로고침 전까지 적용되지 않으므로, 반영 확인은 "당겨서 새로고침" 후에 한다.
 
 ### 서버는 일하는데 화면은 멈춘 것처럼 보임
 
@@ -120,6 +124,59 @@ SSE `busy`만 보던 UI를 `sessionRunning`까지 확장했다. `/status.activit
 ### iOS safe-area
 
 홈화면 PWA를 기준으로 header/footer/drawer/overlay safe-area를 적용한다. Safari browser와 standalone의 inset 값은 다를 수 있다.
+
+### Cloudflare Access 뒤에서 PWA가 구버전에 영구 고착 (가장 함정)
+
+증상: 서버(dist)는 최신인데 폰 PWA는 며칠이 지나도 옛 버전 그대로. autoUpdate/prompt 어느 쪽으로 바꿔도, 캐시 헤더를 손봐도 안 바뀜.
+
+진단: 공개 URL로 `curl -sI https://<host>/sw.js` → **302 redirect to `<team>.cloudflareaccess.com/.../login`**. `/`, `/index.html`, `/assets/*`까지 전부 302. 즉 사이트 전체가 Access로 보호돼, **서비스워커의 `/sw.js` 업데이트 요청이 세션 만료 시 로그인 HTML로 리다이렉트**되어 SW가 영원히 갱신되지 않는다. 캐시가 아니라 인증이 원인.
+
+해결: Zero Trust → Access → Applications에서 **정적 PWA 경로를 Bypass**로 추가.
+- 최소: `sw.js` 하나만 Bypass(Everyone)해도 SW 업데이트가 뚫린다.
+- 권장: `sw.js`, `index.html`, `assets/*`, `manifest.webmanifest`, `workbox-*.js`, `push-handler.js`까지 Bypass. 데이터는 `api/*`만 Access로 보호하면 안전(정적 셸엔 비밀정보 없음).
+
+부수 조치(origin): backend에서 `sw.js`·`index.html`을 `Cache-Control: no-store`로 서빙해 엣지/브라우저 캐시 고착도 방지(main.py `_NO_STORE`).
+
+## 웹 푸시
+
+### 등록 기기는 있는데 sent:0 (발송 실패)
+
+증상: `/push/test`가 `{"sent":0,"total":1}`. `send_one`이 예외를 삼켜 조용히 실패.
+
+원인: pywebpush `vapid_private_key`에 **PEM 파일 내용(string)**을 넘김. pywebpush는 문자열을 raw base64url 키로 해석하려다 `ValueError: Could not deserialize key data`로 실패한다.
+
+해결: PEM **파일 경로**를 넘겨 `Vapid.from_file`이 파싱하게 한다(`push._private_key()`가 경로 반환). 예약 작업 완료 알림도 같은 경로(`_notify_done`)를 쓰므로 함께 복구된다.
+
+## 예약 작업 / 맥 탭
+
+### 예약 생성 모달이 사이드바 뒤에 깔림
+
+`.modal-overlay` z-index(100)가 드로어 `.rooms-overlay`(150)보다 낮았다. 예약 모달에 `.job-modal`(z-index 200)을 부여해 사이드바 위로 띄운다.
+
+### 모달 입력이 오른쪽으로 넘침
+
+`.modal-field`에 `box-sizing: border-box`가 없어 `width:100% + padding`이 모달을 28px 넘쳤다. datetime-local/time 입력에서 특히 두드러진다. `box-sizing: border-box; max-width:100%`로 해결.
+
+### 스와이프 삭제 시 삭제 버튼이 행 내용과 겹쳐 보임
+
+`.job-item`에 불투명 배경(`var(--panel)`)과 `position:relative`, `.job-item.swiped { transform: translateX(-84px) }`가 없으면 뒤의 삭제 버튼이 비쳐 겹쳐 보인다(`.room-swipe` 패턴 재사용). 배경이 투명하면 발생.
+
+### 화면 보기 강제 landscape (iOS)
+
+iOS Safari/PWA는 `screen.orientation.lock()`을 지원하지 않는다. 세로에서 강제 가로로 보이려면 CSS 회전을 쓴다:
+`.mac-overlay.is-screen { inset:auto; top:0; left:100%; width:100vh; height:100vw; transform-origin:top left; transform:rotate(90deg); }` (`@media (orientation: portrait)`에서만). `top:50% + translate(-50%,-50%) + rotate`는 회전 후 위치가 어긋나므로 `left:100% + transform-origin:top left` 패턴을 쓴다. 지원 브라우저(안드로이드)는 `screen.orientation.lock('landscape')`도 시도(try/catch).
+
+### 전체화면 오버레이가 드로어와 겹쳐 보임
+
+`fade-in` 애니메이션 **중간 프레임**을 캡처하면 반투명 상태로 드로어가 비친다. 애니메이션(0.16s) 종료 후엔 불투명. 실제 버그가 아니므로 재캡처로 확인한다.
+
+### 예약으로 자동 생성된 세션 식별
+
+`store.list_rooms()`가 `ScheduledJob.session_id` 집합과 대조해 `scheduled: true`를 부여하고, 프런트가 "예약" 뱃지를 표시한다. 스키마 변경 없이 조인으로 계산.
+
+### 맥 절전 방지(caffeinate) 재시작 내성
+
+`caffeinate` 자식 프로세스는 백엔드 재시작 시 고아가 되어 in-memory 핸들로는 못 끈다. `pgrep -f "caffeinate -dimsu"` / `pkill -f`로 상태 판정·종료해 재시작 후에도 토글이 동작하게 한다.
 
 ## 로그 / 관측
 
