@@ -54,6 +54,9 @@ body,
   height: 100%;
   overflow: hidden;
   touch-action: manipulation;
+  /* iOS가 pre/code 등 텍스트를 임의로 확대하는 것 방지(코드뷰어 폰트 폭주 원인) */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
