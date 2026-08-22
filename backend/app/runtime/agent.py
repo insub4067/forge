@@ -366,6 +366,30 @@ class AgentRuntime:
         return out
 
     @staticmethod
+    def _strip_images(messages: list[dict]) -> list[dict]:
+        """content 리스트의 image_url 항목을 텍스트 placeholder로 치환한다.
+        non-vision 모델은 이미지를 못 받으므로(400), 텍스트만 남긴다.
+        원본(all_messages/DB)은 그대로 두고 모델 전송본만 바꾼다."""
+        out = []
+        for m in messages:
+            content = m.get("content") if isinstance(m, dict) else None
+            if isinstance(content, list):
+                texts = [
+                    c.get("text", "") for c in content
+                    if isinstance(c, dict) and c.get("type") == "text"
+                ]
+                n_img = sum(
+                    1 for c in content
+                    if isinstance(c, dict) and c.get("type") == "image_url"
+                )
+                new = " ".join(t for t in texts if t).strip()
+                if n_img:
+                    new = (new + f" [이미지 {n_img}장 첨부됨]").strip()
+                m = {**m, "content": new or "[이미지]"}
+            out.append(m)
+        return out
+
+    @staticmethod
     def _classify_error(err: Exception) -> str:
         """LLM 오류를 recover 전략별로 분류: reasoning / transient / terminal."""
         msg = str(err).lower()
@@ -723,7 +747,9 @@ class AgentRuntime:
             usage: dict[str, int] = {}
             last_emit = 0.0
 
-            call_messages = [system_msg, *self._project(all_messages, session_id)]
+            # non-vision role에는 이미지를 보내지 않는다(모델이 image 미지원 → 400).
+            # 이미지는 Vision이 이미 분석해 텍스트로 대화에 포함됐고, 원본은 히스토리에만 남긴다.
+            call_messages = [system_msg, *self._strip_images(self._project(all_messages, session_id))]
             if session_id in self._strip_reasoning_sessions:
                 call_messages = self._strip_reasoning(call_messages)
             route["model_calls"] += 1
