@@ -31,6 +31,8 @@ export default defineConfig({
         // API·업로드는 절대 캐시하지 않는다(SSE·실시간 데이터)
         navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//],
         runtimeCaching: [],
+        // Web Push 핸들러를 생성된 SW에 주입
+        importScripts: ['/push-handler.js'],
       },
     }),
   ],

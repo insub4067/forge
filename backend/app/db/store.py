@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, select
 
-from .models import AgentRun, Checkpoint, Message, Session, Task, VisionAnalysis
+from .models import AgentRun, Checkpoint, Message, PushDevice, Session, Task, VisionAnalysis
 from .session import async_session
 
 
@@ -383,6 +383,54 @@ async def session_metrics(session_id: str) -> dict:
     skills = [r.selected_skills for r in runs if r.selected_skills]
     agg["selected_skills"] = skills[0] if skills else ""
     return agg
+
+
+async def register_device(name: str, endpoint: str, subscription_json: str) -> None:
+    """푸시 기기 등록/갱신(endpoint로 중복 방지)."""
+    async with async_session() as s:
+        result = await s.execute(select(PushDevice).where(PushDevice.endpoint == endpoint))
+        dev = result.scalar_one_or_none()
+        if dev:
+            dev.subscription_json = subscription_json
+            if name:
+                dev.name = name
+        else:
+            s.add(PushDevice(name=name, endpoint=endpoint, subscription_json=subscription_json))
+        await s.commit()
+
+
+async def list_devices() -> list[dict]:
+    async with async_session() as s:
+        result = await s.execute(select(PushDevice).order_by(PushDevice.created_at.desc()))
+        return [
+            {
+                "id": d.id,
+                "name": d.name,
+                "created_at": d.created_at.isoformat() if d.created_at else "",
+                "last_seen": d.last_seen.isoformat() if d.last_seen else "",
+            }
+            for d in result.scalars()
+        ]
+
+
+async def delete_device(device_id: int) -> None:
+    async with async_session() as s:
+        await s.execute(delete(PushDevice).where(PushDevice.id == device_id))
+        await s.commit()
+
+
+async def all_subscriptions() -> list[dict]:
+    """모든 기기의 push 구독 정보(발송용)."""
+    import json as _json
+    async with async_session() as s:
+        result = await s.execute(select(PushDevice))
+        out = []
+        for d in result.scalars():
+            try:
+                out.append(_json.loads(d.subscription_json))
+            except Exception:
+                continue
+        return out
 
 
 async def all_runs_for_cost() -> list[dict]:

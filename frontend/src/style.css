@@ -2630,3 +2630,10 @@ button {
   margin: 0 auto 14px;
   display: block;
 }
+
+.push-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}

@@ -103,6 +103,23 @@ async def upload_image(file: UploadFile = File(...)):
     return {"url": f"/uploads/{name}", "name": name}
 
 
+async def _notify_done(session_id: str, history: list) -> None:
+    """작업 완료 시 등록된 기기에 Web Push. 실패는 무시(발송 루프 보호)."""
+    from .. import push
+    subs = await store.all_subscriptions()
+    if not subs:
+        return
+    room = await store.get_room(session_id)
+    title = (room.get("title") if room else "") or "작업 완료"
+    body = "FORGE 작업이 끝났습니다."
+    for msg in reversed(history):
+        if msg.get("role") == "assistant" and isinstance(msg.get("content"), str) and msg["content"].strip():
+            body = msg["content"].strip()[:120]
+            break
+    for sub in subs:
+        push.send_one(sub, f"✓ {title[:40]}", body, "/")
+
+
 @router.post("/chat")
 async def chat(req: Request):
     body = await req.json()
@@ -157,6 +174,7 @@ async def chat(req: Request):
         try:
             new_history = await runtime.run(history, emit, session_id, workspace_path)
             await store.save_history(session_id, new_history)
+            await _notify_done(session_id, new_history)
         except Exception as err:
             error_log.record("agent_run", str(err), session_id)
             # 크래시해도 응답이 조용히 사라지지 않게 오류 메시지를 히스토리에 남긴다.
@@ -288,6 +306,41 @@ async def session_status(session_id: str):
 async def action_log(session_id: str = "", limit: int = 200):
     from .. import eventlog
     return {"events": eventlog.tail(session_id, limit)}
+
+
+@router.get("/push/vapid-public")
+async def push_vapid_public():
+    return {"public_key": settings.vapid_public_key}
+
+
+@router.post("/push/subscribe")
+async def push_subscribe(req: Request):
+    body = await req.json()
+    sub = body.get("subscription") or {}
+    endpoint = sub.get("endpoint", "")
+    if not endpoint:
+        return {"ok": False, "error": "no endpoint"}
+    await store.register_device(str(body.get("name", "")), endpoint, json.dumps(sub, ensure_ascii=False))
+    return {"ok": True}
+
+
+@router.get("/push/devices")
+async def push_devices():
+    return {"devices": await store.list_devices()}
+
+
+@router.delete("/push/devices/{device_id}")
+async def push_device_delete(device_id: int):
+    await store.delete_device(device_id)
+    return {"deleted": True}
+
+
+@router.post("/push/test")
+async def push_test():
+    from .. import push
+    subs = await store.all_subscriptions()
+    sent = sum(1 for s in subs if push.send_one(s, "FORGE", "테스트 알림입니다.", "/"))
+    return {"sent": sent, "total": len(subs)}
 
 
 @router.post("/sessions/{session_id}/auto-approve")

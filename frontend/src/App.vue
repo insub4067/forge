@@ -124,6 +124,9 @@ const fileContent = ref('')
 const viewingFile = ref('')
 const showMenu = ref(false)
 const showAdmin = ref(false)
+const showPush = ref(false)
+const pushDevices = ref([])
+const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window
 const adminStats = ref(null)
 const showModelPicker = ref(false)
 const pickerRole = ref('')
@@ -320,6 +323,53 @@ async function loadErrors() {
     const res = await fetch('/api/admin/errors')
     if (res.ok) adminErrors.value = (await res.json()).errors || []
   } catch {}
+}
+
+async function openPush() {
+  showPush.value = true
+  await loadDevices()
+}
+async function loadDevices() {
+  try {
+    const res = await fetch('/api/push/devices')
+    if (res.ok) pushDevices.value = (await res.json()).devices || []
+  } catch {}
+}
+function urlB64ToUint8(base64) {
+  const pad = '='.repeat((4 - (base64.length % 4)) % 4)
+  const b64 = (base64 + pad).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = atob(b64)
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)))
+}
+async function enablePush() {
+  if (!pushSupported) { alert('이 기기는 웹 푸시를 지원하지 않습니다.'); return }
+  try {
+    const perm = await Notification.requestPermission()
+    if (perm !== 'granted') { alert('알림 권한이 거부되었습니다.'); return }
+    const reg = await navigator.serviceWorker.ready
+    const { public_key } = await (await fetch('/api/push/vapid-public')).json()
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlB64ToUint8(public_key),
+    })
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: navigator.platform || '기기', subscription: sub.toJSON() }),
+    })
+    await loadDevices()
+  } catch (e) {
+    alert('알림 설정 실패: ' + (e.message || e))
+  }
+}
+async function deleteDevice(id) {
+  try {
+    await fetch(`/api/push/devices/${id}`, { method: 'DELETE' })
+    await loadDevices()
+  } catch {}
+}
+async function testPush() {
+  try { await fetch('/api/push/test', { method: 'POST' }) } catch {}
 }
 
 function openAdmin() {
@@ -1302,6 +1352,10 @@ document.addEventListener('visibilitychange', () => {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
           <span>Skills</span>
         </div>
+        <div class="menu-item" @click="openPush(); showMenu = false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span>알림 · 기기</span>
+        </div>
         <div class="menu-item" @click="openAdmin(); showMenu = false">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           <span>관리자</span>
@@ -1726,6 +1780,32 @@ document.addEventListener('visibilitychange', () => {
             <button class="skill-del" @click.stop="deleteSkill(s.name)">삭제</button>
           </div>
           <pre v-show="skillOpen[s.name]" class="skill-content">{{ s.content }}</pre>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showPush" class="kanban-overlay">
+      <div class="kanban-head">
+        <span class="kanban-title">알림 · 기기</span>
+        <button @click="showPush = false">닫기</button>
+      </div>
+      <div class="admin-body">
+        <div class="admin-section">
+          <div class="admin-stat-title">작업 완료 알림</div>
+          <div class="admin-sub">이 기기를 등록하면 FORGE 작업이 끝날 때 푸시 알림을 받습니다.</div>
+          <div class="push-actions">
+            <button class="detail-link" @click="enablePush">＋ 이 기기 알림 켜기</button>
+            <button v-if="pushDevices.length" class="detail-link" @click="testPush">테스트 알림 보내기</button>
+          </div>
+          <div v-if="!pushSupported" class="metric-warn">⚠ 이 기기/브라우저는 웹 푸시를 지원하지 않습니다(iOS는 홈화면 추가 PWA에서만 가능).</div>
+        </div>
+        <div class="admin-section">
+          <div class="admin-stat-title">등록된 기기 {{ pushDevices.length }}</div>
+          <div v-for="d in pushDevices" :key="d.id" class="admin-row">
+            <span>{{ d.name || '기기' }} <span class="run-count">{{ (d.created_at || '').slice(0, 10) }}</span></span>
+            <button class="skill-del" @click="deleteDevice(d.id)">해지</button>
+          </div>
+          <div v-if="!pushDevices.length" class="admin-sub">등록된 기기가 없습니다.</div>
         </div>
       </div>
     </div>
