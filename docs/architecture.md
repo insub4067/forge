@@ -20,7 +20,7 @@ AgentRuntime (현재 API 프로세스 내부)
   └─ Tool Executor
         │
         ├─ DeepSeek V4 Adapter
-        ├─ Docker Sandbox / Local Workspace
+        ├─ Execution: Docker(default) / Host(opt-in)
         └─ PostgreSQL
 
 보조 지속성:
@@ -81,11 +81,19 @@ DB task 상태가 성공 판정의 authority다. 최대 자기수정 사이클�
 - 429/5xx/timeout/connection: 1/2/4초 backoff, 최대 3회
 - 일부 delta가 이미 사용자에게 전달된 뒤 실패한 stream은 중복 생성을 막기 위해 재시도하지 않는다.
 
-## Tool 실행
+## Tool / Execution
 
 읽기 전용 `read_file/list_dir/grep` 다중 호출은 병렬 prefetch 가능하다. `write_file/edit_file/bash/save_skill`은 승인 대상이며 변경 전 git SHA checkpoint를 기록한다.
 
-파일 브라우저 API는 session workspace 경계를 강제해 지정 workspace 밖 접근을 차단한다.
+### Docker mode — 기본
+
+`SANDBOX_MODE=docker`가 기본값이다. bash를 제한된 Docker 환경에서 실행해 non-root/resource isolation을 유지한다.
+
+### Host mode — 명시적 옵트인
+
+`SANDBOX_MODE=host`는 bash를 호스트에서 직접 실행한다. Agent가 FORGE 자신의 개발/검증이나 로컬 도구를 더 자유롭게 사용할 수 있지만 격리가 사라지므로 신뢰된 개인 환경에서만 사용한다. `/workspace` 경로는 실제 세션 workspace로 치환된다.
+
+파일 브라우저 API는 실행 모드와 별개로 session workspace 경계를 강제해 지정 workspace 밖 접근을 차단한다.
 
 ## Remote Operation
 
@@ -95,6 +103,8 @@ DB task 상태가 성공 판정의 authority다. 최대 자기수정 사이클�
 - 승인/질문은 최대 600초 대기 후 안전하게 종료
 - cancel 시 pending approval/question future를 해제
 - 모든 send 이벤트는 JSONL event log에 기록
+- 첨부 이미지는 채팅 썸네일로 표시하고 전체화면 viewer에서 확인 가능
+- Skills viewer는 카드 단위 collapsible UI 제공
 
 ### 서버 재시작
 
