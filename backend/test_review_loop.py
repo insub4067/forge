@@ -22,7 +22,7 @@ def make_runtime(role_status="done"):
     rt._run_role = fake_run_role
 
     async def fake_triage(all_messages):
-        return "agent", "normal", 0, 0
+        return "agent", "high", 0, 0  # COMPLEX → planner 포함 흐름 검증
     rt._triage = fake_triage
 
     # store 목킹
@@ -137,6 +137,16 @@ async def main():
     assert "debugger" not in rs, rs
     assert data.get("status") == "review_limit", data
     print("Case G (진전 없음→즉시 종료): OK", rs)
+
+    # Case H — SIMPLE(normal): planner 생략, coder→reviewer 직행
+    rt, calls = make_runtime("done")
+    async def simple_triage(all_messages):
+        return "agent", "normal", 0, 0
+    rt._triage = simple_triage
+    data, _ = await run_case(rt, [D()])
+    assert roles_of(calls) == ["coder", "reviewer"], roles_of(calls)
+    assert data.get("status") == "completed", data
+    print("Case H (SIMPLE: planner 생략): OK", roles_of(calls))
 
     print("\n모든 케이스 통과 ✓")
 

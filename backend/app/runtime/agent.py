@@ -1065,16 +1065,19 @@ class AgentRuntime:
                 await finish("completed")
             return all_messages
 
-        # 1. Planner — flash 기본, 복잡한 작업이면 pro 승격
-        status, p, c, route = await self._run_role(
-            "planner", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory,
-            skills=skills, complexity=complexity,
-        )
-        await record("planner", p, c, route)
-        step_base += MAX_STEPS
-        if status != "done":
-            await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
-            return all_messages
+        # 1. Planner — COMPLEX 작업에서만 실행한다. SIMPLE(한두 단계 수정)은 coder가
+        #    바로 실행해 planner의 과탐색·컨텍스트 재전송(토큰 폭주)을 없앤다.
+        #    빈 task여도 아래 reviewer가 1회 검토 후 완료하므로 흐름은 안전하다.
+        if complexity == "high":
+            status, p, c, route = await self._run_role(
+                "planner", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory,
+                skills=skills, complexity=complexity,
+            )
+            await record("planner", p, c, route)
+            step_base += MAX_STEPS
+            if status != "done":
+                await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
+                return all_messages
 
         # 2. Coder
         status, p, c, route = await self._run_role(
