@@ -1,151 +1,184 @@
 # FORGE — 작업 진행 상태
 
-> 마지막 갱신: 2026-08-22
+> 마지막 갱신: 2026-08-22 19:41 KST 기준 `main`
 
-## Phase 1 — Agent Core (완료)
+## 현재 요약
 
-안전하게 코드를 읽고 분석하는 Agent.
+- Phase 1 — Agent Core: 완료
+- Phase 2 — Code Modification: 완료
+- Phase 3 — Remote Operation: 진행 중
+- 최적화 기준: **cost per successfully completed task**
 
-### 완료
+## 완료 — Agent Runtime
 
-- [x] 프로젝트 스캐폴딩 (`forge/`, docker-compose, backend/frontend 구조)
-- [x] DeepSeek Adapter — streaming + tool calling + thinking mode (`backend/app/llm/deepseek.py`)
-- [x] Agent Runtime — Planner → Tool Loop → Observation → Report (`backend/app/runtime/agent.py`)
-- [x] Read 도구 — read_file / list_dir / grep (`backend/app/tools/registry.py`)
-- [x] FastAPI API + SSE 스트리밍 (`backend/app/api/routes.py`)
-- [x] Docker Sandbox executor + 이미지 빌드 (`forge-sandbox:latest`)
-- [x] DB 모델 + 세션·메시지 영속화 (`backend/app/db/store.py`)
-- [x] Vue3 PWA 기본 UI (`frontend/`) — 채팅, 추론/도구 표시, 세션
-- [x] 정적 서빙·API 라우팅 분리 (`/assets` mount + SPA fallback)
-- [x] postgres + redis 컨테이너 실행 (docker-compose)
-- [x] 문서화 — spec / architecture / feat / README
+- [x] DeepSeek V4 streaming/tool calling/thinking
+- [x] Triage: CHAT / AGENT + SIMPLE / COMPLEX 분류
+- [x] Planner: Flash + medium 기본, COMPLEX만 Pro + high
+- [x] Coder: Flash/non-thinking
+- [x] Reviewer ↔ Debugger task 상태 기반 자기수정 루프
+- [x] Debugger 마지막 복구 시도 Pro 승격
+- [x] 종료 상태 구분(completed/review_limit/cancelled/context_blocked/max_steps/repeated_tool_call/failed)
+- [x] 동일 tool+args 3회 반복 차단
+- [x] 동일 세션 동시 run 가드
+- [x] 실행 중 메시지 injection
+- [x] cancel
 
-## Phase 2 — Code Modification (완료)
+## 완료 — Tool / 안전
 
-- [x] write_file / edit_file / bash 도구
-- [x] bash — Docker Sandbox 격리 실행 (non-root, 리소스 제한)
-- [x] 승인 게이트 — approval_request / approval_granted 이벤트 + `/api/approvals`
-- [x] 사용자 질문 — ask_user 도구 + question_request + `/api/questions`
-- [x] 보호 장치 — 동일 도구 3회 반복 감지, 컨텍스트 한도(95%) 중단
-- [x] 사용자 중단 — `/api/sessions/{id}/cancel`
-- [x] State 추적 — goal / files_changed / errors (state_update 이벤트)
-- [x] Checkpoint — 변경 도구 실행 전 git sha 기록
-- [x] Diff View — write_file/edit_file 변경 전후 unified diff 표시
-- [x] Triage — 일반 대화와 코드 작업 분리
-- [x] 역할 파이프라인 — Planner → Coder → Reviewer → Debugger
-- [x] Model Router — 역할별 Pro / Flash / Vision 모델 정책
-- [x] Vision Agent — 이미지 요청 사전 분석
-- [x] 실행 중 사용자 메시지 injection
-- [x] DeepSeek V4 raw HTTP thinking 명시 및 streaming usage 수집
-- [x] Reviewer → Debugger → Reviewer 상태 기반 자기수정 루프 (최대 3회, 초과 시 남은 문제 보고)
-- [x] Debugger 마지막 시도 Pro 승격 (retry_count 실제 연결)
-- [x] 종료 상태 구분 — done 이벤트 status (completed/review_limit/cancelled/context_blocked/max_steps/repeated_tool_call/failed)
+- [x] read_file / list_dir / grep
+- [x] write_file / edit_file / bash
+- [x] ask_user / update_tasks / save_skill
+- [x] write/edit/bash/save_skill 승인 게이트
+- [x] 승인/질문 최대 600초 timeout
+- [x] cancel 시 pending approval/question future 해제
+- [x] mutation 전 git SHA checkpoint
+- [x] write/edit unified diff
+- [x] Docker Sandbox(non-root/resource limit)
+- [x] 파일 브라우저 `/fs/list`, `/fs/read` workspace 경계 제한
 
-## Phase 3 — Remote Operation (진행 중)
+## 완료 — 비용/Context 효율
 
-### 완료 — 원격 제어 · 모바일 UI
+- [x] provider 실측 `prompt_tokens` 기반 context pressure
+- [x] 75% 비파괴 context compaction
+- [x] compaction 성공 직후 압축 전 usage로 오차단하지 않고 다음 call 재측정
+- [x] 95% hard block
+- [x] 긴 tool result model-free pruning
+- [x] read-only 다중 tool 병렬 prefetch
+- [x] Stable Prefix(BASE + role) 고정 및 prefix hash
+- [x] DeepSeek cache hit/miss/ratio 분리 계측
+- [x] Skill selective retrieval(상위 최대 3개, 총 6000자 budget)
+- [x] Planner Pro 기본 사용 제거
+- [x] 429/5xx/timeout/connection 1/2/4초 retry
+- [x] reasoning_content 오류 → thinking off recovery
 
-- [x] 모바일 PWA 채팅 및 승인/질문 원격 제어
-- [x] PWA foreground 시 서비스 워커 업데이트 확인
-- [x] Git 추적 화면 — GitHub Desktop 스타일(변경/히스토리/브랜치 탭, 파일별 diff, 커밋 상세)
-- [x] 모바일 safe-area 대응(헤더·푸터·드로어·오버레이 전역)
-- [x] 모바일 UI 개편 — 헤더 축소·좌측 세션 드로어(스와이프 오픈)·Quick Action·Composer 통합
-- [x] 컨텍스트 링 탭 → 세션 사용량 상세(컨텍스트 윈도우·누적 토큰·에이전트별)
-- [x] 관리자 — 에러 로그 진입점, 에이전트별 토큰 소비 카드
-- [x] 앱 실행 시 가장 최근 세션 랜딩
-- [x] 파일 브라우저 숨김 파일 토글
+## 완료 — Skills / Memory
 
-### 완료 — Agent Loop 안정성/효율 (핵심)
+- [x] `save_skill` 승인 기반 Skill 저장
+- [x] `.forge/skills/*.md` 재사용
+- [x] 관련 Skill만 선택 로딩
+- [x] Skills UI 확인/삭제
+- [x] Session search
+- [x] FORGE 자체 개발 workflow/convention/runtime Skill 저장
 
-- [x] Triage — 일반 대화(chat, 읽기 전용 fast path)와 코드 작업(agent) 분리
-- [x] Reviewer → Debugger → Reviewer 상태 기반 자기수정 루프 (최대 3회, 초과 시 남은 문제 보고)
-- [x] Debugger 마지막 시도 Pro 승격 (retry_count 실제 연결)
-- [x] 종료 상태 구분 — done 이벤트 status
-- [x] LLM 스텝 오류 자가 회복 — reasoning_content 400에 죽지 않고 reasoning 벗겨 재시도(세션별 학습)
-- [x] 실행 중 사용자 메시지 개입 — 작업 대기(inject) / 계획 수정(중단 후 재시작)
-- [x] 도구 자동 승인 모드 — 세션별 플래그, 실행 중 토글
-- [x] 대화 지속성 — 사용자 메시지를 수신 즉시 저장(크래시·앱 종료에도 유실 방지)
-- [x] Agent Activity — role별 phase 활동 카드(텍스트 항상 표시, 도구 로그 접힘)
-- [x] 응답 생성 중 스크롤 위치 유지 + 맨아래 이동 화살표
-- [x] DeepSeek V4 raw HTTP thinking 명시 및 streaming usage 수집
+## 완료 — Persistence / Telemetry
 
-### 최근 부분 착수
+- [x] PostgreSQL session/message/task/checkpoint 영속화
+- [x] `agent_runs` role/model/thinking/token/cache telemetry
+- [x] model_calls/tool_calls/retries/compactions/elapsed/selected skill 기록
+- [x] `sessions.final_status` 영속화
+- [x] `sessions.running` 영속화
+- [x] 서버 시작 시 interrupted run reconcile
+- [x] run crash 시 오류 메시지 history 저장
+- [x] metrics summary/session API
+- [x] success_rate / review_first_pass / debugger_activation / Pro escalation 집계
+- [x] 모델 가격 설정 시 estimated cost 계산
+- [x] bottleneck diagnostic rules
+- [x] `docs/benchmark.md` 기준 작업 A~F
 
-- [x] 도구 결과 pruning — 모델 컨텍스트에서 긴 도구 결과를 앞뒤+오류만 남겨 축약(20k→~4k), UI는 전체 유지 (harness §3.1 / hermes H1)
-- [x] planner 최소 탐색 지침 — BASE_PROMPT에 전수 탐색 억제(planner 토큰 67% 완화 착수)
-- [x] Provider Error Recovery(부분) — reasoning_content 400 자가 회복
-- [x] planner를 flash 기본으로, triage COMPLEX 판정 시에만 pro 승격(planner 토큰 67% 절감)
+### 중요한 한계
 
----
+서버 재시작 복구는 **중단된 run 감지 + 안내 + 상태 정리**까지다. model/tool 실행 stack을 이어서 실행하는 durable resume은 아직 아니다.
 
-## 작업큐 — 두 제안서 통합 로드맵
+## 완료 — Durable 가시성 / Remote
 
-> 출처: [`proposal/deepseek-harness-adoption.md`](proposal/deepseek-harness-adoption.md) (운영 생존 계층),
-> [`proposal/hermes-agent-adoption.md`](proposal/hermes-agent-adoption.md) (학습·비용·persistent)
+- [x] SSE streaming
+- [x] Agent `send()` 이벤트 JSONL durable log
+- [x] `/sessions/{id}/status`
+- [x] status에 `running`, `role`, `activity`, `waiting_for`, idle 정보
+- [x] SSE 끊김 시 status polling으로 Mac 작업 상태 추적
+- [x] tool/thinking/text activity 한 줄 표시
+- [x] 승인/질문 대기 상태 재접속 표시
+- [x] 앱 종료 후 서버 run 계속 + 완료 자동 새로고침
 
-### 큐 1 — 비용/장기실행 기반 (최우선) ✅ 대부분 완료
+## 완료 — Mobile PWA
 
-- [x] **Context Compaction (비파괴)** — 75% 넘으면 오래된 대화를 flash로 요약해 모델 컨텍스트만 압축, 표시/저장 원본은 유지. tool pair 경계 보존. harness §3.2 / hermes H1
-- [x] Context overflow → compact → 계속 (95%는 최후 안전장치로 유지)
-- [x] 도구 결과 pruning(20k→~4k, 앞뒤+오류 보존)
-- [x] Provider Error Recovery 일반화 — 429/5xx/timeout backoff(1·2·4초) 재시도 + reasoning 회복
-- [~] **Prompt-Cache-First** — role 내 system_msg byte-stable, tool 결과는 tail append로 이미 대체로 충족. prefix hash 추적은 미도입. hermes §4
+- [x] 세션 드로어 / 최근 세션 landing
+- [x] 신규 session workspace 선택 필수
+- [x] 채팅/추론/tool/diff 표시
+- [x] 실행 중 typing/activity 표시
+- [x] 실행 중 context/복사 액션 숨김
+- [x] Kanban live refresh 및 task 상태 전이 인라인 알림
+- [x] Git changes/history/branch/file diff
+- [x] 파일 브라우저 + hidden toggle + 타입별 아이콘
+- [x] Session search
+- [x] Skills viewer
+- [x] 세션 사용량/효율 metrics UI
+- [x] 4종 테마 + FORGE 로고/PWA 이름
+- [x] iOS safe-area
+- [x] history loading skeleton
+- [x] PWA update 무한 reload 방지
 
-### 큐 2 — Durable Runtime / 세션 재개
+## 아직 남은 핵심 작업
 
-- [x] 경량 재접속 인지 — 앱 종료 후에도 서버 run은 계속, 재접속 시 실행 여부 표시 + 완료 자동 갱신
-- [x] Model Surface 분리(부분) — compaction/pruning으로 저장 원본 ≠ 모델 전달 메시지
-- [ ] **Durable Event Log** — append-only 실행 이벤트 영속화(Redis Streams) + 재접속 LIVE replay. harness §4 / hermes H4
-- [ ] 서버 재시작 후 세션 재개(인메모리 상태라 재시작엔 아직 미복구)
-- [ ] Agent Core ↔ PWA lifecycle 완전 분리. hermes §7
+### 1. Durable Worker / 실제 Resume — 최우선
 
-### 큐 3 — Tool 효율
+- [ ] Agent worker를 FastAPI request/process lifecycle에서 분리
+- [ ] durable queue
+- [ ] replay 가능한 authoritative event stream
+- [ ] 서버 재시작 후 step/run continuation 실제 복원
+- [ ] reconnect 시 필요한 event range replay
 
-- [x] read-only 병렬 실행 — 한 응답의 다중 read_file/grep를 병렬 prefetch(3개 0.9s→0.3s). harness §9 / hermes H3
-- [ ] **Tool Script/RPC Mode** — 탐색성 다중 도구를 한 번에 묶어 model round-trip 감소(제한된 executor, mutation은 승인 통과). hermes §5
-- [ ] ToolExecutor 분리(agent.py에서 tool 정책 코드 분리). harness §8
+현재 JSONL event log는 감사/추적 계층이며 위 기능을 대체하지 않는다.
 
-### 큐 4 — 학습 (Self-Improving Skills)
+### 2. Tool 효율
 
-- [x] Skill 저장·로드 — save_skill 도구(승인 게이트)로 .forge/skills/*.md 저장, 시스템 프롬프트에 자동 로드·재사용. hermes §3
-- [x] 사용자 승인 후 저장 — save_skill이 승인 게이트를 통과(에이전트 제안 → 사용자 확인)
-- [x] Skills 뷰어 — 메뉴에서 축적된 skill 확인·삭제
-- [x] Session search — 메시지 내용 검색(드로어 검색창), 세션 이동. hermes §6
-- [x] 즐겨쓰는 개발 워크플로우를 skill로 저장(.forge/skills/*)
-- [x] Skill 검색·선택 로드 — 요청 키워드로 상위 N개만 삽입(전체 로드 폐기). 아래 효율 개선 참조
+- [ ] Tool Script/RPC Mode — 탐색성 다중 tool을 한 model round-trip으로 묶기
+- [ ] AgentRuntime의 tool 정책/dispatch 코드가 더 커질 경우 ToolExecutor 분리
 
-### 큐 5 — Persistent / 확장
+### 3. Persistent Automation
 
-- [ ] Scheduled Autonomous Jobs(예약·조건 작업), Web Push. hermes §9
-- [ ] ExecutionBackend 추상화(Local→SSH→Docker). hermes §8
-- [ ] Isolated Subagents(독립 workstream 병렬, context 복제 금지). hermes §10
+- [ ] Scheduled Jobs
+- [ ] Condition Jobs
+- [ ] Web Push
 
-## 런타임 토큰/컨텍스트 효율 개선 (2026-08-22)
+### 4. Execution Backend
 
-목표: tokens/task가 아니라 **cost per successfully completed task**를 낮춘다.
+- [ ] LocalBackend 명시화
+- [ ] SSHBackend
+- [ ] DockerBackend 추상화
 
-- [x] **컨텍스트 압박 계산 수정** — 압박 기준을 `prompt+completion`에서
-  provider 실측 `prompt_tokens`(=이번 호출 실제 입력 컨텍스트)로 변경. 출력 토큰은
-  다음 입력에 누적되지 않으므로 제외. `_should_compact`/`_should_block` 순수 함수로 분리.
-- [x] **압축 성공 시 오차단 제거** — 압축이 방금 성공하면 압축 전 usage로 95% 차단하지 않고,
-  다음 호출에서 줄어든 컨텍스트를 실측으로 재검증. 더 못 줄이는데도 한도를 넘을 때만 차단.
-  → 성공 가능한 작업이 압축 직후 조기 종료되던 실패(=cost per success 무한대) 제거.
-- [x] **Skill 선택 삽입** — 전체 `.forge/skills/*.md` 삽입을 폐기하고 요청 키워드와의
-  겹침 점수 상위 `MAX_ACTIVE_SKILLS`(3)개만, `SKILL_CHAR_BUDGET`(6000자) 안에서 삽입.
-  관련 skill 없으면 0개. vector DB 없음(부분 문자열 매칭으로 한글 교착어 흡수).
-- [x] **Stable prefix 캐시 정렬** — `_system_for`가 BASE+role(불변)을 맨 앞에,
-  memory/skills(동적)를 뒤에 둠. 같은 role의 모든 호출이 프리픽스를 캐시 히트.
-  `_stable_prefix_hash`를 role_start 이벤트로 노출.
-- [x] **캐시 계측 정정** — `cached_tokens = hit+miss`(=전체 prompt, 의미 오류)를 폐기하고
-  `cache_hit_tokens`/`cache_miss_tokens`/`cache_hit_ratio`로 분리. agent_runs에 컬럼 추가
-  (idempotent ALTER), 세션 카드·context 라인에 캐시 비율 표시.
-- [x] 검증 — `backend/test_runtime_efficiency.py`(시나리오 1~9) + 기존 `test_review_loop.py`(10) 통과,
-  실 런타임 스모크로 context_usage/캐시 저장 확인(hit+miss==prompt_tokens).
-- [보류] Triage deterministic fast-path — flash triage가 이미 저렴하고, 휴리스틱 오라우팅이
-  오히려 비용을 늘릴 위험. 측정 근거 없이 복잡도만 추가하므로 제외.
-- [보류] provider context-overflow 시 compact→retry — 실측 기반 조기 압축/차단으로 도달 자체가
-  거의 없고, 스트림 계층에 압축 로직을 중복시킴. 도달 시 명확한 오류로 표면화됨.
+### 5. 이후 검토
 
-## Phase 4 — Advanced Extension (별도 프로젝트)
+- [ ] isolated subagent
+- [ ] MCP
+- [ ] Repository Intelligence
+- [ ] Vector Search
 
-- Multi-Agent, MCP, Repository Intelligence, Vector Search, Vision Agent 고도화
+실제 benchmark로 병목이 확인되기 전에는 복잡한 프레임워크를 선제 도입하지 않는다.
+
+## 현재 검증 세트
+
+최근 `main`에서 다음이 통과한 상태로 보고됨.
+
+- `test_review_loop.py`
+- `test_runtime_efficiency.py`
+- `test_metrics.py`
+- frontend production build
+
+## Proposal 반영 현황
+
+### DeepSeek Harness에서 반영됨
+
+- [x] tool-result pruning
+- [x] context compaction
+- [x] provider recovery
+- [x] model surface/history 분리
+- [x] event logging 일부
+- [~] durable resume/event replay — 미완료
+
+### Claude Code clean-room 제안에서 반영됨
+
+- [x] task lifecycle 기반 검증
+- [x] permission/approval boundary
+- [x] runtime steering
+- [~] coordinator/isolated worker — 미완료
+
+### Hermes Agent에서 반영됨
+
+- [x] Self-Improving Skills 1차
+- [x] prompt-cache-first stable prefix
+- [x] selective Skill retrieval
+- [x] session search
+- [~] persistent runtime — 재접속은 지원, 서버 재시작 resume은 미완료
+- [ ] Tool Script/RPC
+- [ ] scheduler/execution backend/subagent
