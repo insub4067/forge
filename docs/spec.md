@@ -1,135 +1,168 @@
 # FORGE — 요구사항 정의서
 
-**문서 버전** v0.3
-**코드네임** `FORGE`
+**문서 버전** v0.4  
+**기준일** 2026-08-22  
 **목표** 개인 개발 환경에서 사용하는 셀프호스팅 Agent Runtime 기반 코딩 AI 플랫폼
 
----
+## 1. 제품 목표
 
-## 1. 프로젝트 개요
+FORGE는 특정 LLM에 종속된 챗봇이 아니라 LLM을 판단 엔진으로 사용하는 실행 Runtime이다.
 
-FORGE는 특정 LLM에 종속된 챗봇이 아니라, LLM을 두뇌로 활용하는 **Agent Runtime 플랫폼**이다.
-
-```
-요구사항 분석 → 작업 계획 생성 → Repository 탐색 → 코드 수정 → 실행 및 검증 → 결과 보고
+```text
+요구사항 → Triage → Plan → Code/Tool → Review → Debug → Re-review → Done
 ```
 
-## 2. 핵심 설계 원칙
+최상위 효율 원칙:
 
-LLM은 판단 엔진이며 Agent가 아니다.
+> 동일하거나 더 높은 성공률을 유지하면서 더 적은 토큰·API 호출·시간·비용으로 작업을 완료한다.
 
-| 주체 | 역할 |
+대표 지표는 `cost per successfully completed task`다.
+
+## 2. 현재 v1 범위
+
+구현됨:
+
+- DeepSeek V4 Flash/Pro/Vision 라우팅
+- Planner Flash 기본, COMPLEX만 Pro
+- Coder/Reviewer/Debugger 역할 분리
+- Reviewer ↔ Debugger 자기수정 루프
+- read/list/grep/write/edit/bash/ask_user/update_tasks/save_skill
+- 승인 게이트, 질문, cancel, runtime injection
+- Docker Sandbox, git checkpoint/diff
+- PostgreSQL session/message/task/agent-run 영속화
+- context usage, pruning, compaction, cache telemetry
+- selective Skills + session search
+- SSE + `/status` polling 기반 모바일 원격 제어
+- JSONL durable event/action log
+- run crash/restart 중단 감지 및 사용자 가시화
+- metrics API와 세션별 비용/효율 집계
+- workspace 필수 선택과 파일 API 경계 제한
+
+아직 미구현 또는 부분 구현:
+
+- 서버 재시작 후 실제 실행 stack resume
+- Redis Streams 기반 worker queue/event replay
+- Tool Script/RPC Mode
+- Scheduled/Condition Jobs + Web Push
+- SSH/Docker ExecutionBackend 추상화
+- isolated subagents
+
+## 3. Model Policy
+
+| Role | 기본 정책 |
 |---|---|
-| LLM | 계획 생성, 코드 분석, 코드 작성, 문제 해결 |
-| Agent Runtime | 작업 상태 관리, Tool 실행, 권한 제어, 실패 복구, Context 관리, 장기 실행 관리 |
+| Triage | Flash, non-thinking |
+| Planner | Flash + medium thinking; COMPLEX만 Pro + high |
+| Coder | Flash, non-thinking |
+| Reviewer | Flash + medium thinking |
+| Debugger | Flash; 반복 실패 마지막 복구만 Pro |
+| Chat | Flash |
+| Vision | Flash Vision |
 
-```
-User → Agent Runtime → LLM Provider → Tool Executor → Execution Environment
-```
+강한 모델을 기본으로 쓰지 않는다. 성공률 데이터가 뒷받침될 때만 escalation한다.
 
-## 3. v1 목표 범위
+## 4. Tool 정책
 
-**포함**: Agent Loop, DeepSeek V4 Pro 연동, Tool Calling, Docker Sandbox, 승인 게이트, SSE Streaming, Context Management, Session 관리, Checkpoint, HANDOFF 생성, Mobile PWA 원격 제어
+자동 실행: `read_file`, `list_dir`, `grep`  
+승인 필요: `write_file`, `edit_file`, `bash`, `save_skill`
 
-**제외(v2 이후)**: Multi-Agent, MCP, Repository AST Intelligence, Vector Search, Browser Agent, Vision Agent, 자체 모델 운영
+읽기 전용 다중 호출은 병렬 prefetch할 수 있다. mutation 실행 전 git SHA checkpoint를 남긴다.
 
-## 4. 서비스 구성
+파일/디렉터리 조회 API는 session의 `workspace_path` 경계를 벗어날 수 없다.
 
-| 서비스 | 역할 |
-|---|---|
-| web | Vue3 PWA |
-| api | 인증/API Gateway |
-| worker | Agent 실행 엔진 |
-| executor | Docker 기반 코드 실행 환경 |
-| redis | 작업 큐 및 이벤트 스트림 |
-| postgres | 세션 및 감사 데이터 |
+## 5. Context Management
 
-## 5. Tool System
+- Logical Budget 기본값: 설정 기반
+- provider 실측 `prompt_tokens`를 context pressure 기준으로 사용
+- 75%: 비파괴 compaction 시도
+- 95%: compaction 불가 시 hard block
+- 긴 tool 결과는 model-free pruning
+- DB/history 원본과 model surface를 분리
+- stable prefix hash 및 cache hit/miss 기록
+- Skills는 관련 상위 N개만 선택 삽입
 
-| Tool | 설명 |
-|---|---|
-| read_file | 파일 읽기 |
-| list_dir | 디렉터리 탐색 |
-| grep | 코드 검색 |
-| edit_file | 부분 수정 |
-| write_file | 파일 생성 |
-| bash | 명령 실행 |
-| git | Git 관리 |
-| test | 테스트 실행 |
+## 6. Reliability
 
-## 6. Tool 권한 정책
+- reasoning_content 호환 오류 자동 회복
+- 429/5xx/timeout/connection backoff retry
+- 동일 tool 반복 차단
+- Reviewer/Debugger 최대 cycle 제한
+- 동일 session 동시 run 금지
+- approval/question 600초 timeout
+- cancel 시 pending wait 해제
+- run crash 시 오류 메시지 저장
+- 서버 재시작 시 `sessions.running` 잔여 run reconcile
 
-| 정책 | Tool |
-|---|---|
-| 자동 실행 | read_file, list_dir, grep, git status, git diff |
-| 승인 필요 | edit_file, write_file, bash, git commit, dependency 변경 |
-| 차단 | rm -rf, credential 접근, secret 출력, git push |
+주의: reconcile은 실제 run resume이 아니라 중단 감지 및 상태 정리다.
 
-## 7. Sandbox 실행 정책
+## 7. Remote Operation
 
-- Non-root, Capability 제거, Resource 제한
-- Workspace만 write 가능, Docker socket 접근 금지
-- 네트워크는 Proxy 기반 Whitelist (github.com, npm registry, pypi.org)
+PWA는 IDE 복제가 아니라 Agent 지휘 화면이다.
 
-## 8. Streaming 이벤트
+지원:
 
-```
-thinking_delta, text_delta, tool_call, tool_result,
-plan_update, approval_request, context_usage, error, done
-```
+- 세션/워크스페이스
+- live role/activity
+- approval/question
+- runtime steering
+- Kanban task
+- Git changes/history/branches
+- file browser
+- Skills 관리
+- context/metrics
+- 재접속 후 status polling
 
-모든 이벤트는 `{"seq":1284,"type":"tool_call","data":{}}` 형태. Redis Streams에 저장해 재접속/모바일 복구/다중 클라이언트를 지원.
+## 8. Streaming / Status
 
-## 9. Context Management
+SSE 이벤트는 `{seq,type,data}` 형식이다. runtime의 `send()` 이벤트는 JSONL durable log에도 기록된다.
 
-- 측정: 요청 전(로컬 tokenizer 추정) / 스트리밍 중(delta 누적) / 완료 후(API usage 보정)
-- Logical Budget 기본 256K tokens
-- 임계 정책: Normal(0~59%) / Notice(60~74%) / Warning(75~84%) / Critical(85~94%) / Blocked(95%+)
+별도 status API는 `running`, `role`, `activity`, `waiting_for`, idle 정보를 제공한다.
 
-## 10. Context Compaction
+향후 durable replay의 authoritative backend는 별도 worker/queue 단계에서 구현한다.
 
-압축 시 보존: 사용자 요구사항, 설계 결정, 변경 파일, 실패한 접근, 남은 TODO.
-삭제 우선: 긴 Tool 출력, 반복 로그. 결과로 `HANDOFF.md` 생성.
+## 9. 데이터/계측
 
-## 11. Session Handoff
+핵심 저장 대상:
 
-`HANDOFF.md` 형식: 원 요구사항, 완료 작업, 현재 상태, 결정 사항, 실패 기록, 다음 작업, 관련 파일.
+- sessions
+- messages
+- tasks
+- checkpoints
+- agent_runs
 
-## 12. Project Memory
+집계 지표:
 
-- Session Memory: 현재 작업·대화 범위
-- Project Memory: 프로젝트 규칙, 반복 실패, 기술 결정 (`PROJECT_MEMORY.md`)
+- success rate
+- prompt/completion/cache token
+- model/tool call
+- retries/compactions
+- Pro escalation
+- review first-pass
+- debugger activation
+- elapsed
+- estimated cost(가격 설정이 있을 때)
 
-## 13. 데이터 모델
+API:
 
-- **sessions**: id, title, workspace_id, status, model, logical_budget, created_at, archived_at
-- **messages**: id, session_id, seq, role, content_json, prompt_tokens, completion_tokens, cached_tokens, cost
-- **tool_calls**: id, message_id, tool_name, args_json, result, status, risk_level, duration_ms
-- **approvals**: id, tool_call_id, decision, scope, requested_at, decided_at
-- **checkpoints**: id, session_id, git_sha, step_no, created_at
-- **audit_logs**: id, actor, action, payload, created_at
+- `GET /api/metrics/summary`
+- `GET /api/rooms/{id}/metrics`
 
-## 14. Non Functional Requirements
+## 10. 보안/운영 원칙
 
-- **성능**: First Token 3초 이내, Streaming latency 200ms 이하
-- **보안**: API Key 서버 보관, Secret Manager, 모든 Tool Audit 기록
-- **안정성**: API 재시작 시 Worker 유지, 세션 데이터 영속화
-- **배포**: `docker compose up`으로 실행
+- API key는 서버 측 보관
+- mutation은 approval 정책 적용
+- Docker 실행은 non-root/resource 제한
+- workspace 밖 파일 접근 차단
+- action/event log 유지
+- 외부 공개 시 반드시 Cloudflare/Tailscale 등 별도 접근 제어 사용
 
-## 15. 개발 단계
+## 11. 개발 우선순위
 
-| Phase | 목표 | 구현 |
-|---|---|---|
-| 1 | Agent Core | FastAPI, Vue, DeepSeek, Agent Loop, Docker Sandbox, Read Tool |
-| 2 | Code Modification | edit_file, write_file, bash, Approval, Diff View |
-| 3 | Remote Operation | Mobile PWA, Web Push, Context Dashboard, HANDOFF |
-| 4 | Advanced Extension | Multi-Agent, MCP, Repository Intelligence, Vector Search, Vision Agent |
+1. 실제 benchmark 데이터 축적
+2. durable worker/resume/event replay
+3. Tool Script/RPC로 model round-trip 절감
+4. Scheduled/Condition Jobs + Push
+5. ExecutionBackend 확장
+6. subagent는 비용 대비 실익 확인 후 도입
 
-## 16. Open Questions
-
-1. 단독 사용인가 팀 공유인가? → **단독 사용**
-2. Workspace는 local mount인가 git clone인가? → **local mount**
-3. 외부 공개인가 VPN 환경인가?
-4. 월 API 비용 제한은?
-5. 모바일에서 코드 수정까지 필요한가?
-6. 기본 Logical Budget 256K가 적절한가?
+Vector DB, 거대한 plugin framework, multi-agent는 실제 병목이 확인되기 전까지 기본 해법으로 사용하지 않는다.
