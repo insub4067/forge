@@ -638,6 +638,47 @@ function toggleHidden() {
   navigateFiles(filePath.value)
 }
 
+// 파일 길게 누르면 다운로드(iOS는 공유시트로 '파일에 저장'). 폴더는 제외.
+let _lpTimer = null
+let _lpFired = false
+function fileTouchStart(e) {
+  if (e.is_dir) return
+  _lpFired = false
+  _lpTimer = setTimeout(() => { _lpFired = true; downloadFile(e) }, 500)
+}
+function fileTouchCancel() {
+  if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null }
+}
+function onFileClick(e) {
+  if (_lpFired) { _lpFired = false; return } // 길게눌러 다운로드했으면 열지 않음
+  e.is_dir ? navigateFiles(e.path) : openFile(e.path)
+}
+async function downloadFile(e) {
+  fileTouchCancel()
+  const url = `/api/fs/raw?path=${encodeURIComponent(e.path)}&session_id=${currentRoomId.value}`
+  try {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('HTTP ' + res.status)
+    const blob = await res.blob()
+    const file = new File([blob], e.name, { type: blob.type || 'application/octet-stream' })
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: e.name })
+      return
+    }
+    const objUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = objUrl
+    a.download = e.name
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(objUrl), 1500)
+  } catch (err) {
+    if (err && err.name === 'AbortError') return // 사용자가 공유 취소
+    alert('다운로드 실패: ' + (err.message || err))
+  }
+}
+
 const _MEDIA = {
   image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'],
   video: ['mp4', 'webm', 'mov', 'm4v'],
@@ -2154,7 +2195,11 @@ document.addEventListener('visibilitychange', () => {
           :key="e.path"
           class="fs-item"
           :class="{ dir: e.is_dir }"
-          @click="e.is_dir ? navigateFiles(e.path) : openFile(e.path)"
+          @click="onFileClick(e)"
+          @touchstart.passive="fileTouchStart(e)"
+          @touchmove.passive="fileTouchCancel"
+          @touchend.passive="fileTouchCancel"
+          @contextmenu.prevent="!e.is_dir && downloadFile(e)"
         >
           <span class="fs-icon" :class="'kind-' + fileKind(e)">
             <svg v-if="fileKind(e) === 'dir'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
