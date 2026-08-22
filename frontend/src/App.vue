@@ -43,6 +43,7 @@ const fileParent = ref(null)
 const fileEntries = ref([])
 const fileContent = ref('')
 const viewingFile = ref('')
+const showMenu = ref(false)
 const kanbanOpen = ref({
   todo: true,
   planning: true,
@@ -564,16 +565,19 @@ onMounted(async () => {
         <span class="room-sub">{{ shortPath(currentRoom()?.workspace_path) }}</span>
       </button>
       <button v-if="busy" class="stop-btn" @click="cancelSession">중단</button>
-      <button class="todo-btn" @click="openFiles" aria-label="파일">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-      </button>
-      <button class="todo-btn" @click="openGit" aria-label="Git">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="6" y1="9" x2="6" y2="15"/><path d="M18 6c0 4-6 3-6 9"/></svg>
-      </button>
-      <button class="todo-btn" @click="showKanban = true" aria-label="칸반">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 10l2 2 4-4"/><line x1="8" y1="16" x2="16" y2="16"/></svg>
+      <button class="todo-btn" @click="showMenu = !showMenu" aria-label="메뉴">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
       </button>
     </header>
+
+    <div v-if="showMenu" class="menu-overlay" @click="showMenu = false">
+      <div class="menu-panel" @click.stop>
+        <div class="menu-item" @click="openFiles(); showMenu = false">파일 브라우저</div>
+        <div class="menu-item" @click="openGit(); showMenu = false">Git</div>
+        <div class="menu-item" @click="showKanban = true; showMenu = false">칸반</div>
+        <div v-if="busy" class="menu-item danger" @click="cancelSession(); showMenu = false">중단</div>
+      </div>
+    </div>
 
     <div v-if="showRooms" class="rooms-overlay" @click="showRooms = false">
       <div class="rooms-panel" @click.stop>
