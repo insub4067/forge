@@ -127,6 +127,17 @@ async def main():
     assert roles_of(calls) == ["chat"], roles_of(calls)
     print("Case F (CHAT fast path): OK", roles_of(calls))
 
+    # Case G — 진전 없음 가드: 태스크가 in_progress로 불변(debug 없음)이면
+    # reviewer를 무한 재실행하지 않고 2회 만에 review_limit로 종료(중복 응답 방지).
+    STUCK = lambda: [{"title": "t", "status": "in_progress"}]
+    rt, calls = make_runtime("done")
+    data, _ = await run_case(rt, [STUCK()] * 10)
+    rs = roles_of(calls)
+    assert rs.count("reviewer") == 2, rs  # 1회 + 불변 감지 1회
+    assert "debugger" not in rs, rs
+    assert data.get("status") == "review_limit", data
+    print("Case G (진전 없음→즉시 종료): OK", rs)
+
     print("\n모든 케이스 통과 ✓")
 
 

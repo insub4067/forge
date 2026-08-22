@@ -1088,6 +1088,7 @@ class AgentRuntime:
         debug_attempts = 0
         tasks: list[dict] = []
         final_status = "completed"
+        prev_snapshot: list[tuple] | None = None
         while True:
             status, p, c, route = await self._run_role(
                 "reviewer", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory, skills=skills
@@ -1103,6 +1104,16 @@ class AgentRuntime:
             if not unfinished:
                 final_status = "completed"
                 break
+
+            # 진전 없음 가드: reviewer가 태스크 상태를 전혀 바꾸지 못했고 debug도 없으면
+            # 재실행해도 같은 응답만 재생성된다(실측: 4연속 동일 출력 중복 저장).
+            # 즉시 review_limit로 종료해 중복·비용 낭비를 막는다.
+            snapshot = [(t.get("title"), t.get("status")) for t in tasks]
+            no_debug = not any(t.get("status") == "debug" for t in tasks)
+            if no_debug and prev_snapshot is not None and snapshot == prev_snapshot:
+                final_status = "review_limit"
+                break
+            prev_snapshot = snapshot
 
             review_cycle += 1
             if review_cycle > MAX_REVIEW_CYCLES:
