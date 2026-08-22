@@ -18,6 +18,8 @@ body,
 #app {
   margin: 0;
   height: 100%;
+  overflow: hidden;
+  touch-action: manipulation;
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
@@ -25,10 +27,10 @@ body,
 }
 
 .app {
+  position: fixed;
+  inset: 0;
   display: flex;
   flex-direction: column;
-  height: 100dvh;
-  overflow: hidden;
 }
 
 header {
@@ -171,6 +173,20 @@ header .room-name {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.room-del {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 6px;
+  flex-shrink: 0;
+}
+
+.room-del:active {
+  color: #f87171;
+}
+
 .rooms-add {
   padding: 14px;
   text-align: center;
@@ -306,6 +322,88 @@ header .room-name {
   height: 100%;
   background: var(--accent);
   border-radius: 2px;
+}
+
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 220;
+  display: flex;
+  align-items: flex-end;
+}
+
+.sheet {
+  width: 100%;
+  background: var(--panel);
+  border-top-left-radius: 18px;
+  border-top-right-radius: 18px;
+  padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.sheet-title {
+  flex: 1;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.sheet-head button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.fs-path {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 8px 12px;
+  background: var(--bg);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  word-break: break-all;
+}
+
+.fs-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+
+.fs-item {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.fs-item.parent {
+  color: var(--accent);
+}
+
+.sheet-select {
+  margin-top: 12px;
+  padding: 13px 0;
+  border-radius: 12px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
 }
 
 header .version {

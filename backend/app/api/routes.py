@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import uuid
 
 from fastapi import APIRouter, Request
@@ -10,6 +11,25 @@ from ..runtime.agent import AgentRuntime
 
 router = APIRouter()
 runtime = AgentRuntime()
+
+
+@router.get("/fs/list")
+async def fs_list(path: str = ""):
+    target = os.path.expanduser(path) if path else os.path.expanduser("~")
+    if not os.path.isdir(target):
+        target = os.path.expanduser("~")
+    entries = []
+    try:
+        names = sorted(os.listdir(target))
+    except OSError:
+        names = []
+    for name in names:
+        full = os.path.join(target, name)
+        if name.startswith(".") or not os.path.isdir(full):
+            continue
+        entries.append({"name": name, "path": full, "is_dir": True})
+    parent = os.path.dirname(target) if target != "/" else None
+    return {"path": target, "parent": parent, "entries": entries}
 
 
 @router.post("/chat")
@@ -74,6 +94,12 @@ async def list_rooms():
 @router.get("/rooms/{session_id}")
 async def get_room(session_id: str):
     return await store.get_room(session_id)
+
+
+@router.delete("/rooms/{session_id}")
+async def delete_room(session_id: str):
+    await store.delete_room(session_id)
+    return {"deleted": True}
 
 
 @router.get("/rooms/{session_id}/tasks")

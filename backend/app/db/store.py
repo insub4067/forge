@@ -48,6 +48,15 @@ async def get_room(session_id: str) -> dict | None:
         }
 
 
+async def delete_room(session_id: str) -> None:
+    async with async_session() as s:
+        await s.execute(delete(Message).where(Message.session_id == session_id))
+        await s.execute(delete(Task).where(Task.session_id == session_id))
+        await s.execute(delete(Checkpoint).where(Checkpoint.session_id == session_id))
+        await s.execute(delete(Session).where(Session.id == session_id))
+        await s.commit()
+
+
 async def load_history(session_id: str) -> list[dict]:
     async with async_session() as s:
         result = await s.execute(

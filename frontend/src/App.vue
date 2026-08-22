@@ -26,6 +26,10 @@ const newRoomName = ref('')
 const newRoomPath = ref('')
 const tasks = ref([])
 const showKanban = ref(false)
+const showWorkspacePicker = ref(false)
+const fsPath = ref('')
+const fsParent = ref(null)
+const fsEntries = ref([])
 
 const kanbanCols = [
   { key: 'todo', label: 'TODO' },
@@ -137,6 +141,47 @@ async function createRoom() {
       await selectRoom(room.id)
     }
   } catch {}
+}
+
+async function deleteRoom(id) {
+  if (!confirm('이 채팅방을 삭제할까요?')) return
+  try {
+    await fetch(`/api/rooms/${id}`, { method: 'DELETE' })
+    await loadRooms()
+    if (currentRoomId.value === id) {
+      const next = rooms.value[0]
+      if (next) {
+        await selectRoom(next.id)
+      } else {
+        currentRoomId.value = ''
+        localStorage.removeItem('forge_room')
+        messages.value = []
+        tasks.value = []
+      }
+    }
+  } catch {}
+}
+
+async function openWorkspacePicker() {
+  showWorkspacePicker.value = true
+  await navigateFs(newRoomPath.value || '')
+}
+
+async function navigateFs(path) {
+  try {
+    const res = await fetch(`/api/fs/list?path=${encodeURIComponent(path || '')}`)
+    if (res.ok) {
+      const data = await res.json()
+      fsPath.value = data.path
+      fsParent.value = data.parent
+      fsEntries.value = data.entries
+    }
+  } catch {}
+}
+
+function pickCurrentPath() {
+  newRoomPath.value = fsPath.value
+  showWorkspacePicker.value = false
 }
 
 async function ensureRoom(text) {
@@ -408,6 +453,7 @@ onMounted(async () => {
           <div class="room-path">{{ r.workspace_path || '기본 워크스페이스' }}</div>
         </div>
         <span class="room-pct">{{ ctxPct(r) }}%</span>
+        <button class="room-del" @click.stop="deleteRoom(r.id)">×</button>
       </div>
       <div class="rooms-add" @click="showCreateRoom = true; showRooms = false">+ 새 방 만들기</div>
     </div>
@@ -499,7 +545,9 @@ onMounted(async () => {
         <input
           v-model="newRoomPath"
           class="modal-field"
-          placeholder="워크스페이스 경로 (예: ~/Projects/trade-bot)"
+          placeholder="워크스페이스 폴더 선택"
+          readonly
+          @click="openWorkspacePicker"
         />
         <div class="modal-actions">
           <button class="no" @click="showCreateRoom = false">취소</button>
@@ -527,6 +575,23 @@ onMounted(async () => {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <div v-if="showWorkspacePicker" class="sheet-overlay" @click.self="showWorkspacePicker = false">
+      <div class="sheet">
+        <div class="sheet-head">
+          <span class="sheet-title">폴더 선택</span>
+          <button @click="showWorkspacePicker = false">닫기</button>
+        </div>
+        <div class="fs-path">{{ fsPath }}</div>
+        <div class="fs-list">
+          <div v-if="fsParent" class="fs-item parent" @click="navigateFs(fsParent)">.. 상위 폴더</div>
+          <div v-for="e in fsEntries" :key="e.path" class="fs-item" @click="navigateFs(e.path)">
+            {{ e.name }}
+          </div>
+        </div>
+        <button class="sheet-select" @click="pickCurrentPath">현재 폴더 선택</button>
       </div>
     </div>
   </div>
