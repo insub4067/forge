@@ -265,6 +265,8 @@ async function openSessionDetail() {
   showSessionDetail.value = true
   sessionRuns.value = []
   sessionMetrics.value = null
+  // 방 목록을 새로고침해 컨텍스트 윈도우(used_tokens)를 최신값으로 반영(옛값 0% 방지).
+  await loadRooms()
   try {
     const res = await fetch(`/api/rooms/${id}/runs`)
     if (res.ok) sessionRuns.value = await res.json()
@@ -431,7 +433,7 @@ function openGit() {
 async function navigateFiles(path) {
   try {
     const res = await fetch(
-      `/api/fs/list?path=${encodeURIComponent(path || '')}&show_hidden=${showHidden.value}`
+      `/api/fs/list?path=${encodeURIComponent(path || '')}&show_hidden=${showHidden.value}&session_id=${currentRoomId.value}`
     )
     if (res.ok) {
       const data = await res.json()
@@ -462,7 +464,7 @@ function toggleHidden() {
 
 async function openFile(path) {
   try {
-    const res = await fetch(`/api/fs/read?path=${encodeURIComponent(path)}`)
+    const res = await fetch(`/api/fs/read?path=${encodeURIComponent(path)}&session_id=${currentRoomId.value}`)
     if (res.ok) {
       const data = await res.json()
       viewingFile.value = data.path
@@ -1342,8 +1344,8 @@ document.addEventListener('visibilitychange', () => {
               </template>
             </div>
 
-            <div v-if="busy && i === messages.length - 1" class="typing">
-              <span class="typing-label">작성 중</span>
+            <div v-if="(busy || sessionRunning) && i === messages.length - 1" class="typing">
+              <span class="typing-label">{{ busy ? '작성 중' : 'Mac에서 작업 중' }}</span>
               <span class="typing-dots"><i></i><i></i><i></i></span>
             </div>
 
