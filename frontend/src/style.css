@@ -1165,28 +1165,101 @@ footer {
 
 .composer {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   gap: 4px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 22px;
-  padding: 4px 4px 4px 4px;
+  border-radius: 20px;
+  padding: 8px 10px 6px;
 }
 
 .composer:focus-within {
   border-color: var(--accent);
 }
 
+.composer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.composer-spacer {
+  flex: 1;
+}
+
+.mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mode-chip.small {
+  padding: 0 10px;
+}
+
+.mode-chip.on {
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel-2));
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .attach-btn {
   background: none;
   border: none;
   color: var(--muted);
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+.jump-bottom {
+  position: absolute;
+  bottom: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 50;
+}
+
+.bubble-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: #f87171;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.bubble-stop-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: #f87171;
 }
 
 .image-preview {
@@ -1218,12 +1291,12 @@ footer {
 }
 
 .composer-input {
-  flex: 1;
+  width: 100%;
   resize: none;
   background: none;
   border: none;
   color: var(--text);
-  padding: 9px 4px;
+  padding: 4px 6px;
   font-size: 16px;
   font-family: inherit;
   line-height: 1.4;

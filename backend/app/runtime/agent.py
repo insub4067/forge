@@ -116,6 +116,7 @@ class AgentRuntime:
         self._running_sessions: set[str] = set()
         # reasoning_content 400을 한 번 겪은 세션 — 이후 호출은 미리 reasoning을 벗긴다.
         self._strip_reasoning_sessions: set[str] = set()
+        self._auto_approve_sessions: set[str] = set()
 
     def _adapter_for(self, model: str):
         if model not in self._adapters:
@@ -199,9 +200,29 @@ class AgentRuntime:
         except Exception:
             return ""
 
+    def set_auto_approve(self, session_id: str, enabled: bool) -> None:
+        if enabled:
+            self._auto_approve_sessions.add(session_id)
+        else:
+            self._auto_approve_sessions.discard(session_id)
+
+    def resolve_pending_approvals(self, session_id: str = "") -> int:
+        """대기 중인 승인 요청을 모두 승인 처리한다(자동 승인 켤 때)."""
+        count = 0
+        for approval_id, fut in list(self.pending_approvals.items()):
+            if not fut.done():
+                fut.set_result("approve")
+                count += 1
+        return count
+
     async def _request_approval(
-        self, name: str, args: dict, send: Callable[[str, dict], Awaitable[None]]
+        self, name: str, args: dict, send: Callable[[str, dict], Awaitable[None]],
+        session_id: str = "",
     ) -> str:
+        # 자동 승인 모드면 프롬프트 없이 승인
+        if session_id in self._auto_approve_sessions:
+            await send("approval_auto", {"tool": name})
+            return "approve"
         approval_id = uuid.uuid4().hex
         await send(
             "approval_request",
@@ -508,7 +529,7 @@ class AgentRuntime:
                     continue
 
                 if name in APPROVAL_REQUIRED:
-                    decision = await self._request_approval(name, args, send)
+                    decision = await self._request_approval(name, args, send, session_id)
                     if decision != "approve":
                         result = "사용자가 실행을 거부했습니다."
                         await send("tool_result", {"name": name, "result": result})

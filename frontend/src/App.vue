@@ -14,6 +14,8 @@ function renderMarkdown(text) {
 const messages = ref([])
 const input = ref('')
 const busy = ref(false)
+const isAtBottom = ref(true)
+const autoApprove = ref(localStorage.getItem('forge_auto_approve') === '1')
 const activeQuestion = ref(null)
 const questionAnswer = ref('')
 const debug = ref('대기 중')
@@ -592,6 +594,17 @@ function scrollBottom() {
   })
 }
 
+// 하단 근처에 있을 때만 따라 내려간다(읽고 있는 위치를 뺏지 않음).
+function maybeScrollBottom() {
+  if (isAtBottom.value) scrollBottom()
+}
+
+function onChatScroll() {
+  const el = chatEl.value
+  if (!el) return
+  isAtBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+}
+
 function newUser(text) {
   messages.value.push({ role: 'user', content: text })
 }
@@ -724,7 +737,7 @@ function handleEvent(evt, assistant) {
       if (d.content) assistant.doneMessage = d.content
       break
   }
-  scrollBottom()
+  maybeScrollBottom()
 }
 
 async function steerDuringRun(text) {
@@ -756,6 +769,19 @@ function quickAction(text) {
   send()
 }
 
+function toggleAutoApprove() {
+  autoApprove.value = !autoApprove.value
+  localStorage.setItem('forge_auto_approve', autoApprove.value ? '1' : '0')
+  // 실행 중이면 서버에 즉시 반영
+  if (busy.value && currentRoomId.value) {
+    fetch(`/api/sessions/${currentRoomId.value}/auto-approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: autoApprove.value }),
+    }).catch(() => {})
+  }
+}
+
 async function send() {
   const text = input.value.trim()
   const imageUrl = attachedImage.value?.url
@@ -771,6 +797,7 @@ async function send() {
 
   newUser(text || '[이미지]')
   const assistant = newAssistant()
+  isAtBottom.value = true
   scrollBottom()
   attachedImage.value = null
 
@@ -779,7 +806,7 @@ async function send() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: roomId, message: text, image_url: imageUrl }),
+      body: JSON.stringify({ session_id: roomId, message: text, image_url: imageUrl, auto_approve: autoApprove.value }),
     })
     console.log('[forge] 응답:', res.status, res.headers.get('content-type'))
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
@@ -933,7 +960,6 @@ onMounted(async () => {
           <span v-if="busy" class="status-live">실행 중</span><template v-if="busy"> · </template>{{ shortPath(currentRoom()?.workspace_path) || 'Mobile Coding Agent' }}
         </span>
       </button>
-      <button v-if="busy" class="stop-btn" @click="cancelSession">중단</button>
       <button class="ctx-btn" @click="openSessionDetail" aria-label="컨텍스트 사용량">
         <svg class="ctx" viewBox="0 0 36 36">
           <circle class="ctx-bg" cx="18" cy="18" r="15" pathLength="100" />
@@ -1019,7 +1045,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <main ref="chatEl" @touchstart.passive="onMainTouchStart" @touchend.passive="onMainTouchEnd">
+    <main ref="chatEl" @scroll.passive="onChatScroll" @touchstart.passive="onMainTouchStart" @touchend.passive="onMainTouchEnd">
       <div v-if="messages.length === 0" class="welcome">
         <div class="welcome-brand">FORGE</div>
         <p class="welcome-title">무엇을 작업할까요?</p>
@@ -1097,6 +1123,14 @@ onMounted(async () => {
             <div v-if="m.context" class="context">
               context {{ m.context.prompt_tokens + m.context.completion_tokens }} tokens
             </div>
+
+            <button
+              v-if="busy && i === messages.length - 1"
+              class="bubble-stop"
+              @click="cancelSession"
+            >
+              <span class="bubble-stop-dot"></span>중단
+            </button>
           </template>
         </div>
       </div>
@@ -1109,37 +1143,38 @@ onMounted(async () => {
       </button>
     </div>
 
-    <div v-if="busy" class="steer-bar">
-      <span class="steer-label">작업 중 · 보낼 메시지는</span>
-      <button
-        class="steer-chip"
-        :class="{ active: steerMode === 'queue' }"
-        @click="steerMode = 'queue'"
-      >작업큐 대기</button>
-      <button
-        class="steer-chip"
-        :class="{ active: steerMode === 'switch' }"
-        @click="steerMode = 'switch'"
-      >중단 후 새로</button>
-    </div>
+    <button v-if="!isAtBottom" class="jump-bottom" @click="scrollBottom(); isAtBottom = true" aria-label="맨 아래로">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+    </button>
 
     <footer>
       <input ref="fileInput" type="file" accept="image/*" hidden @change="onFileChange" />
       <div class="composer">
-        <button class="attach-btn" @click="fileInput.click()" aria-label="첨부">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-        </button>
         <textarea
           v-model="input"
           rows="1"
           class="composer-input"
-          :placeholder="busy ? (steerMode === 'switch' ? '중단하고 새로 요청…' : '작업큐에 메시지 추가…') : '메시지를 입력하세요'"
+          :placeholder="busy ? (steerMode === 'switch' ? '중단하고 새로 요청…' : '작업 큐에 메시지 추가…') : '메시지를 입력하세요'"
           @keydown="onKeydown"
           @input="onInput"
         ></textarea>
-        <button id="send" class="composer-send" :disabled="!input.trim() && !attachedImage" @click="send" aria-label="전송">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
-        </button>
+        <div class="composer-row">
+          <button class="attach-btn" @click="fileInput.click()" aria-label="첨부">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+          <button class="mode-chip" :class="{ on: autoApprove }" @click="toggleAutoApprove">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
+            {{ autoApprove ? '자동 승인' : '수동 승인' }}
+          </button>
+          <template v-if="busy">
+            <button class="mode-chip small" :class="{ on: steerMode === 'queue' }" @click="steerMode = 'queue'">작업 대기</button>
+            <button class="mode-chip small" :class="{ on: steerMode === 'switch' }" @click="steerMode = 'switch'">계획 수정</button>
+          </template>
+          <div class="composer-spacer"></div>
+          <button id="send" class="composer-send" :disabled="!input.trim() && !attachedImage" @click="send" aria-label="전송">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+          </button>
+        </div>
       </div>
     </footer>
 

@@ -89,6 +89,7 @@ async def chat(req: Request):
     body = await req.json()
     session_id = body.get("session_id") or uuid.uuid4().hex
     message = str(body.get("message", ""))
+    runtime.set_auto_approve(session_id, bool(body.get("auto_approve", False)))
 
     room = await store.get_room(session_id)
     workspace_path = room["workspace_path"] if room else None
@@ -212,6 +213,15 @@ async def answer_question(question_id: str, req: Request):
 async def cancel_session(session_id: str):
     runtime.cancel(session_id)
     return {"cancelled": True}
+
+
+@router.post("/sessions/{session_id}/auto-approve")
+async def set_auto_approve(session_id: str, req: Request):
+    body = await req.json()
+    enabled = bool(body.get("enabled", False))
+    runtime.set_auto_approve(session_id, enabled)
+    resolved = runtime.resolve_pending_approvals(session_id) if enabled else 0
+    return {"enabled": enabled, "resolved": resolved}
 
 
 @router.post("/sessions/{session_id}/inject")
