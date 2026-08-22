@@ -33,8 +33,11 @@
 - [x] cancel 시 pending approval/question future 해제
 - [x] mutation 전 git SHA checkpoint
 - [x] write/edit unified diff
-- [x] Docker Sandbox(non-root/resource limit)
+- [x] Docker Sandbox(non-root/resource limit) 기본 모드
+- [x] `SANDBOX_MODE=host` 옵트인 host 실행(`/workspace` → 실제 workspace 치환)
 - [x] 파일 브라우저 `/fs/list`, `/fs/read` workspace 경계 제한
+
+> Host mode는 격리를 우회하므로 신뢰된 개인 환경에서만 사용한다.
 
 ## 완료 — 비용/Context 효율
 
@@ -57,6 +60,7 @@
 - [x] `.forge/skills/*.md` 재사용
 - [x] 관련 Skill만 선택 로딩
 - [x] Skills UI 확인/삭제
+- [x] Skills 카드 collapsible / 기본 닫힘
 - [x] Session search
 - [x] FORGE 자체 개발 workflow/convention/runtime Skill 저장
 
@@ -95,13 +99,14 @@
 - [x] 세션 드로어 / 최근 세션 landing
 - [x] 신규 session workspace 선택 필수
 - [x] 채팅/추론/tool/diff 표시
+- [x] 첨부 이미지 썸네일 + 전체화면 이미지 viewer
 - [x] 실행 중 typing/activity 표시
 - [x] 실행 중 context/복사 액션 숨김
 - [x] Kanban live refresh 및 task 상태 전이 인라인 알림
 - [x] Git changes/history/branch/file diff
 - [x] 파일 브라우저 + hidden toggle + 타입별 아이콘
 - [x] Session search
-- [x] Skills viewer
+- [x] Skills viewer + collapsible 카드
 - [x] 세션 사용량/효율 metrics UI
 - [x] 4종 테마 + FORGE 로고/PWA 이름
 - [x] iOS safe-area
@@ -133,9 +138,9 @@
 
 ### 4. Execution Backend
 
-- [ ] LocalBackend 명시화
+- [~] Local execution — Docker 기본 + host 옵트인이 존재하지만 공통 Backend abstraction은 없음
 - [ ] SSHBackend
-- [ ] DockerBackend 추상화
+- [ ] Docker/Host를 공통 ExecutionBackend interface로 정리(실제 필요 시)
 
 ### 5. 이후 검토
 
@@ -157,28 +162,21 @@
 
 ## Proposal 반영 현황
 
-### DeepSeek Harness에서 반영됨
+상세 매핑은 [`proposal/README.md`](proposal/README.md)를 authoritative index로 사용한다.
 
-- [x] tool-result pruning
-- [x] context compaction
-- [x] provider recovery
-- [x] model surface/history 분리
-- [x] event logging 일부
+### DeepSeek Harness
+
+- [x] pruning / compaction / provider recovery / surface 분리
+- [x] JSONL event logging 1차
 - [~] durable resume/event replay — 미완료
 
-### Claude Code clean-room 제안에서 반영됨
+### Claude Code clean-room
 
-- [x] task lifecycle 기반 검증
-- [x] permission/approval boundary
-- [x] runtime steering
+- [x] task lifecycle / approval boundary / runtime steering
 - [~] coordinator/isolated worker — 미완료
 
-### Hermes Agent에서 반영됨
+### Hermes Agent
 
-- [x] Self-Improving Skills 1차
-- [x] prompt-cache-first stable prefix
-- [x] selective Skill retrieval
-- [x] session search
+- [x] Self-Improving Skills / stable prefix / selective retrieval / session search
 - [~] persistent runtime — 재접속은 지원, 서버 재시작 resume은 미완료
-- [ ] Tool Script/RPC
-- [ ] scheduler/execution backend/subagent
+- [ ] Tool Script/RPC / scheduler / backend abstraction / subagent
