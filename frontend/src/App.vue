@@ -947,7 +947,6 @@ onMounted(async () => {
             :class="ctxClass(ctxPct(currentRoom()))"
           />
         </svg>
-        <span class="ctx-pct">{{ ctxPct(currentRoom()) }}</span>
       </button>
       <button class="todo-btn" @click="showMenu = !showMenu" aria-label="메뉴">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
@@ -997,23 +996,12 @@ onMounted(async () => {
             @touchstart="onRoomTouchStart"
             @touchend="onRoomTouchEnd(r, $event)"
           >
-            <svg class="ctx" viewBox="0 0 36 36">
-              <circle class="ctx-bg" cx="18" cy="18" r="15" pathLength="100" />
-              <circle
-                class="ctx-fg"
-                cx="18"
-                cy="18"
-                r="15"
-                pathLength="100"
-                :stroke-dasharray="`${ctxPct(r)} 100`"
-                :class="ctxClass(ctxPct(r))"
-              />
-            </svg>
+            <span class="room-status" :class="r.id === currentRoomId ? 'active' : 'idle'"></span>
             <div class="room-info">
               <div class="room-title">{{ r.title }}</div>
               <div class="room-path">{{ r.workspace_path || '워크스페이스 설정' }}</div>
             </div>
-            <span class="room-pct">{{ ctxPct(r) }}%</span>
+            <span class="room-pct">Context {{ ctxPct(r) }}%</span>
             <button class="room-more" @click.stop="roomMenuId = roomMenuId === r.id ? null : r.id" aria-label="메뉴">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
             </button>

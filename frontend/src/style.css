@@ -1936,3 +1936,21 @@ button {
   font-size: 13px;
   color: var(--muted);
 }
+
+/* 세션 행 상태 점 (링 대체) */
+.room-status {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1.5px solid var(--muted);
+  background: transparent;
+}
+.room-status.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.room-pct {
+  font-size: 12px;
+}
