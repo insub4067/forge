@@ -2232,7 +2232,7 @@ document.addEventListener('visibilitychange', () => {
         </div>
         <div class="gh-head-actions">
           <button class="gh-icon-btn" :disabled="gitLoading" @click="loadGit" aria-label="새로고침">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+            <svg :class="{ spin: gitLoading }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
           </button>
           <button class="gh-close" @click="showGit = false">닫기</button>
         </div>
@@ -2264,8 +2264,7 @@ document.addEventListener('visibilitychange', () => {
 
         <div class="gh-content" @scroll="onGitScroll">
           <template v-if="gitTab === 'changes'">
-            <div v-if="gitLoading" class="gh-empty">불러오는 중…</div>
-            <div v-else-if="!gitFiles.length" class="gh-empty">변경 사항이 없습니다.</div>
+            <div v-if="!gitLoading && !gitFiles.length" class="gh-empty">변경 사항이 없습니다.</div>
             <div v-for="f in gitFiles" :key="f.path" class="gh-file" @click="openFileDiff(f)">
               <span class="gh-status" :class="f.cls">{{ f.badge }}</span>
               <span class="gh-file-path">{{ f.path }}</span>
@@ -2274,8 +2273,7 @@ document.addEventListener('visibilitychange', () => {
           </template>
 
           <template v-else-if="gitTab === 'history'">
-            <div v-if="gitLoading" class="gh-empty">불러오는 중…</div>
-            <div v-else-if="!gitLog.length" class="gh-empty">커밋이 없습니다.</div>
+            <div v-if="!gitLoading && !gitLog.length" class="gh-empty">커밋이 없습니다.</div>
             <div v-for="c in gitLog" :key="c.hash" class="gh-commit" @click="openCommit(c)">
               <div class="gh-avatar">{{ (c.author || '?').slice(0, 1).toUpperCase() }}</div>
               <div class="gh-commit-body">

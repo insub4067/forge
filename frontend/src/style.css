@@ -2653,6 +2653,11 @@ button {
 @keyframes room-spin {
   to { transform: rotate(360deg); }
 }
+/* git 새로고침 버튼 아이콘 회전 */
+.gh-icon-btn svg.spin {
+  animation: room-spin 0.7s linear infinite;
+  transform-origin: center;
+}
 .room-pct {
   font-size: 12px;
 }
