@@ -1063,6 +1063,43 @@ footer {
   flex-shrink: 0;
 }
 
+.attach-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 8px;
+  display: flex;
+  flex-shrink: 0;
+}
+
+.image-preview {
+  position: relative;
+  padding: 8px 12px 0;
+}
+
+.image-preview img {
+  max-height: 160px;
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  display: block;
+}
+
+.image-remove {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 textarea {
   flex: 1;
   resize: none;

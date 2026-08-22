@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import json
+import mimetypes
 import subprocess
 import time
 import uuid
@@ -21,6 +23,27 @@ EventSink = Callable[[dict[str, Any]], Awaitable[None]]
 
 AGENTS_DIR = Path(__file__).resolve().parent.parent.parent / "docs" / "agents"
 GLOBAL_MEMORY_PATH = Path(__file__).resolve().parent.parent.parent / "GLOBAL_MEMORY.md"
+UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
+
+
+def _has_image(msg: dict) -> bool:
+    content = msg.get("content", "")
+    if isinstance(content, list):
+        return any(isinstance(c, dict) and c.get("type") == "image_url" for c in content)
+    return False
+
+
+def _to_data_uri_item(item: Any) -> Any:
+    if isinstance(item, dict) and item.get("type") == "image_url":
+        url = item.get("image_url", {}).get("url", "")
+        if isinstance(url, str) and url.startswith("/uploads/"):
+            name = url.split("/")[-1]
+            path = UPLOADS_DIR / name
+            if path.exists():
+                mime = mimetypes.guess_type(str(path))[0] or "image/png"
+                b64 = base64.b64encode(path.read_bytes()).decode()
+                return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
+    return item
 
 BASE_PROMPT = """당신은 FORGE 에이전틱 코딩 에이전트의 일부입니다. 아래 역할 지침을 따르며 로컬 코드베이스에서 작업합니다.
 
@@ -145,6 +168,56 @@ class AgentRuntime:
             return await fut
         finally:
             self.pending_questions.pop(question_id, None)
+
+    async def _run_vision(
+        self,
+        user_msg: dict,
+        send: Callable[[str, dict], Awaitable[None]],
+        session_id: str,
+    ) -> str:
+        route = self.router.select_model("vision")
+        await send("role_start", {"role": "vision", "model": route["model"]})
+
+        content = user_msg.get("content", "")
+        if isinstance(content, list):
+            content = [_to_data_uri_item(c) for c in content]
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "당신은 FORGE Vision 에이전트입니다. 제공된 이미지를 분석하고, "
+                    "레이아웃·정렬·간격·색상 대비·다크모드·반응형·오류 화면 등 발견한 사항을 "
+                    "한국어로 상세히 설명합니다. 이모지와 이미지는 사용하지 않습니다."
+                ),
+            },
+            {"role": "user", "content": content},
+        ]
+
+        parts: list[str] = []
+        total_prompt = 0
+        total_completion = 0
+        async for delta in self._adapter_for(route["model"]).stream_chat(messages):
+            if delta.get("content"):
+                parts.append(delta["content"])
+                await send("text_delta", {"content": delta["content"]})
+            if delta.get("usage"):
+                total_prompt += delta["usage"].get("prompt_tokens", 0)
+                total_completion += delta["usage"].get("completion_tokens", 0)
+
+        analysis = "".join(parts)
+        if session_id:
+            await store.save_agent_run(
+                session_id,
+                "vision",
+                route["model"],
+                total_prompt,
+                total_completion,
+                route.get("thinking", False),
+                route.get("reasoning_effort", ""),
+            )
+            await store.save_vision_analysis(session_id, "", analysis)
+        return analysis
 
     async def _run_role(
         self,
@@ -373,6 +446,12 @@ class AgentRuntime:
         recent_calls: list[str] = []
         all_messages: list[dict] = [*history]
         room_memory = _load_room_memory(ws)
+
+        # 이미지가 포함된 요청이면 Vision 에이전트로 먼저 분석
+        last_user = history[-1] if history and history[-1].get("role") == "user" else None
+        if last_user and _has_image(last_user):
+            analysis = await self._run_vision(last_user, send, session_id)
+            all_messages.append({"role": "user", "content": "[이미지 분석 결과]\n" + analysis})
 
         step_base = 0
 

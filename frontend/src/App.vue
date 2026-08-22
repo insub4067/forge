@@ -50,6 +50,8 @@ const adminStats = ref(null)
 const showModelPicker = ref(false)
 const pickerRole = ref('')
 const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
+const attachedImage = ref(null)
+const fileInput = ref(null)
 const kanbanOpen = ref({
   todo: true,
   planning: true,
@@ -488,22 +490,24 @@ function handleEvent(evt, assistant) {
 
 async function send() {
   const text = input.value.trim()
-  if (!text || busy.value) return
+  const imageUrl = attachedImage.value?.url
+  if ((!text && !imageUrl) || busy.value) return
   busy.value = true
   input.value = ''
   debug.value = '전송 중…'
   console.log('[forge] send 시작:', text.slice(0, 60))
 
-  newUser(text)
+  newUser(text || '[이미지]')
   const assistant = newAssistant()
   scrollBottom()
+  attachedImage.value = null
 
   try {
-    const roomId = await ensureRoom(text)
+    const roomId = await ensureRoom(text || '이미지 분석')
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: roomId, message: text }),
+      body: JSON.stringify({ session_id: roomId, message: text, image_url: imageUrl }),
     })
     console.log('[forge] 응답:', res.status, res.headers.get('content-type'))
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
@@ -569,6 +573,24 @@ function onInput(e) {
   const el = e.target
   el.style.height = 'auto'
   el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+}
+
+async function onFileChange(e) {
+  const file = e.target.files[0]
+  if (!file) return
+  const formData = new FormData()
+  formData.append('file', file)
+  try {
+    const res = await fetch('/api/upload', { method: 'POST', body: formData })
+    if (res.ok) {
+      attachedImage.value = await res.json()
+    }
+  } catch {}
+  e.target.value = ''
+}
+
+function removeImage() {
+  attachedImage.value = null
 }
 
 async function decide(approval, decision) {
@@ -752,7 +774,18 @@ onMounted(async () => {
       </div>
     </main>
 
+    <div v-if="attachedImage" class="image-preview">
+      <img :src="attachedImage.url" alt="첨부 이미지" />
+      <button class="image-remove" @click="removeImage" aria-label="제거">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
     <footer>
+      <input ref="fileInput" type="file" accept="image/*" hidden @change="onFileChange" />
+      <button class="attach-btn" @click="fileInput.click()" aria-label="이미지 첨부">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+      </button>
       <textarea
         v-model="input"
         rows="1"

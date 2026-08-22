@@ -29,6 +29,11 @@ class ModelRouter:
                 "thinking": False,
                 "reasoning_effort": "low",
             },
+            "vision": {
+                "model": settings.vision_model or "deepseek-v4-flash-vision-exp",
+                "thinking": False,
+                "reasoning_effort": "low",
+            },
         }
         self.debugger_pro_model = settings.deep_seek_model or "deepseek-v4-pro"
 

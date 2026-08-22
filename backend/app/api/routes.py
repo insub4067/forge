@@ -3,8 +3,9 @@ import json
 import os
 import subprocess
 import uuid
+from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, File, Request, UploadFile
 from sse_starlette.sse import EventSourceResponse
 
 from ..config import settings
@@ -13,6 +14,8 @@ from ..runtime.agent import AgentRuntime
 
 router = APIRouter()
 runtime = AgentRuntime()
+
+UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
 
 
 def _git(workspace: str, *args: str, timeout: int = 20) -> str:
@@ -66,6 +69,18 @@ async def fs_read(path: str = ""):
         return {"path": p, "content": f"오류: {err}"}
 
 
+@router.post("/upload")
+async def upload_image(file: UploadFile = File(...)):
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    ext = os.path.splitext(file.filename or "")[1].lower() or ".png"
+    if ext not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+        ext = ".png"
+    name = uuid.uuid4().hex + ext
+    content = await file.read()
+    (UPLOADS_DIR / name).write_bytes(content)
+    return {"url": f"/uploads/{name}", "name": name}
+
+
 @router.post("/chat")
 async def chat(req: Request):
     body = await req.json()
@@ -78,7 +93,16 @@ async def chat(req: Request):
     history = await store.load_history(session_id)
     if not history:
         await store.ensure_session(session_id, message[:40], workspace_path)
-    history.append({"role": "user", "content": message})
+
+    image_url = body.get("image_url")
+    if image_url:
+        content = [
+            {"type": "text", "text": message},
+            {"type": "image_url", "image_url": {"url": image_url}},
+        ]
+    else:
+        content = message
+    history.append({"role": "user", "content": content})
 
     queue: asyncio.Queue = asyncio.Queue()
 

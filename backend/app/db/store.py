@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, select
 
-from .models import AgentRun, Checkpoint, Message, Session, Task
+from .models import AgentRun, Checkpoint, Message, Session, Task, VisionAnalysis
 from .session import async_session
 
 
@@ -182,6 +182,26 @@ async def save_agent_run(
                 completion_tokens=completion_tokens,
                 thinking_enabled=thinking_enabled,
                 reasoning_effort=reasoning_effort,
+            )
+        )
+        await s.commit()
+
+
+async def save_vision_analysis(
+    session_id: str,
+    task_id: str,
+    analysis_result: str,
+    image_path: str = "",
+    issues: str = "",
+) -> None:
+    async with async_session() as s:
+        s.add(
+            VisionAnalysis(
+                session_id=session_id,
+                task_id=task_id,
+                image_path=image_path,
+                analysis_result=analysis_result,
+                issues=issues,
             )
         )
         await s.commit()
