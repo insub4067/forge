@@ -227,7 +227,8 @@ function runningBannerText() {
   if (s.waiting_for === 'approval') return '승인 대기 중 — 확인이 필요합니다'
   if (s.waiting_for === 'question') return '질문 대기 중 — 답변이 필요합니다'
   const role = s.role ? (ROLE_LABELS[s.role] || s.role) : ''
-  const idle = s.idle_seconds != null ? ` · ${Math.round(s.idle_seconds)}초 전` : ''
+  // 경과 시간은 5초 넘게 멈췄을 때만 노출 — 숫자가 커지면 곧 '멈춤 조짐' 신호.
+  const idle = s.idle_seconds != null && s.idle_seconds > 5 ? ` · ${Math.round(s.idle_seconds)}초째 대기` : ''
   if (s.activity) return `${role ? role + ' · ' : ''}${s.activity}${idle}`
   if (role) return `${role} 진행 중${idle}`
   return 'Mac에서 작업 진행 중'
@@ -1488,6 +1489,21 @@ document.addEventListener('visibilitychange', () => {
       </div>
     </main>
 
+    <button v-if="!isAtBottom" class="jump-bottom" @click="jumpToBottom" aria-label="맨 아래로">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+    </button>
+
+    <div v-if="viewerImages.length" class="image-viewer" @click="closeViewer"
+         @touchstart.passive="viewerTouchStart" @touchend.passive="viewerTouchEnd">
+      <img :src="viewerImages[viewerIndex]" alt="이미지" @click.stop />
+      <button class="image-viewer-close" @click="closeViewer" aria-label="닫기">✕</button>
+      <button v-if="viewerIndex > 0" class="image-viewer-nav prev" @click.stop="viewerPrev" aria-label="이전">‹</button>
+      <button v-if="viewerIndex < viewerImages.length - 1" class="image-viewer-nav next" @click.stop="viewerNext" aria-label="다음">›</button>
+      <div v-if="viewerImages.length > 1" class="image-viewer-count">{{ viewerIndex + 1 }} / {{ viewerImages.length }}</div>
+    </div>
+
+    <footer>
+      <input ref="fileInput" type="file" multiple accept="image/*,.md,.txt,.log,.json,.csv,.yml,.yaml,.toml,.py,.js,.ts,.jsx,.tsx,.vue,.html,.css,.sh,.xml,.java,.go,.rs,.c,.cpp,.h,.sql,text/*" hidden @change="onFileChange" />
     <div v-if="attachedText" class="file-chip">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
       <span class="file-chip-name">{{ attachedText.name }}</span>
@@ -1506,21 +1522,6 @@ document.addEventListener('visibilitychange', () => {
       </div>
     </div>
 
-    <button v-if="!isAtBottom" class="jump-bottom" @click="jumpToBottom" aria-label="맨 아래로">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
-    </button>
-
-    <div v-if="viewerImages.length" class="image-viewer" @click="closeViewer"
-         @touchstart.passive="viewerTouchStart" @touchend.passive="viewerTouchEnd">
-      <img :src="viewerImages[viewerIndex]" alt="이미지" @click.stop />
-      <button class="image-viewer-close" @click="closeViewer" aria-label="닫기">✕</button>
-      <button v-if="viewerIndex > 0" class="image-viewer-nav prev" @click.stop="viewerPrev" aria-label="이전">‹</button>
-      <button v-if="viewerIndex < viewerImages.length - 1" class="image-viewer-nav next" @click.stop="viewerNext" aria-label="다음">›</button>
-      <div v-if="viewerImages.length > 1" class="image-viewer-count">{{ viewerIndex + 1 }} / {{ viewerImages.length }}</div>
-    </div>
-
-    <footer>
-      <input ref="fileInput" type="file" multiple accept="image/*,.md,.txt,.log,.json,.csv,.yml,.yaml,.toml,.py,.js,.ts,.jsx,.tsx,.vue,.html,.css,.sh,.xml,.java,.go,.rs,.c,.cpp,.h,.sql,text/*" hidden @change="onFileChange" />
       <div class="composer">
         <textarea
           v-model="input"
