@@ -130,8 +130,9 @@ const pickerRole = ref('')
 const adminBalance = ref(null)
 const adminPolicyOpen = ref(false)
 const adminErrors = ref([])
-const adminErrorsOpen = ref(false)
 const showSessionDetail = ref(false)
+const showRunHistory = ref(false)
+const showErrorLog = ref(false)
 const sessionRuns = ref([])
 const sessionMetrics = ref(null)
 const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
@@ -1794,24 +1795,25 @@ document.addEventListener('visibilitychange', () => {
           <div v-if="!adminStats.rooms.length" class="admin-sub">기록 없음</div>
         </div>
 
-        <div class="admin-section">
-          <div class="admin-stat-title collapsible" @click="adminErrorsOpen = !adminErrorsOpen">
-            <span>에러 로그</span>
-            <div class="collapsible-right">
-              <span class="provider-summary">{{ adminErrors.length }}건</span>
-              <span class="chevron">{{ adminErrorsOpen ? '▾' : '▸' }}</span>
-            </div>
-          </div>
-          <template v-if="adminErrorsOpen">
-            <div v-if="!adminErrors.length" class="admin-sub">기록된 에러가 없습니다.</div>
-            <div v-for="(e, i) in adminErrors" :key="i" class="err-item">
-              <div class="err-meta">{{ e.at }} · {{ e.source }}</div>
-              <div class="err-msg">{{ e.message }}</div>
-            </div>
-          </template>
-        </div>
+        <button class="detail-link" @click="showErrorLog = true">
+          에러 로그 {{ adminErrors.length }}건 보기 →
+        </button>
 
         <div class="admin-version">v{{ version }}</div>
+      </div>
+    </div>
+
+    <div v-if="showErrorLog" class="kanban-overlay">
+      <div class="kanban-head">
+        <span class="kanban-title">에러 로그</span>
+        <button @click="showErrorLog = false">닫기</button>
+      </div>
+      <div class="admin-body">
+        <div v-if="!adminErrors.length" class="admin-sub">기록된 에러가 없습니다.</div>
+        <div v-for="(e, i) in adminErrors" :key="i" class="err-item">
+          <div class="err-meta">{{ e.at }} · {{ e.source }}</div>
+          <div class="err-msg">{{ e.message }}</div>
+        </div>
       </div>
     </div>
 
@@ -1864,17 +1866,32 @@ document.addEventListener('visibilitychange', () => {
           <div v-if="!sessionRuns.length" class="admin-sub">기록 없음</div>
         </div>
 
-        <div v-if="sessionRuns.length" class="admin-section">
-          <div class="admin-stat-title">실행 이력</div>
-          <div v-for="(r, i) in sessionRuns" :key="i" class="run-item">
-            <div class="run-head">
-              <span class="run-role">{{ r.role }}</span>
-              <span class="run-model">{{ r.model }}</span>
-            </div>
-            <div class="run-meta">
-              prompt {{ formatTokens(r.prompt_tokens) }} · completion {{ formatTokens(r.completion_tokens) }}<span v-if="r.thinking_enabled"> · thinking {{ r.reasoning_effort }}</span>
-            </div>
+        <button v-if="sessionRuns.length" class="detail-link" @click="showRunHistory = true">
+          실행 이력 {{ sessionRuns.length }}건 전체 보기 →
+        </button>
+      </div>
+    </div>
+
+    <div v-if="showRunHistory" class="kanban-overlay">
+      <div class="kanban-head">
+        <span class="kanban-title">{{ currentRoom()?.title || '세션' }} · 실행 이력</span>
+        <button @click="showRunHistory = false">닫기</button>
+      </div>
+      <div class="admin-body">
+        <div v-if="!sessionRuns.length" class="admin-sub">기록 없음</div>
+        <div v-for="(r, i) in sessionRuns" :key="i" class="run-item">
+          <div class="run-head">
+            <span class="run-role">{{ ROLE_LABELS[r.role] || r.role }}</span>
+            <span class="run-model">{{ r.model }}</span>
           </div>
+          <div class="run-meta">
+            prompt {{ formatTokens(r.prompt_tokens) }} · completion {{ formatTokens(r.completion_tokens) }}<span v-if="r.thinking_enabled"> · thinking {{ r.reasoning_effort }}</span>
+          </div>
+          <div class="run-meta">
+            cache {{ formatTokens(r.cache_hit_tokens) }}↔{{ formatTokens(r.cache_miss_tokens) }} · model {{ r.model_calls }} · tool {{ r.tool_calls }} · 재시도 {{ r.retries }} · 압축 {{ r.compactions }}<span v-if="r.elapsed_ms"> · {{ (r.elapsed_ms / 1000).toFixed(1) }}s</span>
+          </div>
+          <div v-if="r.selected_skills" class="run-meta">skill: {{ r.selected_skills }}</div>
+          <div class="run-meta run-time">{{ r.created_at }}</div>
         </div>
       </div>
     </div>
