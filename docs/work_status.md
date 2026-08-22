@@ -82,12 +82,13 @@
 > 출처: [`proposal/deepseek-harness-adoption.md`](proposal/deepseek-harness-adoption.md) (운영 생존 계층),
 > [`proposal/hermes-agent-adoption.md`](proposal/hermes-agent-adoption.md) (학습·비용·persistent)
 
-### 큐 1 — 비용/장기실행 기반 (최우선)
+### 큐 1 — 비용/장기실행 기반 (최우선) ✅ 대부분 완료
 
-- [ ] **Summary Compaction** — pruning 이후에도 압박이 높으면 오래된 history 구간을 요약 checkpoint로 치환(tool call/result pair 경계 보존). harness §3.2 / hermes H1
-- [ ] Context overflow → compact → retry (95% 중단 대신 압축 후 계속)
-- [ ] **Prompt-Cache-First** — 세션 중 system prompt·tool schema·stable memory 삽입 순서/직렬화 고정, 동적 상태는 tail. prefix hash로 변경 추적. hermes §4
-- [ ] Provider Error Recovery 일반화 — 429/500/timeout backoff·재시도(현재 reasoning만)
+- [x] **Context Compaction (비파괴)** — 75% 넘으면 오래된 대화를 flash로 요약해 모델 컨텍스트만 압축, 표시/저장 원본은 유지. tool pair 경계 보존. harness §3.2 / hermes H1
+- [x] Context overflow → compact → 계속 (95%는 최후 안전장치로 유지)
+- [x] 도구 결과 pruning(20k→~4k, 앞뒤+오류 보존)
+- [x] Provider Error Recovery 일반화 — 429/5xx/timeout backoff(1·2·4초) 재시도 + reasoning 회복
+- [~] **Prompt-Cache-First** — role 내 system_msg byte-stable, tool 결과는 tail append로 이미 대체로 충족. prefix hash 추적은 미도입. hermes §4
 
 ### 큐 2 — Durable Runtime / 세션 재개
 

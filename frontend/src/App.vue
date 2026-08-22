@@ -617,7 +617,7 @@ function newUser(text) {
 }
 
 function newAssistant() {
-  const m = reactive({ role: 'assistant', phases: [], approval: null, context: null, state: null, doneMessage: '' })
+  const m = reactive({ role: 'assistant', phases: [], approval: null, context: null, state: null, doneMessage: '', compacted: false })
   messages.value.push(m)
   return m
 }
@@ -709,6 +709,9 @@ function handleEvent(evt, assistant) {
       }
       break
     }
+    case 'compaction':
+      assistant.compacted = true
+      break
     case 'state_update':
       assistant.state = d
       break
@@ -1149,9 +1152,10 @@ onMounted(async () => {
               </template>
             </div>
 
-            <div v-if="m.state && (m.state.files_changed?.length || m.state.errors?.length)" class="state-summary">
-              <span v-if="m.state.files_changed?.length" class="state-chip">변경 {{ m.state.files_changed.length }}</span>
-              <span v-if="m.state.errors?.length" class="state-chip err">오류 {{ m.state.errors.length }}</span>
+            <div v-if="(m.state && (m.state.files_changed?.length || m.state.errors?.length)) || m.compacted" class="state-summary">
+              <span v-if="m.state?.files_changed?.length" class="state-chip">변경 {{ m.state.files_changed.length }}</span>
+              <span v-if="m.state?.errors?.length" class="state-chip err">오류 {{ m.state.errors.length }}</span>
+              <span v-if="m.compacted" class="state-chip">컨텍스트 압축됨</span>
             </div>
 
             <div v-if="m.approval" class="approval">
