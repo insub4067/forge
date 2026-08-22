@@ -676,10 +676,12 @@ header .todo-btn {
 }
 
 .fs-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   width: 100%;
   text-align: left;
-  padding: 14px 16px;
+  padding: 13px 16px;
   border: none;
   border-bottom: 1px solid var(--border);
   background: none;
@@ -687,14 +689,24 @@ header .todo-btn {
   font-size: 15px;
   cursor: pointer;
 }
+.fs-item:active { background: var(--panel); }
+
+.fs-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+}
+.fs-icon.kind-dir { color: var(--accent); }
+.fs-icon.kind-image { color: #6cba7f; }
 
 .fs-item.parent {
   color: var(--accent);
   font-weight: 600;
 }
+.fs-item.parent .fs-icon { color: var(--accent); }
 
 .fs-item.dir {
-  color: var(--accent);
   font-weight: 600;
 }
 
@@ -1709,17 +1721,21 @@ footer {
 }
 
 .fs-hidden-toggle {
-  padding: 5px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--panel-2);
   color: var(--muted);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
+  flex-shrink: 0;
 }
 .fs-hidden-toggle.active {
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-soft);
+  color: var(--accent);
   border-color: var(--accent);
 }
 
