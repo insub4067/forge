@@ -755,15 +755,19 @@ class AgentRuntime:
             # non-vision role에는 이미지를 보내지 않는다(모델이 image 미지원 → 400).
             # 이미지는 Vision이 이미 분석해 텍스트로 대화에 포함됐고, 원본은 히스토리에만 남긴다.
             call_messages = [system_msg, *self._strip_images(self._project(all_messages, session_id))]
-            if session_id in self._strip_reasoning_sessions:
+            # reasoning_content 400을 겪은 세션은 이후 내내 reasoning을 벗기고 thinking도 끈다.
+            # (thinking을 켜둔 채 보내면 매 콜마다 400→재시도가 반복돼 낭비 — recovery의 성공
+            #  상태와 동일하게 처음부터 thinking을 꺼서 그 재시도 사이클을 없앤다.)
+            reasoning_disabled = session_id in self._strip_reasoning_sessions
+            if reasoning_disabled:
                 call_messages = self._strip_reasoning(call_messages)
             route["model_calls"] += 1
             async for delta in self._stream_with_recovery(
                 route["model"],
                 call_messages,
                 tool_schemas,
-                route["thinking"],
-                route["reasoning_effort"],
+                False if reasoning_disabled else route["thinking"],
+                None if reasoning_disabled else route["reasoning_effort"],
                 session_id,
                 counters,
             ):
