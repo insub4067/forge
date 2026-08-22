@@ -114,15 +114,16 @@ npm run build
 
 ## 주요 문서
 
-- [`docs/spec.md`](docs/spec.md) — 현재 요구사항과 범위
-- [`docs/architecture.md`](docs/architecture.md) — 실제 시스템 구조
-- [`docs/agent-loop.md`](docs/agent-loop.md) — Agent Runtime 흐름
-- [`docs/feat.md`](docs/feat.md) — 기능 구현 현황
-- [`docs/db-schema.md`](docs/db-schema.md) — DB/telemetry 구조
-- [`docs/benchmark.md`](docs/benchmark.md) — 비용·성능 benchmark 기준
-- [`docs/troubleshooting.md`](docs/troubleshooting.md) — 운영 이슈/해결 기록
-- [`docs/work_status.md`](docs/work_status.md) — 구현 상태와 다음 작업
-- [`docs/proposal/`](docs/proposal/) — 외부 Agent 설계 차용 제안(역사/로드맵 문서)
+전체 문서 구조는 [`docs/README.md`](docs/README.md)에서 확인한다.
+
+- [`docs/core/`](docs/core/) — 아키텍처, Agent loop, DB, 요구사항
+- [`docs/status/`](docs/status/) — 구현 상태와 기능 matrix
+- [`docs/operations/`](docs/operations/) — benchmark, troubleshooting
+- [`docs/planning/`](docs/planning/) — 우선순위 로드맵과 개선 계획
+- [`docs/proposal/`](docs/proposal/) — 설계 제안 및 외부 Harness 조사 기록
+- [`docs/archive/`](docs/archive/) — 현재 기준이 아닌 과거 문서
+
+`docs/agents/`는 일반 문서가 아니라 **실제 Runtime prompt 파일**이므로 별도 취급한다.
 
 ## 다음 핵심 과제
 
