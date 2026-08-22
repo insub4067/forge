@@ -108,6 +108,7 @@ async function deleteSkill(name) {
   } catch {}
 }
 const activeQuestion = ref(null)
+const activeApproval = ref(null) // 스트림 끊긴 사이 뜬 승인 요청 복구용
 const questionAnswer = ref('')
 const debug = ref('대기 중')
 
@@ -256,6 +257,12 @@ async function fetchStatus(id) {
   if (st.waiting_for === 'question' && st.pending && !activeQuestion.value) {
     activeQuestion.value = { id: st.pending.id, question: st.pending.question, options: st.pending.options || [] }
     questionAnswer.value = ''
+  }
+  // 승인도 동일하게 복구 — 리로드로 스트림이 끊기면 인라인 승인 버튼이 사라져 막힌다
+  if (st.waiting_for === 'approval' && st.pending) {
+    if (!activeApproval.value) activeApproval.value = st.pending // {id, tool, args}
+  } else {
+    activeApproval.value = null
   }
   return st
 }
@@ -1667,6 +1674,7 @@ function removeText() {
 }
 
 async function decide(approval, decision) {
+  activeApproval.value = null // 복구 모달 닫기
   try {
     await fetch(`/api/approvals/${approval.id}`, {
       method: 'POST',
@@ -2175,6 +2183,18 @@ document.addEventListener('visibilitychange', () => {
             @keydown.enter="answerQuestion(activeQuestion, questionAnswer)"
           />
           <button @click="answerQuestion(activeQuestion, questionAnswer)">보내기</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 승인 요청 복구 모달(스트림 끊긴 뒤에도 승인/거부 가능) -->
+    <div v-if="activeApproval" class="modal-overlay">
+      <div class="modal" @click.stop>
+        <div class="modal-head">도구 실행 승인이 필요합니다</div>
+        <div class="modal-question">{{ activeApproval.tool }} — {{ summarizeArgs(activeApproval.args) }}</div>
+        <div class="modal-actions">
+          <button class="no" @click="decide(activeApproval, 'reject')">거부</button>
+          <button class="ok" @click="decide(activeApproval, 'approve')">승인</button>
         </div>
       </div>
     </div>
