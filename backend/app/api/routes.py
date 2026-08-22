@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import subprocess
 import uuid
 from pathlib import Path
@@ -223,7 +224,7 @@ async def inject_message(session_id: str, req: Request):
 @router.get("/rooms/{session_id}/git/status")
 async def git_status(session_id: str):
     ws = await _room_workspace(session_id)
-    return {"output": _git(ws, "status", "--short")}
+    return {"output": _git(ws, "-c", "core.quotepath=false", "status", "--short")}
 
 
 @router.get("/rooms/{session_id}/git/branches")
@@ -249,6 +250,54 @@ async def git_checkout(session_id: str, req: Request):
 async def git_diff(session_id: str):
     ws = await _room_workspace(session_id)
     return {"output": _git(ws, "diff", "--stat")}
+
+
+_SEP = "\x1f"
+
+
+@router.get("/rooms/{session_id}/git/log")
+async def git_log(session_id: str, limit: int = 50):
+    ws = await _room_workspace(session_id)
+    limit = max(1, min(limit, 200))
+    raw = _git(
+        ws, "-c", "core.quotepath=false", "log", "-n", str(limit),
+        f"--pretty=format:%h{_SEP}%s{_SEP}%an{_SEP}%ar",
+    )
+    commits = []
+    for line in raw.splitlines():
+        parts = line.split(_SEP)
+        if len(parts) == 4:
+            commits.append(
+                {"hash": parts[0], "subject": parts[1], "author": parts[2], "date": parts[3]}
+            )
+    return {"commits": commits}
+
+
+@router.get("/rooms/{session_id}/git/file-diff")
+async def git_file_diff(session_id: str, path: str = ""):
+    ws = await _room_workspace(session_id)
+    if not path:
+        return {"diff": ""}
+    out = _git(ws, "-c", "core.quotepath=false", "diff", "--", path)
+    if not out.strip():
+        # 추적되지 않은 새 파일 — 전체를 추가로 표시
+        out = _git(ws, "-c", "core.quotepath=false", "diff", "--no-index", "--", "/dev/null", path)
+    return {"diff": out}
+
+
+@router.get("/rooms/{session_id}/git/commit")
+async def git_commit(session_id: str, hash: str = ""):
+    ws = await _room_workspace(session_id)
+    if not re.fullmatch(r"[0-9a-fA-F]{4,40}", hash or ""):
+        return {"error": "잘못된 커밋 해시입니다."}
+    meta = _git(
+        ws, "-c", "core.quotepath=false", "show", "-s",
+        f"--pretty=format:%h{_SEP}%an{_SEP}%ar{_SEP}%s", hash,
+    ).split(_SEP)
+    diff = _git(ws, "-c", "core.quotepath=false", "show", "--format=", hash)
+    if len(meta) == 4:
+        return {"hash": meta[0], "author": meta[1], "date": meta[2], "subject": meta[3], "diff": diff}
+    return {"hash": hash, "author": "", "date": "", "subject": "", "diff": diff}
 
 
 @router.get("/admin/stats")

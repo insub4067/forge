@@ -54,7 +54,7 @@ const adminStats = ref(null)
 const showModelPicker = ref(false)
 const pickerRole = ref('')
 const adminBalance = ref(null)
-const adminPolicyOpen = ref(true)
+const adminPolicyOpen = ref(false)
 const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
 const attachedImage = ref(null)
 const fileInput = ref(null)
@@ -1001,7 +1001,10 @@ onMounted(async () => {
         <div v-if="adminStats" class="admin-section">
           <div class="admin-stat-title collapsible" @click="togglePolicy">
             <span>Provider / 모델 정책</span>
-            <span class="chevron">{{ adminPolicyOpen ? '▾' : '▸' }}</span>
+            <span class="collapsible-right">
+              <span v-if="!adminPolicyOpen" class="provider-summary">{{ adminStats.provider }}</span>
+              <span class="chevron">{{ adminPolicyOpen ? '▾' : '▸' }}</span>
+            </span>
           </div>
           <div v-show="adminPolicyOpen">
             <div class="admin-row"><span>Provider</span><span>{{ adminStats.provider }}</span></div>

@@ -334,9 +334,22 @@ header .todo-btn {
   margin-bottom: 10px;
 }
 
+.collapsible-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.provider-summary {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+}
+
 .chevron {
-  font-size: 12px;
+  font-size: 18px;
   color: var(--muted);
+  line-height: 1;
 }
 
 .admin-row {
