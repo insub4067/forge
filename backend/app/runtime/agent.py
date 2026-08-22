@@ -19,6 +19,7 @@ CONTEXT_BLOCK_RATIO = 0.95
 EventSink = Callable[[dict[str, Any]], Awaitable[None]]
 
 AGENTS_DIR = Path(__file__).resolve().parent.parent.parent / "docs" / "agents"
+GLOBAL_MEMORY_PATH = Path(__file__).resolve().parent.parent.parent / "GLOBAL_MEMORY.md"
 
 BASE_PROMPT = """당신은 FORGE 에이전틱 코딩 에이전트의 일부입니다. 아래 역할 지침을 따르며 로컬 코드베이스에서 작업합니다.
 
@@ -42,8 +43,28 @@ def _load_role(role: str) -> str:
     return ""
 
 
-def _system_for(role: str) -> str:
-    return BASE_PROMPT + "\n\n" + _load_role(role)
+def _load_global_memory() -> str:
+    if GLOBAL_MEMORY_PATH.exists():
+        return GLOBAL_MEMORY_PATH.read_text(encoding="utf-8")
+    return ""
+
+
+def _load_room_memory(workspace: str) -> str:
+    path = Path(workspace) / "ROOM_MEMORY.md"
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+    return ""
+
+
+def _system_for(role: str, room_memory: str = "") -> str:
+    parts = [BASE_PROMPT]
+    global_mem = _load_global_memory()
+    if global_mem:
+        parts.append("\n\n## 전역 메모리 (GLOBAL_MEMORY.md)\n" + global_mem)
+    if room_memory:
+        parts.append("\n\n## 방 메모리 (ROOM_MEMORY.md)\n" + room_memory)
+    parts.append("\n\n" + _load_role(role))
+    return "".join(parts)
 
 
 def _role_model(role: str) -> str:
@@ -144,10 +165,11 @@ class AgentRuntime:
         state: dict,
         recent_calls: list[str],
         step_base: int,
+        room_memory: str = "",
     ) -> str:
         await send("role_start", {"role": role})
         messages: list[dict] = [
-            {"role": "system", "content": _system_for(role)},
+            {"role": "system", "content": _system_for(role, room_memory)},
             *all_messages,
         ]
 
@@ -347,12 +369,13 @@ class AgentRuntime:
         state: dict[str, Any] = {"goal": goal, "files_changed": [], "errors": []}
         recent_calls: list[str] = []
         all_messages: list[dict] = [*history]
+        room_memory = _load_room_memory(ws)
 
         step_base = 0
 
         # 1. Planner
         status = await self._run_role(
-            "planner", all_messages, send, session_id, ws, state, recent_calls, step_base
+            "planner", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
         )
         step_base += MAX_STEPS
         if status != "done":
@@ -361,7 +384,7 @@ class AgentRuntime:
 
         # 2. Coder
         status = await self._run_role(
-            "coder", all_messages, send, session_id, ws, state, recent_calls, step_base
+            "coder", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
         )
         step_base += MAX_STEPS
         if status != "done":
@@ -370,7 +393,7 @@ class AgentRuntime:
 
         # 3. Reviewer
         status = await self._run_role(
-            "reviewer", all_messages, send, session_id, ws, state, recent_calls, step_base
+            "reviewer", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
         )
         step_base += MAX_STEPS
         if status != "done":
@@ -382,7 +405,7 @@ class AgentRuntime:
             tasks = await store.list_tasks(session_id)
             if any(t.get("status") == "debug" for t in tasks):
                 status = await self._run_role(
-                    "debugger", all_messages, send, session_id, ws, state, recent_calls, step_base
+                    "debugger", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
                 )
                 if status != "done":
                     await send("done", {"content": self._finish_message(status)})
