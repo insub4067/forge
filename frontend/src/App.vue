@@ -1,5 +1,15 @@
 <script setup>
 import { ref, reactive, nextTick, onMounted } from 'vue'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
+
+function renderMarkdown(text) {
+  try {
+    return DOMPurify.sanitize(marked.parse(text || ''))
+  } catch {
+    return ''
+  }
+}
 
 const messages = ref([])
 const input = ref('')
@@ -262,7 +272,7 @@ onMounted(async () => {
               <div class="thinking-body">{{ m.thinking }}</div>
             </details>
 
-            <div v-if="m.text" class="text">{{ m.text }}</div>
+            <div v-if="m.text" class="text" v-html="renderMarkdown(m.text)"></div>
 
             <details v-for="(t, j) in m.tools" :key="j" class="tool" :class="{ running: t.status === 'running' }" open>
               <summary>
