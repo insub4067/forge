@@ -2,96 +2,62 @@
 
 [English](README.md) | **한국어**
 
-셀프호스팅 **Agent Runtime 기반 코딩 AI 플랫폼**. 자연어 요구사항을 받아 계획 → 실행 → 검토 → 수정 → 재검증을 반복하며, Mac에서 장시간 실행하고 모바일 PWA로 원격 제어한다.
+셀프호스팅 **Agent Runtime 기반 코딩 AI 플랫폼**. 자연어 목표를 받아 실행·검토·수정을 반복하고, Mac에서 장시간 작업하며 모바일 PWA로 원격 제어한다.
 
-FORGE의 최상위 최적화 목표는 **동일하거나 더 높은 성공률을 유지하면서 더 적은 토큰·API 호출·시간·비용으로 작업을 끝내는 것**이다. 핵심 지표는 `tokens/task`가 아니라 **cost per successfully completed task**다.
+최상위 목표는 **동일하거나 더 높은 성공률을 유지하면서 더 적은 토큰·API 호출·시간·비용으로 작업을 끝내는 것**이다. 핵심 지표는 `tokens/task`가 아니라 **cost per successfully completed task**다.
 
 ```text
 User Goal
   ↓
 Triage (Flash)
-  ↓
-Planner (Flash 기본 / COMPLEX만 Pro)
-  ↓
-Coder (Flash)
-  ↓
-Reviewer (Flash)
-  ↓
-Debugger (필요 시 Flash → 마지막 복구 Pro)
-  ↓
-Re-review / Done
+  ├─ CHAT → Chat
+  ├─ SIMPLE → Coder → Reviewer
+  └─ COMPLEX → Planner → Coder → Reviewer
+                              ↓ 필요 시
+                         Debugger ↔ Reviewer
 ```
+
+SIMPLE 작업은 Planner를 생략한다. 짧은 작업에서 Planner의 과탐색·context 재전송 비용을 없애고, 복잡한 작업에만 계획 단계를 사용한다.
 
 ## ⚠️ 보안 경고
 
-FORGE는 일반적인 채팅 UI가 아니다. 설정된 Workspace 안에서 파일을 읽고 수정하며, shell 명령을 실행하고 Git 저장소를 변경할 수 있는 코딩 에이전트다.
+FORGE는 파일 수정, shell 실행, Git 변경뿐 아니라 현재 **Mac host PTY Terminal, 화면 보기, 카메라 보기**까지 제공한다. 공용 인터넷에 직접 노출하지 말 것.
 
-**FORGE 인스턴스를 공용 인터넷에 직접 노출하지 말 것.** 인증되지 않은 사용자가 접근하면 다음과 같은 위험이 생길 수 있다.
+Cloudflare Tunnel 자체는 사용자 인증이 아니다. 원격 사용 시 **Cloudflare Zero Trust / Access, Tailscale, VPN 등 별도 접근제어**를 사용한다. 현재 개발 배포는 Cloudflare Zero Trust Access 정책으로 제한한다.
 
-- 접근 가능한 Workspace의 파일 읽기·수정
-- shell 명령 실행
-- Git 저장소 변경
-- 설정된 LLM API quota/credential의 간접 사용
-- host 실행 모드 사용 시 로컬 시스템에 대한 더 넓은 접근
+특히 Host Terminal은 사실상 원격 shell이다. application-level WebSocket authorization과 네트워크 경계를 독립적으로 검증해야 한다.
 
-FORGE 자체의 애플리케이션 인증만을 네트워크 접근제어의 대체재로 간주하지 않는다. 원격 사용 시 **Cloudflare Zero Trust / Access, Tailscale, VPN 등 신뢰 가능한 외부 접근제어 계층 뒤에 배치하는 것을 강하게 권장한다.**
-
-운영 중인 개발 인스턴스는 **Cloudflare Zero Trust의 명시적 Access 정책으로 접근을 제한**하고 있다. Cloudflare Tunnel만 연결하는 것은 사용자 인증을 제공하지 않으므로, Tunnel을 공개 hostname에 연결할 경우 반드시 Access 정책을 별도로 구성해야 한다.
-
-기본 Docker Sandbox를 유지하고, `SANDBOX_MODE=host`는 위험성을 이해한 신뢰된 개인 환경에서만 사용한다. **host 실행 모드를 신뢰할 수 없는 네트워크에 노출하지 말 것.**
-
-## 현재 상태
-
-- Phase 1 — Agent Core: 완료
-- Phase 2 — Code Modification: 완료
-- Phase 3 — Remote Operation: 진행 중
-
-현재 구현된 핵심 기능:
+## 현재 구현
 
 - DeepSeek V4 streaming / tool calling / thinking
-- Planner Flash-first, Pro-on-demand 모델 라우팅
-- Reviewer ↔ Debugger 상태 기반 자기수정 루프
-- read/write/edit/bash/grep/list 도구 + 승인 게이트
-- Docker Sandbox 기본 실행 + `SANDBOX_MODE=host` 옵트인 host 실행
-- git checkpoint, unified diff
-- Tool result pruning + 75% context compaction + 95% hard block
-- DeepSeek cache hit/miss 계측 + stable prefix hash
-- selective Skill retrieval + `save_skill` 기반 Self-Improving Skills
-- read-only tool 병렬 prefetch
-- 429/5xx/timeout 및 reasoning_content 오류 recovery
-- PostgreSQL 세션/메시지/태스크/agent run 영속화
-- Agent Run telemetry, 성공률·비용·cache·Pro 승격 지표 API
-- 동일 세션 동시 run 가드와 실행 중 메시지 injection
-- 서버 재시작 시 중단된 run 감지·정리(실행 자체 재개는 미구현)
-- JSONL durable action/event log
-- `/sessions/{id}/status` 기반 running/role/activity/승인·질문 대기 상태 조회
-- 승인·질문 600초 timeout + cancel 시 pending future 해제
-- workspace 필수 선택 및 파일 브라우저 workspace 경계 제한
-- 모바일 PWA: 세션/칸반/Git/파일/Skills/metrics/승인·질문/실시간 활동
-- 다중 이미지 첨부 + Vision 분석 + 전체화면 스와이프 뷰어
-- non-vision 모델 전송 시 원본 이미지 제거 및 텍스트 placeholder 변환
-- 실행 이력·에러 로그 독립 상세 화면
-- SSE 단절 후 `/status` 재확인 및 실행 중 polling 복구
-- Skills 카드 collapsible UI
+- SIMPLE Planner bypass + COMPLEX planning
+- Flash-first / Pro-on-demand routing
+- Reviewer ↔ Debugger 자기수정 루프
+- context pruning / 75% compaction / 95% hard block
+- cache hit/miss telemetry + selective Skills
+- reasoning_content 400 recovery 및 session 반복 retry 제거
+- read/write/edit/bash/grep/list + approval
+- `build_frontend` host build 도구: FORGE가 자기 프론트 수정 후 production build까지 수행
+- Docker Sandbox 기본 + `SANDBOX_MODE=host` opt-in
+- PostgreSQL persistence / agent telemetry / JSONL event log
+- SSE 단절 후 `/status` polling 및 pending approval 복구
+- 모바일 PWA: Session / 예약 / Mac 중심 원격 운영
+- Git / Files / Skills / Metrics / Kanban / Vision
+- Mac view-only 화면 보기
+- Mac host PTY + WebSocket + xterm.js Terminal
+- Mac Camera `imagesnap` JPEG polling PoC
+- 예약 작업 기반 및 workspace fallback
 
-## 실행 모드
+## 아직 중요한 미완료
 
-기본 `SANDBOX_MODE`는 Docker 격리 실행이다. 필요한 경우에만 `SANDBOX_MODE=host`로 호스트 직접 실행을 옵트인할 수 있다. host 모드는 자기검증과 로컬 도구 활용 범위가 넓지만 격리 수준이 낮으므로 신뢰된 개인 환경에서만 사용한다.
+- 서버 재시작 후 실제 run continuation을 위한 Durable Worker / authoritative event replay
+- Terminal/Screen/Camera authorization 보안 검증
+- Scheduled / Deferred / Condition Jobs 완성 + Web Push
+- Tool Script/RPC Mode
+- ExecutionBackend 추상화
+- bounded RSI: candidate branch → benchmark → promotion/rollback
 
-## Remote Runtime
-
-브라우저 SSE가 끊겨도 서버 run은 계속될 수 있으며 PWA는 `/status` 폴링으로 현재 role과 activity를 복구한다. 서버 프로세스 자체가 재시작된 경우 DB의 `sessions.running`을 reconcile해 중단 사실을 히스토리에 남긴다. **프로세스 재시작 후 실행 지점부터 자동 resume하는 durable worker는 아직 구현되지 않았다.**
-
-## 효율 전략
-
-1. Flash-first / Pro-on-demand
-2. Stable prompt prefix와 cache hit 추적
-3. 관련 Skill만 최대 N개 선택 삽입
-4. 긴 tool result model-free pruning
-5. read-only tool 병렬 실행
-6. 75% context pressure에서 비파괴 compaction
-7. 실패 시에만 retry / debugger / Pro escalation
-8. 실제 telemetry로 `cost per successfully completed task` 비교
+FORGE는 자기 코드를 수정하고 일부 빌드까지 수행할 수 있지만, 자동 평가·선택 루프가 닫히기 전에는 완전한 RSI로 간주하지 않는다.
 
 ## 시작하기
 
@@ -112,26 +78,16 @@ npm install
 npm run build
 ```
 
-## 주요 문서
+## 문서
 
-전체 문서 구조는 [`docs/README.md`](docs/README.md)에서 확인한다.
+[`docs/README.md`](docs/README.md)를 authoritative 문서 인덱스로 사용한다.
 
-- [`docs/core/`](docs/core/) — 아키텍처, Agent loop, DB, 요구사항
-- [`docs/status/`](docs/status/) — 구현 상태와 기능 matrix
-- [`docs/operations/`](docs/operations/) — benchmark, troubleshooting
-- [`docs/planning/`](docs/planning/) — 우선순위 로드맵과 개선 계획
-- [`docs/proposal/`](docs/proposal/) — 설계 제안 및 외부 Harness 조사 기록
-- [`docs/archive/`](docs/archive/) — 현재 기준이 아닌 과거 문서
-
-`docs/agents/`는 일반 문서가 아니라 **실제 Runtime prompt 파일**이므로 별도 취급한다.
-
-## 다음 핵심 과제
-
-- 실제 worker 수준의 durable resume / event replay
-- Tool Script/RPC Mode
-- Scheduled / Condition Jobs + Web Push
-- ExecutionBackend(Local→SSH→Docker) 추상화
-- isolated subagent는 기반 안정화 이후 검토
+- `docs/core/` — 현재 구조와 Agent loop
+- `docs/status/` — 실제 구현 상태
+- `docs/operations/` — benchmark / troubleshooting
+- `docs/planning/` — roadmap
+- `docs/proposal/` — 제안 및 adoption 기록
+- `docs/agents/` — **실제 runtime prompt**
 
 ## 라이선스
 
