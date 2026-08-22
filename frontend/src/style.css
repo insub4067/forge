@@ -1260,3 +1260,30 @@ textarea:focus {
   font-size: 13px;
   padding: 4px 0;
 }
+
+.steer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 12px;
+}
+.steer-label {
+  color: var(--muted);
+}
+.steer-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.steer-chip.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}

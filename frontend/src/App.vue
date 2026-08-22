@@ -40,6 +40,8 @@ const gitStatus = ref('')
 const gitDiff = ref('')
 const gitError = ref('')
 const gitLoading = ref(false)
+const steerMode = ref('queue') // 'queue' = 작업큐 대기(기본), 'switch' = 중단 후 새로 시작
+const pendingSend = ref(null)
 const showFiles = ref(false)
 const filePath = ref('')
 const fileParent = ref(null)
@@ -623,6 +625,13 @@ async function send() {
   } finally {
     busy.value = false
     scrollBottom()
+    // '중단 후 새로 시작' 모드로 대기된 메시지가 있으면 현재 스트림 종료 후 전송
+    if (pendingSend.value) {
+      const t = pendingSend.value
+      pendingSend.value = null
+      input.value = t
+      setTimeout(() => send(), 50)
+    }
   }
 }
 
@@ -784,7 +793,6 @@ onMounted(async () => {
     <div v-if="roomMenuId" class="menu-overlay" @click="roomMenuId = null">
       <div class="menu-panel" @click.stop>
         <div class="menu-item" @click="renameRoom(roomMenuId); roomMenuId = null">이름 변경</div>
-        <div v-if="!menuRoom()?.workspace_locked" class="menu-item" @click="openWorkspacePicker(roomMenuId); roomMenuId = null">워크스페이스 변경</div>
         <div class="menu-item danger" @click="deleteRoom(roomMenuId); roomMenuId = null">삭제</div>
       </div>
     </div>
@@ -844,6 +852,20 @@ onMounted(async () => {
       </button>
     </div>
 
+    <div v-if="busy" class="steer-bar">
+      <span class="steer-label">작업 중 · 보낼 메시지는</span>
+      <button
+        class="steer-chip"
+        :class="{ active: steerMode === 'queue' }"
+        @click="steerMode = 'queue'"
+      >작업큐 대기</button>
+      <button
+        class="steer-chip"
+        :class="{ active: steerMode === 'switch' }"
+        @click="steerMode = 'switch'"
+      >중단 후 새로</button>
+    </div>
+
     <footer>
       <input ref="fileInput" type="file" accept="image/*" hidden @change="onFileChange" />
       <button class="attach-btn" @click="fileInput.click()" aria-label="이미지 첨부">
@@ -852,11 +874,11 @@ onMounted(async () => {
       <textarea
         v-model="input"
         rows="1"
-        placeholder="메시지를 입력하세요"
+        :placeholder="busy ? (steerMode === 'switch' ? '중단하고 새로 요청…' : '작업큐에 메시지 추가…') : '메시지를 입력하세요'"
         @keydown="onKeydown"
         @input="onInput"
       ></textarea>
-      <button id="send" :disabled="busy" @click="send" aria-label="전송">
+      <button id="send" :disabled="!input.trim() && !attachedImage" @click="send" aria-label="전송">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
       </button>
     </footer>
