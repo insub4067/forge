@@ -167,7 +167,7 @@ async function selectModel(model) {
 async function loadGit() {
   const id = currentRoomId.value
   if (!id) {
-    gitError.value = '방을 먼저 선택하세요.'
+    gitError.value = '세션을 먼저 선택하세요.'
     return
   }
   gitError.value = ''
@@ -429,7 +429,7 @@ async function createRoom() {
 }
 
 async function deleteRoom(id) {
-  if (!confirm('이 채팅방을 삭제할까요?')) return
+  if (!confirm('이 세션을 삭제할까요?')) return
   try {
     await fetch(`/api/rooms/${id}`, { method: 'DELETE' })
     await loadRooms()
@@ -449,7 +449,7 @@ async function deleteRoom(id) {
 
 async function renameRoom(id) {
   const room = rooms.value.find((r) => r.id === id)
-  const name = prompt('새 방 이름', room?.title || '')
+  const name = prompt('새 세션 이름', room?.title || '')
   if (!name || !name.trim()) return
   try {
     await fetch(`/api/rooms/${id}`, {
@@ -631,6 +631,12 @@ async function steerDuringRun(text) {
   }
 }
 
+function quickAction(text) {
+  if (busy.value) return
+  input.value = text
+  send()
+}
+
 async function send() {
   const text = input.value.trim()
   const imageUrl = attachedImage.value?.url
@@ -788,23 +794,17 @@ onMounted(async () => {
 <template>
   <div class="app">
     <header>
-      <button class="ctx-btn" @click="openAdmin" aria-label="관리자">
-        <svg class="ctx" viewBox="0 0 36 36">
-          <circle class="ctx-bg" cx="18" cy="18" r="15" pathLength="100" />
-          <circle
-            class="ctx-fg"
-            cx="18"
-            cy="18"
-            r="15"
-            pathLength="100"
-            :stroke-dasharray="`${ctxPct(currentRoom())} 100`"
-            :class="ctxClass(ctxPct(currentRoom()))"
-          />
-        </svg>
+      <button class="icon-btn" @click="showRooms = true" aria-label="세션 목록">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
-      <button class="room-btn" @click="showRooms = !showRooms">
-        <span class="room-title-main">{{ currentRoom()?.title || 'FORGE' }}</span>
-        <span class="room-sub">{{ shortPath(currentRoom()?.workspace_path) }}</span>
+      <button class="room-btn" @click="showRooms = true">
+        <span class="room-title-main">
+          <span class="status-dot" :class="busy ? 'working' : 'idle'"></span>
+          {{ currentRoom()?.title || 'FORGE' }}
+        </span>
+        <span class="room-sub">
+          <span v-if="busy" class="status-live">실행 중</span><template v-if="busy"> · </template>{{ shortPath(currentRoom()?.workspace_path) || 'Mobile Coding Agent' }}
+        </span>
       </button>
       <button v-if="busy" class="stop-btn" @click="cancelSession">중단</button>
       <button class="todo-btn" @click="showMenu = !showMenu" aria-label="메뉴">
@@ -826,6 +826,11 @@ onMounted(async () => {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 10l2 2 4-4"/><line x1="8" y1="16" x2="16" y2="16"/></svg>
           <span>칸반</span>
         </div>
+        <div class="menu-item" @click="openAdmin(); showMenu = false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>관리자</span>
+          <span class="menu-ctx">Context {{ ctxPct(currentRoom()) }}%</span>
+        </div>
         <div v-if="busy" class="menu-item danger" @click="cancelSession(); showMenu = false">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
           <span>중단</span>
@@ -835,6 +840,13 @@ onMounted(async () => {
 
     <div v-if="showRooms" class="rooms-overlay" @click="showRooms = false">
       <div class="rooms-panel" @click.stop>
+        <div class="drawer-head">
+          <span class="drawer-title">세션</span>
+          <button class="drawer-close" @click="showRooms = false" aria-label="닫기">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+        <div class="rooms-scroll">
         <div v-for="r in rooms" :key="r.id" class="room-swipe">
           <button class="room-swipe-del" @click.stop="deleteRoom(r.id)">삭제</button>
           <div
@@ -866,7 +878,8 @@ onMounted(async () => {
             </button>
           </div>
         </div>
-        <div class="rooms-add" @click="showCreateRoom = true; showRooms = false">+ 새 방 만들기</div>
+        </div>
+        <div class="rooms-add" @click="showCreateRoom = true; showRooms = false">+ 새 세션</div>
       </div>
     </div>
 
@@ -879,8 +892,15 @@ onMounted(async () => {
 
     <main ref="chatEl">
       <div v-if="messages.length === 0" class="welcome">
-        <p>무엇을 분석할까요?</p>
-        <p class="sub">코드 탐색·분석을 자율로 수행합니다.</p>
+        <div class="welcome-brand">FORGE</div>
+        <p class="welcome-title">무엇을 작업할까요?</p>
+        <p class="sub">{{ shortPath(currentRoom()?.workspace_path) || '워크스페이스 미설정' }}에서 자율로 작업합니다.</p>
+        <div class="quick-actions">
+          <button class="quick-action" @click="quickAction('이 프로젝트의 구조와 핵심 동작을 파악해서 요약해줘')">프로젝트 파악</button>
+          <button class="quick-action" @click="quickAction('현재 git 변경사항을 리뷰해줘')">변경사항 리뷰</button>
+          <button class="quick-action" @click="quickAction('git 상태와 최근 커밋을 확인해서 알려줘')">Git 상태 확인</button>
+          <button class="quick-action" @click="quickAction('테스트를 실행하고 결과를 알려줘')">테스트 실행</button>
+        </div>
       </div>
 
       <div v-for="(m, i) in messages" :key="i" class="msg" :class="m.role">
@@ -948,19 +968,22 @@ onMounted(async () => {
 
     <footer>
       <input ref="fileInput" type="file" accept="image/*" hidden @change="onFileChange" />
-      <button class="attach-btn" @click="fileInput.click()" aria-label="이미지 첨부">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-      </button>
-      <textarea
-        v-model="input"
-        rows="1"
-        :placeholder="busy ? (steerMode === 'switch' ? '중단하고 새로 요청…' : '작업큐에 메시지 추가…') : '메시지를 입력하세요'"
-        @keydown="onKeydown"
-        @input="onInput"
-      ></textarea>
-      <button id="send" :disabled="!input.trim() && !attachedImage" @click="send" aria-label="전송">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-      </button>
+      <div class="composer">
+        <button class="attach-btn" @click="fileInput.click()" aria-label="첨부">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <textarea
+          v-model="input"
+          rows="1"
+          class="composer-input"
+          :placeholder="busy ? (steerMode === 'switch' ? '중단하고 새로 요청…' : '작업큐에 메시지 추가…') : '메시지를 입력하세요'"
+          @keydown="onKeydown"
+          @input="onInput"
+        ></textarea>
+        <button id="send" class="composer-send" :disabled="!input.trim() && !attachedImage" @click="send" aria-label="전송">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+        </button>
+      </div>
     </footer>
 
     <div v-if="activeQuestion" class="modal-overlay" @click="activeQuestion = null">
@@ -987,8 +1010,8 @@ onMounted(async () => {
 
     <div v-if="showCreateRoom" class="modal-overlay" @click="showCreateRoom = false">
       <div class="modal" @click.stop>
-        <div class="modal-head">새 채팅방</div>
-        <input v-model="newRoomName" class="modal-field" placeholder="방 이름" />
+        <div class="modal-head">새 세션</div>
+        <input v-model="newRoomName" class="modal-field" placeholder="세션 이름" />
         <button type="button" class="modal-field ws-btn" @click="openWorkspacePicker(null)">
           {{ newRoomPath || '워크스페이스 폴더 선택 (선택 사항)' }}
         </button>
@@ -1167,7 +1190,7 @@ onMounted(async () => {
           <div v-if="!adminStats.roles.length" class="admin-sub">기록 없음</div>
         </div>
         <div v-if="adminStats" class="admin-section">
-          <div class="admin-stat-title">방별 실행 이력</div>
+          <div class="admin-stat-title">세션별 실행 이력</div>
           <div v-for="room in adminStats.rooms" :key="room.session_id" class="admin-row">
             <span>{{ roomTitle(room.session_id) }}</span>
             <span>{{ room.count }}회</span>
