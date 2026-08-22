@@ -46,6 +46,9 @@ const viewingFile = ref('')
 const showMenu = ref(false)
 const showAdmin = ref(false)
 const adminStats = ref(null)
+const showModelPicker = ref(false)
+const pickerRole = ref('')
+const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner']
 const kanbanOpen = ref({
   todo: true,
   planning: true,
@@ -98,16 +101,20 @@ function openAdmin() {
 }
 
 async function changeRoleModel(role) {
-  const cur = adminStats.value?.policy?.roles?.[role]
-  const model = prompt(`${role} 모델 변경`, cur?.model || '')
-  if (!model || !model.trim()) return
+  pickerRole.value = role
+  showModelPicker.value = true
+}
+
+async function selectModel(model) {
+  if (!pickerRole.value || !model) return
   try {
-    await fetch(`/api/admin/model-policy/${role}`, {
+    await fetch(`/api/admin/model-policy/${pickerRole.value}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: model.trim() }),
+      body: JSON.stringify({ model }),
     })
     await loadAdmin()
+    showModelPicker.value = false
   } catch {}
 }
 
@@ -904,6 +911,18 @@ onMounted(async () => {
         </button>
       </div>
       <pre v-else class="file-view">{{ fileContent }}</pre>
+    </div>
+
+    <div v-if="showModelPicker" class="modal-overlay" @click="showModelPicker = false">
+      <div class="modal" @click.stop>
+        <div class="modal-head">{{ pickerRole }} 모델 선택</div>
+        <div
+          v-for="m in AVAILABLE_MODELS"
+          :key="m"
+          class="model-option"
+          @click="selectModel(m)"
+        >{{ m }}</div>
+      </div>
     </div>
 
     <div v-if="showWorkspacePicker" class="fs-overlay">

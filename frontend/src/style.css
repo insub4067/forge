@@ -404,6 +404,22 @@ header .todo-btn {
   padding: 2px 8px;
 }
 
+.model-option {
+  padding: 13px 14px;
+  font-size: 15px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.model-option:last-child {
+  border-bottom: none;
+}
+
+.model-option:active {
+  background: var(--panel-2);
+}
+
 .modal-field {
   width: 100%;
   background: var(--panel-2);
