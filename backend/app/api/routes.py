@@ -211,3 +211,21 @@ async def git_checkout(session_id: str, req: Request):
 async def git_diff(session_id: str):
     ws = await _room_workspace(session_id)
     return {"output": _git(ws, "diff", "--stat")}
+
+
+@router.get("/admin/stats")
+async def admin_stats():
+    stats = await store.admin_stats(7)
+    stats["provider"] = settings.llm_provider
+    stats["models"] = {
+        "planner": settings.planner_model or settings.deep_seek_model,
+        "coder": settings.coder_model or settings.deep_seek_model,
+        "reviewer": settings.reviewer_model or settings.deep_seek_model,
+        "debugger": settings.debugger_model or settings.deep_seek_model,
+    }
+    return stats
+
+
+@router.get("/rooms/{session_id}/runs")
+async def room_runs(session_id: str):
+    return await store.session_agent_runs(session_id)

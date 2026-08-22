@@ -1,10 +1,11 @@
 import json
 import os
 import uuid
+from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, select
 
-from .models import Checkpoint, Message, Session, Task
+from .models import AgentRun, Checkpoint, Message, Session, Task
 from .session import async_session
 
 
@@ -152,3 +153,87 @@ async def list_tasks(session_id: str) -> list[dict]:
             {"id": t.id, "title": t.title, "status": t.status, "progress": t.progress}
             for t in result.scalars()
         ]
+
+
+async def save_agent_run(
+    session_id: str,
+    role: str,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> None:
+    async with async_session() as s:
+        s.add(
+            AgentRun(
+                session_id=session_id,
+                role=role,
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
+        )
+        await s.commit()
+
+
+async def session_agent_runs(session_id: str) -> list[dict]:
+    async with async_session() as s:
+        result = await s.execute(
+            select(AgentRun)
+            .where(AgentRun.session_id == session_id)
+            .order_by(AgentRun.created_at.desc())
+        )
+        return [
+            {
+                "role": r.role,
+                "model": r.model,
+                "prompt_tokens": r.prompt_tokens,
+                "completion_tokens": r.completion_tokens,
+                "created_at": r.created_at.isoformat() if r.created_at else "",
+            }
+            for r in result.scalars()
+        ]
+
+
+async def admin_stats(days: int = 7) -> dict:
+    since = datetime.utcnow() - timedelta(days=days)
+    async with async_session() as s:
+        result = await s.execute(select(AgentRun).where(AgentRun.created_at >= since))
+        runs = result.scalars().all()
+
+        total_prompt = sum(r.prompt_tokens for r in runs)
+        total_completion = sum(r.completion_tokens for r in runs)
+
+        role_counts: dict[str, int] = {}
+        role_tokens: dict[str, int] = {}
+        for r in runs:
+            role_counts[r.role] = role_counts.get(r.role, 0) + 1
+            role_tokens[r.role] = role_tokens.get(r.role, 0) + r.prompt_tokens + r.completion_tokens
+
+        total_runs = len(runs)
+        roles = [
+            {
+                "role": role,
+                "count": count,
+                "percent": round(count / total_runs * 100, 1) if total_runs else 0,
+                "tokens": role_tokens.get(role, 0),
+            }
+            for role, count in sorted(role_counts.items(), key=lambda x: -x[1])
+        ]
+
+        room_counts: dict[str, int] = {}
+        for r in runs:
+            room_counts[r.session_id] = room_counts.get(r.session_id, 0) + 1
+        rooms = [
+            {"session_id": sid, "count": c}
+            for sid, c in sorted(room_counts.items(), key=lambda x: -x[1])
+        ]
+
+        return {
+            "days": days,
+            "total_runs": total_runs,
+            "total_tokens": total_prompt + total_completion,
+            "total_prompt": total_prompt,
+            "total_completion": total_completion,
+            "roles": roles,
+            "rooms": rooms,
+        }

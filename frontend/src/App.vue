@@ -44,6 +44,8 @@ const fileEntries = ref([])
 const fileContent = ref('')
 const viewingFile = ref('')
 const showMenu = ref(false)
+const showAdmin = ref(false)
+const adminStats = ref(null)
 const kanbanOpen = ref({
   todo: true,
   planning: true,
@@ -71,6 +73,28 @@ function onRoomTouchEnd(r, e) {
 
 function toggleKanban(key) {
   kanbanOpen.value[key] = !kanbanOpen.value[key]
+}
+
+function formatTokens(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
+  return String(n || 0)
+}
+
+function roomTitle(id) {
+  return rooms.value.find((r) => r.id === id)?.title || id.slice(0, 8)
+}
+
+async function loadAdmin() {
+  try {
+    const res = await fetch('/api/admin/stats')
+    if (res.ok) adminStats.value = await res.json()
+  } catch {}
+}
+
+function openAdmin() {
+  showAdmin.value = true
+  loadAdmin()
 }
 
 async function loadGit() {
@@ -548,18 +572,20 @@ onMounted(async () => {
 <template>
   <div class="app">
     <header>
-      <svg class="ctx" viewBox="0 0 36 36">
-        <circle class="ctx-bg" cx="18" cy="18" r="15" pathLength="100" />
-        <circle
-          class="ctx-fg"
-          cx="18"
-          cy="18"
-          r="15"
-          pathLength="100"
-          :stroke-dasharray="`${ctxPct(currentRoom())} 100`"
-          :class="ctxClass(ctxPct(currentRoom()))"
-        />
-      </svg>
+      <button class="ctx-btn" @click="openAdmin" aria-label="관리자">
+        <svg class="ctx" viewBox="0 0 36 36">
+          <circle class="ctx-bg" cx="18" cy="18" r="15" pathLength="100" />
+          <circle
+            class="ctx-fg"
+            cx="18"
+            cy="18"
+            r="15"
+            pathLength="100"
+            :stroke-dasharray="`${ctxPct(currentRoom())} 100`"
+            :class="ctxClass(ctxPct(currentRoom()))"
+          />
+        </svg>
+      </button>
       <button class="room-btn" @click="showRooms = !showRooms">
         <span class="room-title-main">{{ currentRoom()?.title || 'FORGE' }}</span>
         <span class="room-sub">{{ shortPath(currentRoom()?.workspace_path) }}</span>
@@ -572,10 +598,22 @@ onMounted(async () => {
 
     <div v-if="showMenu" class="menu-overlay" @click="showMenu = false">
       <div class="menu-panel" @click.stop>
-        <div class="menu-item" @click="openFiles(); showMenu = false">파일 브라우저</div>
-        <div class="menu-item" @click="openGit(); showMenu = false">Git</div>
-        <div class="menu-item" @click="showKanban = true; showMenu = false">칸반</div>
-        <div v-if="busy" class="menu-item danger" @click="cancelSession(); showMenu = false">중단</div>
+        <div class="menu-item" @click="openFiles(); showMenu = false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          <span>파일 브라우저</span>
+        </div>
+        <div class="menu-item" @click="openGit(); showMenu = false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="6" y1="9" x2="6" y2="15"/><path d="M18 6c0 4-6 3-6 9"/></svg>
+          <span>Git</span>
+        </div>
+        <div class="menu-item" @click="showKanban = true; showMenu = false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 10l2 2 4-4"/><line x1="8" y1="16" x2="16" y2="16"/></svg>
+          <span>칸반</span>
+        </div>
+        <div v-if="busy" class="menu-item danger" @click="cancelSession(); showMenu = false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          <span>중단</span>
+        </div>
       </div>
     </div>
 
@@ -763,6 +801,46 @@ onMounted(async () => {
         <div class="git-section">
           <div class="git-section-title">Diff (--stat)</div>
           <pre class="git-pre">{{ gitDiff || '(diff 없음)' }}</pre>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showAdmin" class="kanban-overlay">
+      <div class="kanban-head">
+        <span class="kanban-title">관리자</span>
+        <button @click="showAdmin = false">닫기</button>
+      </div>
+      <div class="admin-body">
+        <div v-if="adminStats" class="admin-section">
+          <div class="admin-stat-title">Provider / 모델</div>
+          <div class="admin-row"><span>Provider</span><span>{{ adminStats.provider }}</span></div>
+          <div v-for="(m, role) in adminStats.models" :key="role" class="admin-row">
+            <span>{{ role }}</span><span class="mono">{{ m }}</span>
+          </div>
+        </div>
+        <div v-if="adminStats" class="admin-section">
+          <div class="admin-stat-title">지난 {{ adminStats.days }}일 토큰</div>
+          <div class="admin-big">{{ formatTokens(adminStats.total_tokens) }} tokens</div>
+          <div class="admin-sub">
+            prompt {{ formatTokens(adminStats.total_prompt) }} · completion
+            {{ formatTokens(adminStats.total_completion) }}
+          </div>
+        </div>
+        <div v-if="adminStats" class="admin-section">
+          <div class="admin-stat-title">에이전트 호출 ({{ adminStats.days }}일)</div>
+          <div v-for="r in adminStats.roles" :key="r.role" class="admin-row">
+            <span>{{ r.role }}</span>
+            <span>{{ r.count }}회 · {{ r.percent }}%</span>
+          </div>
+          <div v-if="!adminStats.roles.length" class="admin-sub">기록 없음</div>
+        </div>
+        <div v-if="adminStats" class="admin-section">
+          <div class="admin-stat-title">방별 실행 이력</div>
+          <div v-for="room in adminStats.rooms" :key="room.session_id" class="admin-row">
+            <span>{{ roomTitle(room.session_id) }}</span>
+            <span>{{ room.count }}회</span>
+          </div>
+          <div v-if="!adminStats.rooms.length" class="admin-sub">기록 없음</div>
         </div>
       </div>
     </div>

@@ -173,9 +173,12 @@ class AgentRuntime:
             *all_messages,
         ]
 
+        total_prompt = 0
+        total_completion = 0
+
         for step in range(step_base, step_base + MAX_STEPS):
             if session_id in self._cancel_sessions:
-                return "cancelled"
+                return "cancelled", total_prompt, total_completion
 
             reasoning: list[str] = []
             content: list[str] = []
@@ -223,6 +226,8 @@ class AgentRuntime:
                 await send("text_delta", {"content": "".join(content_buf)})
 
             if usage:
+                total_prompt += usage.get("prompt_tokens", 0)
+                total_completion += usage.get("completion_tokens", 0)
                 await send(
                     "context_usage",
                     {
@@ -236,7 +241,7 @@ class AgentRuntime:
                 if session_id:
                     await store.update_context_usage(session_id, used)
                 if used > settings.logical_budget * CONTEXT_BLOCK_RATIO:
-                    return "context_blocked"
+                    return "context_blocked", total_prompt, total_completion
 
             assistant_msg: dict[str, Any] = {"role": "assistant", "content": "".join(content)}
             if reasoning:
@@ -259,11 +264,11 @@ class AgentRuntime:
             all_messages.append(assistant_msg)
 
             if not tool_calls:
-                return "done"
+                return "done", total_prompt, total_completion
 
             for tc in tool_calls:
                 if session_id in self._cancel_sessions:
-                    return "cancelled"
+                    return "cancelled", total_prompt, total_completion
 
                 name = tc["function"]["name"]
                 try:
@@ -283,7 +288,7 @@ class AgentRuntime:
                     all_messages.append(
                         {"role": "tool", "tool_call_id": tc["id"], "content": result}
                     )
-                    return "repeated"
+                    return "repeated", total_prompt, total_completion
 
                 await send("tool_call", {"name": name, "args": args})
 
@@ -342,7 +347,7 @@ class AgentRuntime:
                     {"role": "tool", "tool_call_id": tc["id"], "content": result[:20_000]}
                 )
 
-        return "max_steps"
+        return "max_steps", total_prompt, total_completion
 
     async def run(
         self,
@@ -374,27 +379,33 @@ class AgentRuntime:
         step_base = 0
 
         # 1. Planner
-        status = await self._run_role(
+        status, p, c = await self._run_role(
             "planner", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
         )
+        if session_id:
+            await store.save_agent_run(session_id, "planner", _role_model("planner"), p, c)
         step_base += MAX_STEPS
         if status != "done":
             await send("done", {"content": self._finish_message(status)})
             return all_messages
 
         # 2. Coder
-        status = await self._run_role(
+        status, p, c = await self._run_role(
             "coder", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
         )
+        if session_id:
+            await store.save_agent_run(session_id, "coder", _role_model("coder"), p, c)
         step_base += MAX_STEPS
         if status != "done":
             await send("done", {"content": self._finish_message(status)})
             return all_messages
 
         # 3. Reviewer
-        status = await self._run_role(
+        status, p, c = await self._run_role(
             "reviewer", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
         )
+        if session_id:
+            await store.save_agent_run(session_id, "reviewer", _role_model("reviewer"), p, c)
         step_base += MAX_STEPS
         if status != "done":
             await send("done", {"content": self._finish_message(status)})
@@ -404,9 +415,11 @@ class AgentRuntime:
         if session_id:
             tasks = await store.list_tasks(session_id)
             if any(t.get("status") == "debug" for t in tasks):
-                status = await self._run_role(
+                status, p, c = await self._run_role(
                     "debugger", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
                 )
+                if session_id:
+                    await store.save_agent_run(session_id, "debugger", _role_model("debugger"), p, c)
                 if status != "done":
                     await send("done", {"content": self._finish_message(status)})
                     return all_messages
