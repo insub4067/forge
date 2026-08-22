@@ -1,6 +1,6 @@
 const CACHE_NAME = 'forge-v2';
 
-const STATIC_ASSETS = ['/', '/manifest.webmanifest', '/icon.png', '/icon.svg'];
+const STATIC_ASSETS = ['/', '/manifest.webmanifest', '/logo.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
