@@ -420,6 +420,10 @@ header .todo-btn {
   background: var(--panel-2);
 }
 
+.model-picker-overlay {
+  z-index: 300;
+}
+
 .modal-field {
   width: 100%;
   background: var(--panel-2);

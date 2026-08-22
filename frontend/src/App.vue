@@ -48,7 +48,7 @@ const showAdmin = ref(false)
 const adminStats = ref(null)
 const showModelPicker = ref(false)
 const pickerRole = ref('')
-const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner']
+const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
 const kanbanOpen = ref({
   todo: true,
   planning: true,
@@ -917,7 +917,7 @@ onMounted(async () => {
       <pre v-else class="file-view">{{ fileContent }}</pre>
     </div>
 
-    <div v-if="showModelPicker" class="modal-overlay" @click="showModelPicker = false">
+    <div v-if="showModelPicker" class="modal-overlay model-picker-overlay" @click="showModelPicker = false">
       <div class="modal" @click.stop>
         <div class="modal-head">{{ pickerRole }} 모델 선택</div>
         <div
