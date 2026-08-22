@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable
 from ..config import settings
 from ..db import store
 from ..llm.factory import create_adapter
+from ..orchestrator.model_router import ModelRouter
 from ..tools.registry import APPROVAL_REQUIRED, TOOL_SCHEMAS, execute_tool
 from ..sandbox.executor import DockerSandbox
 
@@ -67,26 +68,16 @@ def _system_for(role: str, room_memory: str = "") -> str:
     return "".join(parts)
 
 
-def _role_model(role: str) -> str:
-    mapping = {
-        "planner": settings.planner_model,
-        "coder": settings.coder_model,
-        "reviewer": settings.reviewer_model,
-        "debugger": settings.debugger_model,
-    }
-    return mapping.get(role) or settings.deep_seek_model
-
-
 class AgentRuntime:
     def __init__(self):
         self.sandbox = DockerSandbox()
+        self.router = ModelRouter()
         self._adapters: dict[str, Any] = {}
         self.pending_approvals: dict[str, asyncio.Future] = {}
         self.pending_questions: dict[str, asyncio.Future] = {}
         self._cancel_sessions: set[str] = set()
 
-    def _adapter_for(self, role: str):
-        model = _role_model(role)
+    def _adapter_for(self, model: str):
         if model not in self._adapters:
             self._adapters[model] = create_adapter(model)
         return self._adapters[model]
@@ -166,8 +157,10 @@ class AgentRuntime:
         recent_calls: list[str],
         step_base: int,
         room_memory: str = "",
-    ) -> str:
-        await send("role_start", {"role": role})
+        retry_count: int = 0,
+    ) -> tuple:
+        route = self.router.select_model(role, retry_count)
+        await send("role_start", {"role": role, "model": route["model"], "thinking": route["thinking"]})
         messages: list[dict] = [
             {"role": "system", "content": _system_for(role, room_memory)},
             *all_messages,
@@ -178,7 +171,7 @@ class AgentRuntime:
 
         for step in range(step_base, step_base + MAX_STEPS):
             if session_id in self._cancel_sessions:
-                return "cancelled", total_prompt, total_completion
+                return "cancelled", total_prompt, total_completion, route
 
             reasoning: list[str] = []
             content: list[str] = []
@@ -188,7 +181,12 @@ class AgentRuntime:
             usage: dict[str, int] = {}
             last_emit = 0.0
 
-            async for delta in self._adapter_for(role).stream_chat(messages, TOOL_SCHEMAS):
+            async for delta in self._adapter_for(route["model"]).stream_chat(
+                messages,
+                TOOL_SCHEMAS,
+                thinking=route["thinking"],
+                reasoning_effort=route["reasoning_effort"],
+            ):
                 if delta.get("reasoning_content"):
                     reasoning.append(delta["reasoning_content"])
                     reasoning_buf.append(delta["reasoning_content"])
@@ -241,7 +239,7 @@ class AgentRuntime:
                 if session_id:
                     await store.update_context_usage(session_id, used)
                 if used > settings.logical_budget * CONTEXT_BLOCK_RATIO:
-                    return "context_blocked", total_prompt, total_completion
+                    return "context_blocked", total_prompt, total_completion, route
 
             assistant_msg: dict[str, Any] = {"role": "assistant", "content": "".join(content)}
             if reasoning:
@@ -264,11 +262,11 @@ class AgentRuntime:
             all_messages.append(assistant_msg)
 
             if not tool_calls:
-                return "done", total_prompt, total_completion
+                return "done", total_prompt, total_completion, route
 
             for tc in tool_calls:
                 if session_id in self._cancel_sessions:
-                    return "cancelled", total_prompt, total_completion
+                    return "cancelled", total_prompt, total_completion, route
 
                 name = tc["function"]["name"]
                 try:
@@ -288,7 +286,7 @@ class AgentRuntime:
                     all_messages.append(
                         {"role": "tool", "tool_call_id": tc["id"], "content": result}
                     )
-                    return "repeated", total_prompt, total_completion
+                    return "repeated", total_prompt, total_completion, route
 
                 await send("tool_call", {"name": name, "args": args})
 
@@ -347,7 +345,7 @@ class AgentRuntime:
                     {"role": "tool", "tool_call_id": tc["id"], "content": result[:20_000]}
                 )
 
-        return "max_steps", total_prompt, total_completion
+        return "max_steps", total_prompt, total_completion, route
 
     async def run(
         self,
@@ -378,34 +376,43 @@ class AgentRuntime:
 
         step_base = 0
 
+        async def record(role: str, p: int, c: int, route: dict) -> None:
+            if session_id:
+                await store.save_agent_run(
+                    session_id,
+                    role,
+                    route.get("model", ""),
+                    p,
+                    c,
+                    route.get("thinking", False),
+                    route.get("reasoning_effort", ""),
+                )
+
         # 1. Planner
-        status, p, c = await self._run_role(
+        status, p, c, route = await self._run_role(
             "planner", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
         )
-        if session_id:
-            await store.save_agent_run(session_id, "planner", _role_model("planner"), p, c)
+        await record("planner", p, c, route)
         step_base += MAX_STEPS
         if status != "done":
             await send("done", {"content": self._finish_message(status)})
             return all_messages
 
         # 2. Coder
-        status, p, c = await self._run_role(
+        status, p, c, route = await self._run_role(
             "coder", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
         )
-        if session_id:
-            await store.save_agent_run(session_id, "coder", _role_model("coder"), p, c)
+        await record("coder", p, c, route)
         step_base += MAX_STEPS
         if status != "done":
             await send("done", {"content": self._finish_message(status)})
             return all_messages
 
         # 3. Reviewer
-        status, p, c = await self._run_role(
+        status, p, c, route = await self._run_role(
             "reviewer", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
         )
-        if session_id:
-            await store.save_agent_run(session_id, "reviewer", _role_model("reviewer"), p, c)
+        await record("reviewer", p, c, route)
         step_base += MAX_STEPS
         if status != "done":
             await send("done", {"content": self._finish_message(status)})
@@ -415,11 +422,10 @@ class AgentRuntime:
         if session_id:
             tasks = await store.list_tasks(session_id)
             if any(t.get("status") == "debug" for t in tasks):
-                status, p, c = await self._run_role(
+                status, p, c, route = await self._run_role(
                     "debugger", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
                 )
-                if session_id:
-                    await store.save_agent_run(session_id, "debugger", _role_model("debugger"), p, c)
+                await record("debugger", p, c, route)
                 if status != "done":
                     await send("done", {"content": self._finish_message(status)})
                     return all_messages

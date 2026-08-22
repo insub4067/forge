@@ -61,12 +61,27 @@ Observation (결과 관찰)
 ## LLM Adapter 구조
 
 ```
-Agent Runtime → LLM Adapter Interface → DeepSeek V4 Pro Provider
+Agent Runtime → Model Router → LLM Adapter Interface → Provider (DeepSeek 등)
 ```
 
 - DeepSeek 최적화: Streaming, Thinking Mode, Effort Control, Prefix Cache
 - Prefix Cache 고정 순서: System Prompt → Agent Policy → Tool Schema → Project Rules
 - 금지: Timestamp, Random ID, Dynamic Prompt
+
+## Model Router
+
+`orchestrator/model_router.py` — 역할별 모델·thinking·effort를 선택한다.
+
+| Agent | 모델 | Thinking | Effort |
+|---|---|---|---|
+| Planner | deepseek-v4-pro | on | high |
+| Coder | deepseek-v4-flash | off | low |
+| Reviewer | deepseek-v4-flash | on | medium |
+| Debugger | deepseek-v4-flash → pro | off → on | low → high |
+
+- Debugger escalation: `retry_count >= 3` 또는 `complexity == "high"`
+- 정책은 관리자 API(`/api/admin/model-policy`)로 런타임 조회·변경
+- 실행 이력은 `agent_runs`에 model·thinking·effort 포함 기록
 
 ## Sandbox 실행
 

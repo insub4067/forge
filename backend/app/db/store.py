@@ -169,6 +169,8 @@ async def save_agent_run(
     model: str,
     prompt_tokens: int,
     completion_tokens: int,
+    thinking_enabled: bool = False,
+    reasoning_effort: str = "",
 ) -> None:
     async with async_session() as s:
         s.add(
@@ -178,6 +180,8 @@ async def save_agent_run(
                 model=model,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
+                thinking_enabled=thinking_enabled,
+                reasoning_effort=reasoning_effort,
             )
         )
         await s.commit()
@@ -194,6 +198,8 @@ async def session_agent_runs(session_id: str) -> list[dict]:
             {
                 "role": r.role,
                 "model": r.model,
+                "thinking_enabled": r.thinking_enabled,
+                "reasoning_effort": r.reasoning_effort,
                 "prompt_tokens": r.prompt_tokens,
                 "completion_tokens": r.completion_tokens,
                 "created_at": r.created_at.isoformat() if r.created_at else "",

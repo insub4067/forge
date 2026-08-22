@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -53,6 +53,8 @@ class AgentRun(Base):
     session_id: Mapped[str] = mapped_column(String, default="")
     role: Mapped[str] = mapped_column(String, default="")
     model: Mapped[str] = mapped_column(String, default="")
+    thinking_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    reasoning_effort: Mapped[str] = mapped_column(String, default="")
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

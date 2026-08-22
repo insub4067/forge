@@ -14,6 +14,8 @@ class DeepSeekAdapter:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
+        thinking: bool = False,
+        reasoning_effort: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         payload: dict[str, Any] = {
             "model": self.model,
@@ -23,6 +25,10 @@ class DeepSeekAdapter:
         }
         if tools:
             payload["tools"] = tools
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
+        if thinking:
+            payload["extra_body"] = {"thinking": {"type": "enabled"}}
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(600, connect=30)) as client:
             async with client.stream(

@@ -88,6 +88,37 @@ Loop는 다음 조건에서 종료한다.
 - Tool 권한 정책
 - Human Approval Gate
 
+## Agent별 Model Policy
+
+역할별로 비용 효율이 높은 모델과 추론 설정을 사용한다.
+
+| Agent | 모델 | Thinking | Reasoning Effort |
+|---|---|---|---|
+| Planner | `deepseek-v4-pro` | enabled | high |
+| Coder | `deepseek-v4-flash` | disabled | low |
+| Reviewer | `deepseek-v4-flash` | enabled | medium |
+| Debugger | `deepseek-v4-flash` → `deepseek-v4-pro` | disabled → enabled | low → high |
+
+Debugger escalation 조건: `retry_count >= 3` 또는 `complexity == "high"`.
+
+## Model Router
+
+`backend/app/orchestrator/model_router.py` — Agent 타입·재시도 횟수·복잡도로 모델 선택.
+
+- 정책은 런타임에 `get_policy()` / `update_policy()`로 조회·변경 가능
+- 관리자 페이지에서 확인·변경 가능 (`/api/admin/model-policy`)
+- 실행 시 사용한 모델·thinking·effort는 `agent_runs` 테이블에 기록
+
+## DeepSeek Thinking 활용 전략
+
+- reasoning(thinking)은 Planner·Reviewer처럼 깊은 추론이 필요한 단계에서만 사용
+- Coder는 반복 실행이 많으므로 thinking을 꺼서 지연·비용 절감
+- Debugger는 기본 flash로 시도하고, 재시도 3회 이상 또는 아키텍처 변경이 필요할 때만 pro로 격상
+
+## Cost Optimization Strategy
+
+강한 모델 하나를 쓰는 대신, 저비용 모델을 반복 실행하고 필요한 순간만 고성능 추론을 사용한다.
+
 ## 설계 의도
 
 FORGE의 경쟁력은 가장 강한 모델을 사용하는 것이 아니라, 적절한 작업 단위로 분해하고 저비용 LLM 호출을 반복하여 결과 품질을 높이는 Agent Runtime에 있다.

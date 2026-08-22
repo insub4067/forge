@@ -220,13 +220,25 @@ async def git_diff(session_id: str):
 async def admin_stats():
     stats = await store.admin_stats(7)
     stats["provider"] = settings.llm_provider
-    stats["models"] = {
-        "planner": settings.planner_model or settings.deep_seek_model,
-        "coder": settings.coder_model or settings.deep_seek_model,
-        "reviewer": settings.reviewer_model or settings.deep_seek_model,
-        "debugger": settings.debugger_model or settings.deep_seek_model,
-    }
+    stats["policy"] = runtime.router.get_policy()
     return stats
+
+
+@router.get("/admin/model-policy")
+async def get_model_policy():
+    return runtime.router.get_policy()
+
+
+@router.put("/admin/model-policy/{role}")
+async def update_model_policy(role: str, req: Request):
+    body = await req.json()
+    ok = runtime.router.update_policy(
+        role,
+        model=body.get("model"),
+        thinking=body.get("thinking"),
+        reasoning_effort=body.get("reasoning_effort"),
+    )
+    return {"ok": ok}
 
 
 @router.get("/rooms/{session_id}/runs")

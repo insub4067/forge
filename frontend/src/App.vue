@@ -97,6 +97,20 @@ function openAdmin() {
   loadAdmin()
 }
 
+async function changeRoleModel(role) {
+  const cur = adminStats.value?.policy?.roles?.[role]
+  const model = prompt(`${role} 모델 변경`, cur?.model || '')
+  if (!model || !model.trim()) return
+  try {
+    await fetch(`/api/admin/model-policy/${role}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: model.trim() }),
+    })
+    await loadAdmin()
+  } catch {}
+}
+
 async function loadGit() {
   const id = currentRoomId.value
   if (!id) return
@@ -831,10 +845,17 @@ onMounted(async () => {
       </div>
       <div class="admin-body">
         <div v-if="adminStats" class="admin-section">
-          <div class="admin-stat-title">Provider / 모델</div>
+          <div class="admin-stat-title">Provider / 모델 정책</div>
           <div class="admin-row"><span>Provider</span><span>{{ adminStats.provider }}</span></div>
-          <div v-for="(m, role) in adminStats.models" :key="role" class="admin-row">
-            <span>{{ role }}</span><span class="mono">{{ m }}</span>
+          <div v-for="(p, role) in adminStats.policy?.roles" :key="role" class="admin-policy">
+            <div class="admin-row">
+              <span class="role-name">{{ role }}</span>
+              <button class="admin-edit" @click="changeRoleModel(role)">변경</button>
+            </div>
+            <div class="admin-policy-detail">
+              <span class="mono">{{ p.model }}</span>
+              <span class="tag">{{ p.thinking ? 'thinking' : 'no-thinking' }} · {{ p.reasoning_effort }}</span>
+            </div>
           </div>
         </div>
         <div v-if="adminStats" class="admin-section">
