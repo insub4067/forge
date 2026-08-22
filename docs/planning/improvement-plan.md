@@ -149,3 +149,22 @@ roadmap-priority.md(P0~P9)·proposal 검토에서 나온, 위에 없던 실행 �
 우선순위 원칙은 roadmap-priority.md를 따른다: **P0 benchmark → P1 durable
 worker → P2 parallel → P3 tool RPC → …**. 단, 신뢰를 깨는 P0 버그(위 1~4)는
 로드맵과 무관하게 즉시 처리한다.
+
+### proposal 6종 전문 검토로 추가된 실행 항목
+
+- [ ] **web_search / web_fetch tool (proposal: web-search-tools)** — 코딩 에이전트가
+      최신 문서·breaking change·오류 사례를 조사(= 클로드급). bounded tool:
+      provider 추상화(Tavily/Brave, API 키 없으면 미등록), URL 검증·timeout·
+      private network 차단·HTML 정제·결과 크기 제한. 모든 요청에 검색하지 말고
+      필요 시만(정책). **성공률 대비 비용을 benchmark로 판정.**
+- [ ] **role별 tool 권한 (proposal: cleanroom)** — Reviewer=read-only, Coder=read/write
+      를 프롬프트가 아니라 Runtime이 강제. 지금은 chat만 CHAT_TOOLS로 분리됨.
+      Reviewer가 write 가능한 현재는 correctness/보안 리스크.
+- [ ] **Vision UI 자동 리뷰 루프 (proposal: vision-agent)** — Coder→스크린샷→Vision
+      이슈 감지(정렬/간격/대비/다크모드/반응형)→auto Task 생성, before/after 회귀
+      비교. FORGE가 자기 UI를 많이 고치므로 실익 큼(단, 스크린샷 캡처 수단 필요).
+- [ ] **compaction 체크포인트 포맷 (proposal: deepseek-harness)** — 요약을
+      `[COMPACTION CHECKPOINT] 목표/확인한 사실/변경한 파일/남은 작업/실패` 구조로,
+      압박 밴드(70/85/92%)로 단계화. 현재 압축을 이 포맷으로 정제.
+- [ ] **skill candidate 승인 흐름 (proposal: hermes)** — Reviewer가 재사용 가치를
+      판단해 `skill_candidate` 이벤트 → 사용자 승인 → 저장(자동저장 대신). P2-9와 연동.
