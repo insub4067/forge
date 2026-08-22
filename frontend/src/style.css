@@ -356,6 +356,19 @@ header .todo-btn {
   margin-top: 4px;
 }
 
+.admin-charge {
+  display: block;
+  text-align: center;
+  margin-top: 12px;
+  padding: 11px 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
 .admin-policy {
   border-bottom: 1px solid var(--border);
   padding: 4px 0;

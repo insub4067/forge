@@ -5,6 +5,7 @@ import subprocess
 import uuid
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, File, Request, UploadFile
 from sse_starlette.sse import EventSourceResponse
 
@@ -251,6 +252,21 @@ async def admin_stats():
 @router.get("/admin/model-policy")
 async def get_model_policy():
     return runtime.router.get_policy()
+
+
+@router.get("/admin/balance")
+async def admin_balance():
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                "https://api.deepseek.com/user/balance",
+                headers={"Authorization": f"Bearer {settings.deep_seek_api_key}"},
+            )
+            if r.status_code == 200:
+                return r.json()
+            return {"error": f"HTTP {r.status_code}"}
+    except Exception as err:
+        return {"error": str(err)}
 
 
 @router.put("/admin/model-policy/{role}")

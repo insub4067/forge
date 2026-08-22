@@ -49,6 +49,7 @@ const showAdmin = ref(false)
 const adminStats = ref(null)
 const showModelPicker = ref(false)
 const pickerRole = ref('')
+const adminBalance = ref(null)
 const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
 const attachedImage = ref(null)
 const fileInput = ref(null)
@@ -98,9 +99,22 @@ async function loadAdmin() {
   } catch {}
 }
 
+async function loadBalance() {
+  try {
+    const res = await fetch('/api/admin/balance')
+    if (res.ok) adminBalance.value = await res.json()
+  } catch {}
+}
+
 function openAdmin() {
   showAdmin.value = true
   loadAdmin()
+  loadBalance()
+}
+
+function refreshAdmin() {
+  loadAdmin()
+  loadBalance()
 }
 
 async function changeRoleModel(role) {
@@ -892,9 +906,22 @@ onMounted(async () => {
     <div v-if="showAdmin" class="kanban-overlay">
       <div class="kanban-head">
         <span class="kanban-title">관리자</span>
+        <button @click="refreshAdmin">새로고침</button>
         <button @click="showAdmin = false">닫기</button>
       </div>
       <div class="admin-body">
+        <div v-if="adminBalance && adminBalance.balance_infos" class="admin-section">
+          <div class="admin-stat-title">DeepSeek 잔액</div>
+          <div v-for="b in adminBalance.balance_infos" :key="b.currency" class="admin-row">
+            <span>{{ b.currency }}</span>
+            <span class="admin-big">${{ b.total_balance }}</span>
+          </div>
+          <a class="admin-charge" href="https://platform.deepseek.com" target="_blank" rel="noopener">충전하러 가기</a>
+        </div>
+        <div v-if="adminBalance && adminBalance.error" class="admin-section">
+          <div class="admin-stat-title">DeepSeek 잔액</div>
+          <div class="admin-sub">{{ adminBalance.error }}</div>
+        </div>
         <div v-if="adminStats" class="admin-section">
           <div class="admin-stat-title">Provider / 모델 정책</div>
           <div class="admin-row"><span>Provider</span><span>{{ adminStats.provider }}</span></div>
