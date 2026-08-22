@@ -84,6 +84,7 @@ const debug = ref('대기 중')
 
 const rooms = ref([])
 const currentRoomId = ref(localStorage.getItem('forge_room') || '')
+const loadingMessages = ref(false)
 const showRooms = ref(false)
 const showCreateRoom = ref(false)
 const newRoomName = ref('')
@@ -169,7 +170,7 @@ function startRunningPoll() {
       if (!running) {
         stopRunningPoll()
         sessionRunning.value = false
-        await loadMessages() // 완료 결과 반영
+        await loadMessages(true) // 완료 결과 반영 — 이미 열린 방 새로고침이라 skeleton 생략
       }
     } catch {}
   }, 3000)
@@ -520,10 +521,12 @@ async function loadRooms() {
   } catch {}
 }
 
-async function loadMessages() {
+async function loadMessages(isNew = false) {
   const id = currentRoomId.value
   if (!id) return
   messages.value = []
+  // 기존 방은 이력 로딩 동안 skeleton, 새 방은 곧장 welcome placeholder.
+  if (!isNew) loadingMessages.value = true
   try {
     const res = await fetch(`/api/sessions/${id}/messages`)
     if (!res.ok) return
@@ -564,10 +567,13 @@ async function loadMessages() {
       }
     }
     scrollBottom()
-  } catch {}
+  } catch {
+  } finally {
+    loadingMessages.value = false
+  }
 }
 
-async function selectRoom(id) {
+async function selectRoom(id, isNew = false) {
   stopRunningPoll()
   sessionRunning.value = false
   searchQuery.value = ''
@@ -575,7 +581,7 @@ async function selectRoom(id) {
   currentRoomId.value = id
   localStorage.setItem('forge_room', id)
   showRooms.value = false
-  await loadMessages()
+  await loadMessages(isNew)
   await loadTasks()
   checkRunning()
 }
@@ -607,7 +613,7 @@ async function createRoom() {
       newRoomPath.value = ''
       showCreateRoom.value = false
       await loadRooms()
-      await selectRoom(room.id)
+      await selectRoom(room.id, true)
     }
   } catch {}
 }
@@ -1265,7 +1271,14 @@ document.addEventListener('visibilitychange', () => {
     </div>
 
     <main ref="chatEl" @scroll.passive="onChatScroll" @touchstart.passive="onMainTouchStart" @touchend.passive="onMainTouchEnd">
-      <div v-if="messages.length === 0" class="welcome">
+      <div v-if="loadingMessages" class="msg-skeleton">
+        <div class="skel-row user"><div class="skel-bubble"></div></div>
+        <div class="skel-row"><div class="skel-line w60"></div><div class="skel-line w90"></div><div class="skel-line w75"></div></div>
+        <div class="skel-row user"><div class="skel-bubble sm"></div></div>
+        <div class="skel-row"><div class="skel-line w80"></div><div class="skel-line w50"></div></div>
+      </div>
+
+      <div v-else-if="messages.length === 0" class="welcome">
         <img src="/logo.svg" class="welcome-logo" alt="FORGE" />
         <div class="welcome-brand">FORGE</div>
         <p class="welcome-title">무엇을 작업할까요?</p>

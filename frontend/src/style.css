@@ -831,6 +831,38 @@ main {
 .welcome .sub { animation: welcome-in 0.5s 0.18s cubic-bezier(0.22, 1, 0.36, 1) both; }
 .quick-actions { animation: welcome-in 0.5s 0.24s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
+/* 기존 방 이력 로딩 중 skeleton */
+.msg-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 12px 4px;
+}
+.skel-row { display: flex; flex-direction: column; gap: 8px; }
+.skel-row.user { align-items: flex-end; }
+.skel-bubble {
+  width: 55%;
+  height: 38px;
+  border-radius: 16px;
+  background: var(--accent-soft, rgba(217, 119, 87, 0.15));
+}
+.skel-bubble.sm { width: 38%; height: 30px; }
+.skel-line {
+  height: 13px;
+  border-radius: 6px;
+  background: var(--border, rgba(255, 255, 255, 0.08));
+}
+.skel-line.w90 { width: 90%; }
+.skel-line.w80 { width: 80%; }
+.skel-line.w75 { width: 75%; }
+.skel-line.w60 { width: 60%; }
+.skel-line.w50 { width: 50%; }
+.skel-bubble, .skel-line { animation: skel-pulse 1.3s ease-in-out infinite; }
+@keyframes skel-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.9; }
+}
+
 .welcome-brand {
   font-size: 13px;
   font-weight: 800;
