@@ -23,6 +23,8 @@ localStorage.setItem('forge_session', sessionId)
 
 const chatEl = ref(null)
 
+const version = __APP_VERSION__
+
 function scrollBottom() {
   nextTick(() => {
     if (chatEl.value) chatEl.value.scrollTop = chatEl.value.scrollHeight
@@ -252,6 +254,7 @@ onMounted(async () => {
     <header>
       <span class="dot"></span>
       <h1>FORGE</h1>
+      <span class="version">v{{ version }}</span>
       <button v-if="busy" @click="cancelSession">중단</button>
       <button @click="resetSession">새로</button>
     </header>
