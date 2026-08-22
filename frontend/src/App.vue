@@ -139,8 +139,7 @@ async function send() {
         const lines = block.split('\n')
         let data = ''
         for (const line of lines) {
-          if (line.startsWith('event: ')) eventType = line.slice(7).trim()
-          else if (line.startsWith('data: ')) data += line.slice(6)
+          if (line.startsWith('data: ')) data += line.slice(6)
         }
         if (data) {
           eventCount++
@@ -166,7 +165,7 @@ async function send() {
 }
 
 function onKeydown(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault()
     send()
   }
