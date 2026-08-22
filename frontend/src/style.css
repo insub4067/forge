@@ -1451,9 +1451,9 @@ footer {
   /* in-flow flex child — main(flex:1) 아래에 자리를 차지한다. 오버랩·magic padding 없음. */
   position: relative;
   flex-shrink: 0;
-  /* safe-area는 여기 한 곳에서만 책임진다. composer를 홈 인디케이터 바로 위로
-     붙이려고 하단 여분 padding을 빼고 safe-area만 남긴다(클로드처럼 밀착). */
-  padding: 8px 12px max(6px, env(safe-area-inset-bottom));
+  /* SwiftUI ignoresSafeArea처럼 하단 안전영역을 '쓴다' — safe-area 여백을 주지 않고
+     물리적 바닥까지 내린다. 버튼은 composer 자체 높이 덕에 홈 인디케이터 위에 남는다. */
+  padding: 8px 12px 10px;
   border-top: none;
   background: var(--bg);
 }
