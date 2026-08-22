@@ -7,6 +7,9 @@ import 'highlight.js/styles/github-dark.css'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import '@xterm/xterm/css/xterm.css'
 
 const _EXT_LANG = {
   js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
@@ -1171,11 +1174,59 @@ function onScreenError() {
 }
 function closeMacView() {
   stopScreen()
+  stopTerminal()
   macView.value = ''
   macControls.value = true // 다음에 열 때 컨트롤 보이게
   try {
     screen.orientation?.unlock?.()
   } catch {}
+}
+
+// ─── 맥: 터미널 연결 (PTY + WebSocket + xterm) ───
+const termEl = ref(null)
+let term = null
+let termFit = null
+let termWs = null
+
+async function openMacTerminal() {
+  macView.value = 'terminal'
+  macControls.value = true
+  await nextTick()
+  if (!termEl.value) return
+  term = new Terminal({
+    fontSize: 13,
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+    theme: { background: '#000000', foreground: '#e6e6e6' },
+    cursorBlink: true,
+  })
+  termFit = new FitAddon()
+  term.loadAddon(termFit)
+  term.open(termEl.value)
+  termFit.fit()
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+  const sid = currentRoomId.value || ''
+  termWs = new WebSocket(`${proto}://${location.host}/api/terminals/ws?session_id=${sid}&cols=${term.cols}&rows=${term.rows}`)
+  termWs.onmessage = (e) => term && term.write(e.data)
+  termWs.onclose = () => term && term.write('\r\n\x1b[90m[연결 종료]\x1b[0m\r\n')
+  term.onData((d) => termWs && termWs.readyState === 1 && termWs.send(JSON.stringify({ type: 'input', data: d })))
+  term.onResize(({ cols, rows }) => termWs && termWs.readyState === 1 && termWs.send(JSON.stringify({ type: 'resize', cols, rows })))
+  window.addEventListener('resize', fitTerminal)
+}
+
+function fitTerminal() {
+  try { termFit && termFit.fit() } catch {}
+}
+
+function termKey(seq) {
+  if (termWs && termWs.readyState === 1) termWs.send(JSON.stringify({ type: 'input', data: seq }))
+  term && term.focus()
+}
+
+function stopTerminal() {
+  window.removeEventListener('resize', fitTerminal)
+  if (termWs) { try { termWs.close() } catch {} termWs = null }
+  if (term) { try { term.dispose() } catch {} term = null }
+  termFit = null
 }
 
 async function deleteRoom(id) {
@@ -1931,7 +1982,7 @@ document.addEventListener('visibilitychange', () => {
               <button class="mac-tile" @click="openMacScreen">
                 <span class="mac-ico">🖥️</span><span>화면 보기</span>
               </button>
-              <button class="mac-tile" @click="macView = 'terminal'">
+              <button class="mac-tile" @click="openMacTerminal">
                 <span class="mac-ico">⌨️</span><span>터미널 연결</span>
               </button>
               <button class="mac-tile" @click="macView = 'camera'">
@@ -2000,10 +2051,23 @@ document.addEventListener('visibilitychange', () => {
           @error="onScreenError"
         />
       </template>
-      <div v-else class="mac-placeholder">
-        {{ macView === 'terminal' ? '터미널 연결' : '카메라 보기' }} — 곧 지원됩니다.
+      <div v-else-if="macView === 'terminal'" class="term-wrap">
+        <div ref="termEl" class="term-host"></div>
+        <div class="term-keys">
+          <button @click="termKey('\t')">Tab</button>
+          <button @click="termKey('\x1b')">Esc</button>
+          <button @click="termKey('\x03')">Ctrl-C</button>
+          <button @click="termKey('\x04')">Ctrl-D</button>
+          <button @click="termKey('\x1b[A')">↑</button>
+          <button @click="termKey('\x1b[B')">↓</button>
+          <button @click="termKey('\x1b[D')">←</button>
+          <button @click="termKey('\x1b[C')">→</button>
+        </div>
       </div>
-      <button class="mac-ov-close" @click="closeMacView" aria-label="닫기">
+      <div v-else class="mac-placeholder">
+        카메라 보기 — 곧 지원됩니다.
+      </div>
+      <button class="mac-ov-close" :class="{ top: macView === 'terminal' }" @click="closeMacView" aria-label="닫기">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
     </div>

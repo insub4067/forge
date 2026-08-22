@@ -2387,7 +2387,7 @@ footer .image-preview-row {
   position: absolute;
   right: calc(16px + env(safe-area-inset-right));
   bottom: calc(16px + env(safe-area-inset-bottom));
-  z-index: 2;
+  z-index: 3;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2398,8 +2398,46 @@ footer .image-preview-row {
   height: 48px;
   border-radius: 50%;
 }
+/* 터미널 뷰에선 하단 키 툴바와 겹치지 않게 X를 상단으로 */
+.mac-ov-close.top {
+  top: calc(env(safe-area-inset-top) + 10px);
+  bottom: auto;
+}
 .mac-overlay .mac-placeholder {
   color: #999;
+}
+/* 터미널 */
+.term-wrap {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  padding-top: calc(env(safe-area-inset-top) + 6px);
+}
+.term-host {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 8px;
+}
+.term-keys {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 8px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  border-top: 1px solid #222;
+  background: #0d0d0d;
+}
+.term-keys button {
+  flex: 0 0 auto;
+  background: #1c1c1c;
+  border: 1px solid #333;
+  color: #ddd;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: ui-monospace, monospace;
 }
 /* iOS는 orientation.lock 미지원 → 세로에선 '영상(이미지)만' 90° 회전해 가로로 채운다.
    컨트롤(뒤로/정지)은 회전하지 않아 항상 정상 위치·safe-area에서 누를 수 있다. */

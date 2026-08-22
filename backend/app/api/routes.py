@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter, File, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, Response
 from sse_starlette.sse import EventSourceResponse
 
@@ -439,6 +439,20 @@ async def caffeinate_toggle(req: Request):
         killer = await asyncio.create_subprocess_exec("pkill", "-f", _CAFFEINATE_MARK)
         await killer.wait()
     return {"on": on}
+
+
+@router.websocket("/terminals/ws")
+async def terminal_ws(ws: WebSocket, session_id: str = "", cols: int = 80, rows: int = 24):
+    """host PTY 터미널 — 방의 워크스페이스에서 인터랙티브 셸을 연다."""
+    await ws.accept()
+    if sys.platform != "darwin":
+        await ws.send_text("터미널은 macOS host에서만 지원됩니다.\r\n")
+        await ws.close()
+        return
+    from .. import terminal
+    room = await store.get_room(session_id) if session_id else None
+    workspace = (room.get("workspace_path") if room else "") or settings.workspace
+    await terminal.bridge(ws, workspace, cols=cols, rows=rows)
 
 
 @router.get("/mac/screen")
