@@ -34,8 +34,14 @@ class ModelRouter:
                 "thinking": False,
                 "reasoning_effort": "low",
             },
+            "chat": {
+                "model": settings.chat_model or "deepseek-v4-flash",
+                "thinking": False,
+                "reasoning_effort": "low",
+            },
         }
         self.debugger_pro_model = settings.deep_seek_model or "deepseek-v4-pro"
+        self.triage_model = settings.triage_model or "deepseek-v4-flash"
 
     def select_model(
         self,

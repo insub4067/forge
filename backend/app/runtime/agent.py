@@ -12,7 +12,7 @@ from ..config import settings
 from ..db import store
 from ..llm.factory import create_adapter
 from ..orchestrator.model_router import ModelRouter
-from ..tools.registry import APPROVAL_REQUIRED, TOOL_SCHEMAS, execute_tool
+from ..tools.registry import APPROVAL_REQUIRED, CHAT_TOOLS, TOOL_SCHEMAS, execute_tool
 from ..sandbox.executor import DockerSandbox
 
 MAX_STEPS = 30
@@ -99,6 +99,8 @@ class AgentRuntime:
         self.pending_approvals: dict[str, asyncio.Future] = {}
         self.pending_questions: dict[str, asyncio.Future] = {}
         self._cancel_sessions: set[str] = set()
+        self._injections: dict[str, list[str]] = {}
+        self._running_sessions: set[str] = set()
 
     def _adapter_for(self, model: str):
         if model not in self._adapters:
@@ -121,6 +123,16 @@ class AgentRuntime:
 
     def cancel(self, session_id: str) -> None:
         self._cancel_sessions.add(session_id)
+
+    def inject(self, session_id: str, text: str) -> bool:
+        """실행 중인 세션에 사용자 메시지를 큐잉한다. 다음 스텝에서 반영된다."""
+        if not text.strip():
+            return False
+        self._injections.setdefault(session_id, []).append(text.strip())
+        return True
+
+    def is_running(self, session_id: str) -> bool:
+        return session_id in self._running_sessions
 
     @staticmethod
     async def _git_sha(workspace: str) -> str:
@@ -168,6 +180,54 @@ class AgentRuntime:
             return await fut
         finally:
             self.pending_questions.pop(question_id, None)
+
+    async def _triage(self, all_messages: list[dict]) -> tuple[str, int, int]:
+        """마지막 요청이 코드 작업인지(agent) 일반 대화·질문인지(chat) 분류한다.
+
+        chat이면 전체 파이프라인을 건너뛰고 단일 패스로 답한다.
+        """
+        # 최근 대화만 압축해서 분류 입력으로 쓴다 (텍스트만).
+        lines: list[str] = []
+        for m in all_messages[-6:]:
+            role = m.get("role", "")
+            if role == "tool":
+                continue
+            content = m.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(
+                    c.get("text", "") for c in content
+                    if isinstance(c, dict) and c.get("type") == "text"
+                ) or "[이미지]"
+            text = str(content).strip()
+            if text:
+                lines.append(f"{role}: {text[:500]}")
+        transcript = "\n".join(lines)
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "너는 요청 분류기다. 마지막 사용자 메시지가 로컬 코드베이스를 "
+                    "수정·생성·실행·리팩터링·디버깅하는 작업이면 AGENT, 그 외 일반 대화·"
+                    "질문·설명·조회면 CHAT 이다. 코드를 읽어 설명만 하면 CHAT, 파일을 "
+                    "고치거나 명령을 실행해야 하면 AGENT. 오직 한 단어(CHAT 또는 AGENT)만 답한다."
+                ),
+            },
+            {"role": "user", "content": transcript},
+        ]
+
+        parts: list[str] = []
+        prompt_t = 0
+        completion_t = 0
+        async for delta in self._adapter_for(self.router.triage_model).stream_chat(messages):
+            if delta.get("content"):
+                parts.append(delta["content"])
+            if delta.get("usage"):
+                prompt_t += delta["usage"].get("prompt_tokens", 0)
+                completion_t += delta["usage"].get("completion_tokens", 0)
+        answer = "".join(parts).upper()
+        route = "agent" if "AGENT" in answer else "chat"
+        return route, prompt_t, completion_t
 
     async def _run_vision(
         self,
@@ -231,8 +291,10 @@ class AgentRuntime:
         step_base: int,
         room_memory: str = "",
         retry_count: int = 0,
+        tools: list[dict] | None = None,
     ) -> tuple:
         route = self.router.select_model(role, retry_count)
+        tool_schemas = tools if tools is not None else TOOL_SCHEMAS
         await send("role_start", {"role": role, "model": route["model"], "thinking": route["thinking"]})
         messages: list[dict] = [
             {"role": "system", "content": _system_for(role, room_memory)},
@@ -246,6 +308,15 @@ class AgentRuntime:
             if session_id in self._cancel_sessions:
                 return "cancelled", total_prompt, total_completion, route
 
+            # 실행 중 사용자가 큐잉한 메시지를 다음 스텝 컨텍스트에 주입
+            injected = self._injections.pop(session_id, None) if session_id else None
+            if injected:
+                for text in injected:
+                    user_msg = {"role": "user", "content": "[작업 중 사용자 메시지]\n" + text}
+                    messages.append(user_msg)
+                    all_messages.append(user_msg)
+                    await send("user_injected", {"content": text})
+
             reasoning: list[str] = []
             content: list[str] = []
             reasoning_buf: list[str] = []
@@ -256,7 +327,7 @@ class AgentRuntime:
 
             async for delta in self._adapter_for(route["model"]).stream_chat(
                 messages,
-                TOOL_SCHEMAS,
+                tool_schemas,
                 thinking=route["thinking"],
                 reasoning_effort=route["reasoning_effort"],
             ):
@@ -436,6 +507,9 @@ class AgentRuntime:
             await emit({"seq": seq, "type": event_type, "data": data})
 
         self._cancel_sessions.discard(session_id)
+        self._injections.pop(session_id, None)
+        if session_id:
+            self._running_sessions.add(session_id)
 
         goal = ""
         for m in reversed(history):
@@ -466,6 +540,21 @@ class AgentRuntime:
                     route.get("thinking", False),
                     route.get("reasoning_effort", ""),
                 )
+
+        # 0. Triage — 코드 작업이 아니면 단일 chat 패스로 답하고 종료
+        triage_route, tp, tc = await self._triage(all_messages)
+        await record("triage", tp, tc, {"model": self.router.triage_model})
+        if triage_route == "chat":
+            status, p, c, route = await self._run_role(
+                "chat", all_messages, send, session_id, ws, state, recent_calls,
+                step_base, room_memory, tools=CHAT_TOOLS,
+            )
+            await record("chat", p, c, route)
+            if status != "done":
+                await send("done", {"content": self._finish_message(status)})
+            else:
+                await send("done", {})
+            return all_messages
 
         # 1. Planner
         status, p, c, route = await self._run_role(

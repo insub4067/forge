@@ -140,6 +140,12 @@ TOOL_SCHEMAS: list[dict] = [
     },
 ]
 
+# chat 에이전트는 읽기·질문만 — 코드 수정/실행 도구는 제외한다.
+CHAT_TOOLS = [
+    t for t in TOOL_SCHEMAS
+    if t["function"]["name"] in {"read_file", "list_dir", "grep", "ask_user"}
+]
+
 APPROVAL_REQUIRED = {"write_file", "edit_file", "bash"}
 BLOCKED_COMMANDS = ["rm -rf", "git push", "sudo ", "chmod 777"]
 

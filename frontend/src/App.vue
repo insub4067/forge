@@ -52,6 +52,7 @@ const adminStats = ref(null)
 const showModelPicker = ref(false)
 const pickerRole = ref('')
 const adminBalance = ref(null)
+const adminPolicyOpen = ref(true)
 const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
 const attachedImage = ref(null)
 const fileInput = ref(null)
@@ -117,6 +118,10 @@ function openAdmin() {
 function refreshAdmin() {
   loadAdmin()
   loadBalance()
+}
+
+function togglePolicy() {
+  adminPolicyOpen.value = !adminPolicyOpen.value
 }
 
 async function changeRoleModel(role) {
@@ -943,16 +948,21 @@ onMounted(async () => {
           <div class="admin-sub">{{ adminBalance.error }}</div>
         </div>
         <div v-if="adminStats" class="admin-section">
-          <div class="admin-stat-title">Provider / 모델 정책</div>
-          <div class="admin-row"><span>Provider</span><span>{{ adminStats.provider }}</span></div>
-          <div v-for="(p, role) in adminStats.policy?.roles" :key="role" class="admin-policy">
-            <div class="admin-row">
-              <span class="role-name">{{ role }}</span>
-              <button class="admin-edit" @click="changeRoleModel(role)">변경</button>
-            </div>
-            <div class="admin-policy-detail">
-              <span class="mono">{{ p.model }}</span>
-              <span class="tag">{{ p.thinking ? 'thinking' : 'no-thinking' }} · {{ p.reasoning_effort }}</span>
+          <div class="admin-stat-title collapsible" @click="togglePolicy">
+            <span>Provider / 모델 정책</span>
+            <span class="chevron">{{ adminPolicyOpen ? '▾' : '▸' }}</span>
+          </div>
+          <div v-show="adminPolicyOpen">
+            <div class="admin-row"><span>Provider</span><span>{{ adminStats.provider }}</span></div>
+            <div v-for="(p, role) in adminStats.policy?.roles" :key="role" class="admin-policy">
+              <div class="admin-row">
+                <span class="role-name">{{ role }}</span>
+                <button class="admin-edit" @click="changeRoleModel(role)">변경</button>
+              </div>
+              <div class="admin-policy-detail">
+                <span class="mono">{{ p.model }}</span>
+                <span class="tag">{{ p.thinking ? 'thinking' : 'no-thinking' }} · {{ p.reasoning_effort }}</span>
+              </div>
             </div>
           </div>
         </div>
