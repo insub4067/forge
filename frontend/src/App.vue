@@ -522,10 +522,37 @@ function handleEvent(evt, assistant) {
   scrollBottom()
 }
 
+async function steerDuringRun(text) {
+  const id = currentRoomId.value
+  input.value = ''
+  if (steerMode.value === 'switch') {
+    // 현재 작업 중단 후, 이 메시지로 새로 시작 (스트림 종료 시 자동 전송)
+    try {
+      await fetch(`/api/sessions/${id}/cancel`, { method: 'POST' })
+    } catch {}
+    pendingSend.value = text
+  } else {
+    // 큐 대기(기본) — 실행 중 에이전트에 주입, 다음 스텝에서 반영
+    newUser(text)
+    scrollBottom()
+    try {
+      await fetch(`/api/sessions/${id}/inject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })
+    } catch {}
+  }
+}
+
 async function send() {
   const text = input.value.trim()
   const imageUrl = attachedImage.value?.url
-  if ((!text && !imageUrl) || busy.value) return
+  if (!text && !imageUrl) return
+  if (busy.value) {
+    if (text) await steerDuringRun(text)
+    return
+  }
   busy.value = true
   input.value = ''
   debug.value = '전송 중…'
@@ -738,9 +765,7 @@ onMounted(async () => {
             </svg>
             <div class="room-info">
               <div class="room-title">{{ r.title }}</div>
-              <div class="room-path" @click.stop="openWorkspacePicker(r.id)">
-                {{ r.workspace_path || '워크스페이스 설정' }}
-              </div>
+              <div class="room-path">{{ r.workspace_path || '워크스페이스 설정' }}</div>
             </div>
             <span class="room-pct">{{ ctxPct(r) }}%</span>
             <button class="room-more" @click.stop="roomMenuId = roomMenuId === r.id ? null : r.id" aria-label="메뉴">

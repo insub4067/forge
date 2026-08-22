@@ -134,6 +134,11 @@ class AgentRuntime:
     def is_running(self, session_id: str) -> bool:
         return session_id in self._running_sessions
 
+    def cleanup_session(self, session_id: str) -> None:
+        self._running_sessions.discard(session_id)
+        self._injections.pop(session_id, None)
+        self._cancel_sessions.discard(session_id)
+
     @staticmethod
     async def _git_sha(workspace: str) -> str:
         try:

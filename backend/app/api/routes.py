@@ -119,6 +119,7 @@ async def chat(req: Request):
                 {"seq": 0, "type": "error", "data": {"message": str(err)}}
             )
         finally:
+            runtime.cleanup_session(session_id)
             await queue.put(None)
 
     asyncio.create_task(run_and_close())
@@ -208,6 +209,15 @@ async def answer_question(question_id: str, req: Request):
 async def cancel_session(session_id: str):
     runtime.cancel(session_id)
     return {"cancelled": True}
+
+
+@router.post("/sessions/{session_id}/inject")
+async def inject_message(session_id: str, req: Request):
+    body = await req.json()
+    text = str(body.get("text", ""))
+    running = runtime.is_running(session_id)
+    injected = runtime.inject(session_id, text) if running else False
+    return {"injected": injected, "running": running}
 
 
 @router.get("/rooms/{session_id}/git/status")
