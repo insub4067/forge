@@ -10,9 +10,9 @@ class ModelRouter:
     def __init__(self):
         self._policy: dict[str, dict] = {
             "planner": {
-                "model": settings.planner_model or "deepseek-v4-pro",
+                "model": settings.planner_model or "deepseek-v4-flash",
                 "thinking": True,
-                "reasoning_effort": "high",
+                "reasoning_effort": "medium",
             },
             "coder": {
                 "model": settings.coder_model or "deepseek-v4-flash",
@@ -41,6 +41,7 @@ class ModelRouter:
             },
         }
         self.debugger_pro_model = settings.deep_seek_model or "deepseek-v4-pro"
+        self.planner_pro_model = settings.planner_pro_model or settings.deep_seek_model or "deepseek-v4-pro"
         self.triage_model = settings.triage_model or "deepseek-v4-flash"
 
     def select_model(
@@ -55,6 +56,16 @@ class ModelRouter:
             base.update(
                 {
                     "model": self.debugger_pro_model,
+                    "thinking": True,
+                    "reasoning_effort": "high",
+                }
+            )
+
+        # planner는 flash가 기본. 복잡한 작업(triage 판정)일 때만 pro로 승격.
+        if agent_type == "planner" and complexity == "high":
+            base.update(
+                {
+                    "model": self.planner_pro_model,
                     "thinking": True,
                     "reasoning_effort": "high",
                 }

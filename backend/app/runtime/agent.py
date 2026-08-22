@@ -411,7 +411,7 @@ class AgentRuntime:
         finally:
             self.pending_questions.pop(question_id, None)
 
-    async def _triage(self, all_messages: list[dict]) -> tuple[str, int, int]:
+    async def _triage(self, all_messages: list[dict]) -> tuple[str, str, int, int]:
         """마지막 요청이 코드 작업인지(agent) 일반 대화·질문인지(chat) 분류한다.
 
         chat이면 전체 파이프라인을 건너뛰고 단일 패스로 답한다.
@@ -440,7 +440,10 @@ class AgentRuntime:
                     "너는 요청 분류기다. 마지막 사용자 메시지가 로컬 코드베이스를 "
                     "수정·생성·실행·리팩터링·디버깅하는 작업이면 AGENT, 그 외 일반 대화·"
                     "질문·설명·조회면 CHAT 이다. 코드를 읽어 설명만 하면 CHAT, 파일을 "
-                    "고치거나 명령을 실행해야 하면 AGENT. 오직 한 단어(CHAT 또는 AGENT)만 답한다."
+                    "고치거나 명령을 실행해야 하면 AGENT.\n"
+                    "AGENT면 난이도도 판정한다: 여러 파일·여러 단계·설계 변경·까다로운 디버깅이 "
+                    "필요하면 COMPLEX, 단순한 한두 단계 수정이면 SIMPLE.\n"
+                    "형식: 'CHAT' 또는 'AGENT SIMPLE' 또는 'AGENT COMPLEX' — 이 중 하나만 답한다."
                 ),
             },
             {"role": "user", "content": transcript},
@@ -457,7 +460,8 @@ class AgentRuntime:
                 completion_t += delta["usage"].get("completion_tokens", 0)
         answer = "".join(parts).upper()
         route = "agent" if "AGENT" in answer else "chat"
-        return route, prompt_t, completion_t
+        complexity = "high" if "COMPLEX" in answer else "normal"
+        return route, complexity, prompt_t, completion_t
 
     async def _run_vision(
         self,
@@ -523,8 +527,9 @@ class AgentRuntime:
         retry_count: int = 0,
         tools: list[dict] | None = None,
         skills: str = "",
+        complexity: str = "normal",
     ) -> tuple:
-        route = self.router.select_model(role, retry_count)
+        route = self.router.select_model(role, retry_count, complexity)
         tool_schemas = tools if tools is not None else TOOL_SCHEMAS
         await send("role_start", {"role": role, "model": route["model"], "thinking": route["thinking"]})
         system_msg = {"role": "system", "content": _system_for(role, room_memory, skills)}
@@ -795,8 +800,8 @@ class AgentRuntime:
                     route.get("reasoning_effort", ""),
                 )
 
-        # 0. Triage — 코드 작업이 아니면 단일 chat 패스로 답하고 종료
-        triage_route, tp, tc = await self._triage(all_messages)
+        # 0. Triage — 코드 작업 여부 + 복잡도(planner 모델 승격 판단)
+        triage_route, complexity, tp, tc = await self._triage(all_messages)
         await record("triage", tp, tc, {"model": self.router.triage_model})
         if triage_route == "chat":
             status, p, c, route = await self._run_role(
@@ -810,9 +815,10 @@ class AgentRuntime:
                 await send("done", {"status": "completed"})
             return all_messages
 
-        # 1. Planner
+        # 1. Planner — flash 기본, 복잡한 작업이면 pro 승격
         status, p, c, route = await self._run_role(
-            "planner", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory, skills=skills
+            "planner", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory,
+            skills=skills, complexity=complexity,
         )
         await record("planner", p, c, route)
         step_base += MAX_STEPS

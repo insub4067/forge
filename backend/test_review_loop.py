@@ -13,7 +13,7 @@ def make_runtime(role_status="done"):
     calls = []  # (role, retry_count)
 
     async def fake_run_role(role, all_messages, send, session_id, ws, state,
-                            recent_calls, step_base, room_memory="", retry_count=0, tools=None, skills=""):
+                            recent_calls, step_base, room_memory="", retry_count=0, tools=None, skills="", complexity="normal"):
         calls.append((role, retry_count))
         # 시나리오별로 role_status를 콜러블로 줄 수 있게
         st = role_status(role, len(calls)) if callable(role_status) else role_status
@@ -22,7 +22,7 @@ def make_runtime(role_status="done"):
     rt._run_role = fake_run_role
 
     async def fake_triage(all_messages):
-        return "agent", 0, 0
+        return "agent", "normal", 0, 0
     rt._triage = fake_triage
 
     # store 목킹
@@ -119,7 +119,7 @@ async def main():
     # Case F — CHAT triage: planner/coder/reviewer 호출 안 함
     rt, calls = make_runtime("done")
     async def chat_triage(all_messages):
-        return "chat", 0, 0
+        return "chat", "normal", 0, 0
     rt._triage = chat_triage
     set_tasks([D()])
     events = []

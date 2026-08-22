@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     vision_model: str = ""
     chat_model: str = ""
     triage_model: str = ""
+    planner_pro_model: str = ""
     database_url: str = "postgresql+psycopg://forge:forge@localhost:5432/forge"
     redis_url: str = "redis://localhost:6379"
     workspace: str = str(BASE_DIR.parent.parent)
