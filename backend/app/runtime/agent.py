@@ -262,8 +262,9 @@ class AgentRuntime:
                     sha = await self._git_sha()
                     await store.save_checkpoint(session_id, step, sha)
 
+                diff = ""
                 try:
-                    result = await execute_tool(name, args, settings.workspace)
+                    result, diff = await execute_tool(name, args, settings.workspace)
                     if name in ("write_file", "edit_file") and not result.startswith("오류"):
                         state["files_changed"].append(str(args.get("path")))
                 except Exception as err:
@@ -271,7 +272,10 @@ class AgentRuntime:
                     state["errors"].append(f"{name}: {err}")
 
                 await send("state_update", state)
-                await send("tool_result", {"name": name, "result": result[:20_000]})
+                await send(
+                    "tool_result",
+                    {"name": name, "result": result[:20_000], "diff": diff[:10_000]},
+                )
 
                 messages.append(
                     {"role": "tool", "tool_call_id": tc["id"], "content": result[:20_000]}

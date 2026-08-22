@@ -37,6 +37,17 @@ function summarizeArgs(args) {
   }
 }
 
+function diffLines(diff) {
+  return diff.split('\n')
+}
+
+function diffClass(line) {
+  if (line.startsWith('+') && !line.startsWith('+++')) return 'add'
+  if (line.startsWith('-') && !line.startsWith('---')) return 'del'
+  if (line.startsWith('@@')) return 'hunk'
+  return ''
+}
+
 function handleEvent(evt, assistant) {
   const d = evt.data || {}
   switch (evt.type) {
@@ -54,6 +65,7 @@ function handleEvent(evt, assistant) {
       if (t) {
         t.status = 'done'
         t.result = d.result || ''
+        t.diff = d.diff || ''
       }
       break
     }
@@ -206,7 +218,10 @@ function resetSession() {
                 <span class="tname">{{ t.name }}</span>
                 <span class="targs">{{ summarizeArgs(t.args) }}</span>
               </summary>
-              <pre>{{ t.status === 'running' ? '실행 중…' : (t.result || '(출력 없음)') }}</pre>
+              <div v-if="t.diff" class="diff">
+                <div v-for="(line, li) in diffLines(t.diff)" :key="li" :class="diffClass(line)">{{ line || ' ' }}</div>
+              </div>
+              <pre v-else>{{ t.status === 'running' ? '실행 중…' : (t.result || '(출력 없음)') }}</pre>
             </details>
 
             <div v-if="m.approval" class="approval">

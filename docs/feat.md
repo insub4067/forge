@@ -56,7 +56,7 @@
 - 승인 ✅
 - 중단 ✅
 - 사용자 질문(시트) ✅
-- Diff View ⬜
+- Diff View ✅
 - SSE 재연결 ⬜ Phase 3
 - Web Push ⬜ Phase 3
 - Offline Shell ⬜ Phase 3

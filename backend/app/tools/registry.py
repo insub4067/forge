@@ -170,26 +170,41 @@ def _grep(path: Path, pattern: str, include: str | None, out: list[str]) -> None
                 out.append(f"{e}:{i}: {line.strip()}")
 
 
-async def execute_tool(name: str, args: dict, workspace: str) -> str:
+def _make_diff(old_text: str, new_text: str, path: str) -> str:
+    import difflib
+
+    diff = difflib.unified_diff(
+        old_text.splitlines(keepends=True),
+        new_text.splitlines(keepends=True),
+        fromfile=f"a/{path}",
+        tofile=f"b/{path}",
+    )
+    return "".join(diff)
+
+
+async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]:
     if name == "read_file":
         p = _resolve(workspace, str(args["path"]))
-        return p.read_text(encoding="utf-8", errors="replace")
+        return p.read_text(encoding="utf-8", errors="replace"), ""
     if name == "list_dir":
         p = _resolve(workspace, str(args["path"]))
         if p.is_file():
-            return p.read_text(encoding="utf-8", errors="replace")
+            return p.read_text(encoding="utf-8", errors="replace"), ""
         lines = _list_tree(p, 0)
-        return "\n".join(lines) or "(빈 디렉토리)"
+        return "\n".join(lines) or "(빈 디렉토리)", ""
     if name == "grep":
         p = _resolve(workspace, ".")
         out: list[str] = []
         _grep(p, str(args["pattern"]), args.get("include"), out)
-        return "\n".join(out[:100]) or "검색 결과 없음"
+        return "\n".join(out[:100]) or "검색 결과 없음", ""
     if name == "write_file":
         p = _resolve(workspace, str(args["path"]))
+        old_text = p.read_text(encoding="utf-8", errors="replace") if p.exists() else ""
+        new_text = str(args["content"])
+        diff = _make_diff(old_text, new_text, str(p))
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(str(args["content"]), encoding="utf-8")
-        return f"파일을 작성했습니다: {p}"
+        p.write_text(new_text, encoding="utf-8")
+        return f"파일을 작성했습니다: {p}", diff
     if name == "edit_file":
         p = _resolve(workspace, str(args["path"]))
         old = str(args["old_string"])
@@ -197,8 +212,10 @@ async def execute_tool(name: str, args: dict, workspace: str) -> str:
         content = p.read_text(encoding="utf-8", errors="replace")
         if old not in content:
             raise ValueError(f"old_string을 파일에서 찾을 수 없습니다: {p}")
-        p.write_text(content.replace(old, new, 1), encoding="utf-8")
-        return f"파일을 수정했습니다: {p}"
+        new_content = content.replace(old, new, 1)
+        diff = _make_diff(content, new_content, str(p))
+        p.write_text(new_content, encoding="utf-8")
+        return f"파일을 수정했습니다: {p}", diff
     if name == "bash":
         command = str(args["command"])
         for blocked in BLOCKED_COMMANDS:
@@ -206,5 +223,5 @@ async def execute_tool(name: str, args: dict, workspace: str) -> str:
                 raise PermissionError(f"차단된 명령입니다: {blocked}")
         from ..sandbox.executor import DockerSandbox
 
-        return await DockerSandbox().run(command, write=True)
+        return await DockerSandbox().run(command, write=True), ""
     raise ValueError(f"알 수 없는 도구: {name}")

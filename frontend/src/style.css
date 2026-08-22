@@ -233,6 +233,35 @@ main {
   overflow-y: auto;
 }
 
+.diff {
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.diff div {
+  padding: 0 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff .add {
+  background: rgba(52, 211, 153, 0.12);
+  color: #7ee2b8;
+}
+
+.diff .del {
+  background: rgba(248, 113, 113, 0.12);
+  color: #f0a3a3;
+}
+
+.diff .hunk {
+  color: var(--accent);
+}
+
 .context {
   margin-top: 10px;
   font-size: 11px;
