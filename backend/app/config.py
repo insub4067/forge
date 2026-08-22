@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     workspace: str = str(BASE_DIR.parent.parent)
     logical_budget: int = 262144
     sandbox_image: str = "forge-sandbox:latest"
+    # bash 실행 모드. "docker"(기본, 격리·안전) | "host"(호스트 직접 실행 — 자기검증·
+    # 풀파워 가능하지만 에이전트가 맥 전체에 접근. 신뢰하는 개인 환경에서만 옵트인).
+    sandbox_mode: str = "docker"
 
 
 settings = Settings()

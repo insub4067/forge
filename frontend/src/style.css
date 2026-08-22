@@ -833,6 +833,46 @@ main {
 .welcome .sub { animation: welcome-in 0.5s 0.18s cubic-bezier(0.22, 1, 0.36, 1) both; }
 .quick-actions { animation: welcome-in 0.5s 0.24s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
+/* 사용자 첨부 이미지 썸네일 + 전체화면 뷰어 */
+.user-image {
+  display: block;
+  max-width: 220px;
+  max-height: 240px;
+  border-radius: 14px;
+  margin-bottom: 6px;
+  cursor: zoom-in;
+  object-fit: cover;
+}
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 320;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fade-in 0.18s ease both;
+}
+.image-viewer img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+}
+.image-viewer-close {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: none;
+  font-size: 18px;
+}
+
 /* 칸반 카드 상태 변경 알림(채팅 인라인) */
 .task-notes {
   display: flex;
@@ -2327,10 +2367,20 @@ button {
 .skill-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 8px;
+  cursor: pointer;
+}
+.skill-chevron {
+  color: var(--muted);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+.skill-chevron.open {
+  transform: rotate(90deg);
 }
 .skill-name {
+  flex: 1;
   font-size: 14px;
   font-weight: 700;
   color: var(--accent);

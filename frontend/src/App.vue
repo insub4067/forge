@@ -22,6 +22,7 @@ const autoApprove = ref(localStorage.getItem('forge_auto_approve') === '1')
 const sessionRunning = ref(false)
 const agentStatus = ref(null)
 const showSkills = ref(false)
+const skillOpen = ref({}) // 스킬 카드 펼침 상태(기본 닫힘)
 const skills = ref([])
 const searchQuery = ref('')
 const searchResults = ref([])
@@ -135,6 +136,8 @@ const sessionRuns = ref([])
 const sessionMetrics = ref(null)
 const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
 const attachedImage = ref(null)
+const viewerImage = ref(null)
+function openViewer(url) { viewerImage.value = url }
 const attachedText = ref(null) // { name, content, truncated }
 const fileInput = ref(null)
 const kanbanOpen = ref({
@@ -588,7 +591,15 @@ async function loadMessages(isNew = false) {
     let bubble = null
     for (const m of data) {
       if (m.role === 'user') {
-        messages.value.push({ role: 'user', content: m.content })
+        let uContent = m.content
+        let uImage = null
+        if (Array.isArray(uContent)) {
+          const img = uContent.find((c) => c && c.type === 'image_url')
+          uImage = img?.image_url?.url || null
+          const txt = uContent.find((c) => c && c.type === 'text')
+          uContent = (txt && txt.text) || '[이미지]'
+        }
+        messages.value.push({ role: 'user', content: uContent, image: uImage })
         bubble = null
       } else if (m.role === 'assistant') {
         if (!bubble) {
@@ -788,8 +799,8 @@ function onChatScroll() {
   isAtBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
 }
 
-function newUser(text) {
-  messages.value.push({ role: 'user', content: text })
+function newUser(text, image) {
+  messages.value.push({ role: 'user', content: text, image: image || null })
 }
 
 function newAssistant() {
@@ -1045,7 +1056,7 @@ async function send() {
   }
   const displayText = text || (att ? `[파일: ${att.name}]` : '[이미지]')
 
-  newUser(displayText)
+  newUser(displayText, imageUrl)
   const assistant = newAssistant()
   isAtBottom.value = true
   scrollBottom()
@@ -1366,7 +1377,10 @@ document.addEventListener('visibilitychange', () => {
 
       <div v-for="(m, i) in messages" :key="i" class="msg" :class="m.role">
         <div class="bubble">
-          <div v-if="m.role === 'user'" class="user-text">{{ m.content }}</div>
+          <template v-if="m.role === 'user'">
+            <img v-if="m.image" :src="m.image" class="user-image" @click="openViewer(m.image)" alt="첨부 이미지" />
+            <div v-if="m.content && m.content !== '[이미지]'" class="user-text">{{ m.content }}</div>
+          </template>
 
           <template v-if="m.role === 'assistant'">
             <div v-for="(p, pi) in m.phases" :key="pi" class="activity" :class="[phaseStatus(p), { card: p.tools.length || p.thinking }]">
@@ -1476,6 +1490,11 @@ document.addEventListener('visibilitychange', () => {
     <button v-if="!isAtBottom" class="jump-bottom" @click="jumpToBottom" aria-label="맨 아래로">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
     </button>
+
+    <div v-if="viewerImage" class="image-viewer" @click="viewerImage = null">
+      <img :src="viewerImage" alt="이미지" @click.stop />
+      <button class="image-viewer-close" @click="viewerImage = null" aria-label="닫기">✕</button>
+    </div>
 
     <footer>
       <input ref="fileInput" type="file" accept="image/*,.md,.txt,.log,.json,.csv,.yml,.yaml,.toml,.py,.js,.ts,.jsx,.tsx,.vue,.html,.css,.sh,.xml,.java,.go,.rs,.c,.cpp,.h,.sql,text/*" hidden @change="onFileChange" />
@@ -1664,11 +1683,12 @@ document.addEventListener('visibilitychange', () => {
           아직 저장된 skill이 없습니다. 에이전트가 반복될 만한 해결 절차를 발견하면 save_skill로 저장합니다.
         </div>
         <div v-for="s in skills" :key="s.name" class="admin-section">
-          <div class="skill-head">
+          <div class="skill-head" @click="skillOpen[s.name] = !skillOpen[s.name]">
+            <svg class="skill-chevron" :class="{ open: skillOpen[s.name] }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
             <span class="skill-name">{{ s.name }}</span>
-            <button class="skill-del" @click="deleteSkill(s.name)">삭제</button>
+            <button class="skill-del" @click.stop="deleteSkill(s.name)">삭제</button>
           </div>
-          <pre class="skill-content">{{ s.content }}</pre>
+          <pre v-show="skillOpen[s.name]" class="skill-content">{{ s.content }}</pre>
         </div>
       </div>
     </div>
