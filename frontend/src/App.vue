@@ -1347,7 +1347,8 @@ document.addEventListener('visibilitychange', () => {
             <div v-if="m.doneMessage" class="done-msg">{{ m.doneMessage }}</div>
 
             <div v-if="m.context" class="context">
-              context {{ m.context.prompt_tokens + m.context.completion_tokens }} tokens
+              context {{ m.context.prompt_tokens + m.context.completion_tokens }} tokens<span
+                v-if="m.context.cache_hit_ratio != null"> · cache {{ Math.round(m.context.cache_hit_ratio * 100) }}%</span>
             </div>
 
             <div v-if="hasAssistantText(m) && !(busy && i === messages.length - 1)" class="msg-actions">

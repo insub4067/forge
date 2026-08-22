@@ -112,13 +112,39 @@
 - [x] Skills 뷰어 — 메뉴에서 축적된 skill 확인·삭제
 - [x] Session search — 메시지 내용 검색(드로어 검색창), 세션 이동. hermes §6
 - [x] 즐겨쓰는 개발 워크플로우를 skill로 저장(.forge/skills/*)
-- [ ] Skill 검색·선택 로드(현재는 전체 로드) + 사용 피드백 개선
+- [x] Skill 검색·선택 로드 — 요청 키워드로 상위 N개만 삽입(전체 로드 폐기). 아래 효율 개선 참조
 
 ### 큐 5 — Persistent / 확장
 
 - [ ] Scheduled Autonomous Jobs(예약·조건 작업), Web Push. hermes §9
 - [ ] ExecutionBackend 추상화(Local→SSH→Docker). hermes §8
 - [ ] Isolated Subagents(독립 workstream 병렬, context 복제 금지). hermes §10
+
+## 런타임 토큰/컨텍스트 효율 개선 (2026-08-22)
+
+목표: tokens/task가 아니라 **cost per successfully completed task**를 낮춘다.
+
+- [x] **컨텍스트 압박 계산 수정** — 압박 기준을 `prompt+completion`에서
+  provider 실측 `prompt_tokens`(=이번 호출 실제 입력 컨텍스트)로 변경. 출력 토큰은
+  다음 입력에 누적되지 않으므로 제외. `_should_compact`/`_should_block` 순수 함수로 분리.
+- [x] **압축 성공 시 오차단 제거** — 압축이 방금 성공하면 압축 전 usage로 95% 차단하지 않고,
+  다음 호출에서 줄어든 컨텍스트를 실측으로 재검증. 더 못 줄이는데도 한도를 넘을 때만 차단.
+  → 성공 가능한 작업이 압축 직후 조기 종료되던 실패(=cost per success 무한대) 제거.
+- [x] **Skill 선택 삽입** — 전체 `.forge/skills/*.md` 삽입을 폐기하고 요청 키워드와의
+  겹침 점수 상위 `MAX_ACTIVE_SKILLS`(3)개만, `SKILL_CHAR_BUDGET`(6000자) 안에서 삽입.
+  관련 skill 없으면 0개. vector DB 없음(부분 문자열 매칭으로 한글 교착어 흡수).
+- [x] **Stable prefix 캐시 정렬** — `_system_for`가 BASE+role(불변)을 맨 앞에,
+  memory/skills(동적)를 뒤에 둠. 같은 role의 모든 호출이 프리픽스를 캐시 히트.
+  `_stable_prefix_hash`를 role_start 이벤트로 노출.
+- [x] **캐시 계측 정정** — `cached_tokens = hit+miss`(=전체 prompt, 의미 오류)를 폐기하고
+  `cache_hit_tokens`/`cache_miss_tokens`/`cache_hit_ratio`로 분리. agent_runs에 컬럼 추가
+  (idempotent ALTER), 세션 카드·context 라인에 캐시 비율 표시.
+- [x] 검증 — `backend/test_runtime_efficiency.py`(시나리오 1~9) + 기존 `test_review_loop.py`(10) 통과,
+  실 런타임 스모크로 context_usage/캐시 저장 확인(hit+miss==prompt_tokens).
+- [보류] Triage deterministic fast-path — flash triage가 이미 저렴하고, 휴리스틱 오라우팅이
+  오히려 비용을 늘릴 위험. 측정 근거 없이 복잡도만 추가하므로 제외.
+- [보류] provider context-overflow 시 compact→retry — 실측 기반 조기 압축/차단으로 도달 자체가
+  거의 없고, 스트림 계층에 압축 로직을 중복시킴. 도달 시 명확한 오류로 표면화됨.
 
 ## Phase 4 — Advanced Extension (별도 프로젝트)
 

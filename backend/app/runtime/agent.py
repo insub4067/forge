@@ -1,7 +1,9 @@
 import asyncio
 import base64
+import hashlib
 import json
 import mimetypes
+import re
 import subprocess
 import time
 import uuid
@@ -30,6 +32,11 @@ READ_ONLY_TOOLS = {"read_file", "list_dir", "grep"}
 # ModelRouter의 debugger Pro 승격 임계(retry_count>=3)와 맞물려,
 # 마지막(3번째) Debugger 시도가 Pro로 승격된다.
 MAX_REVIEW_CYCLES = 3
+
+# Skill 선택 삽입 한도 — skill이 많아져도 system prompt가 폭증하지 않게 상위 N개만,
+# 총 문자 예산 안에서 삽입한다. 관련 skill이 없으면 아무것도 넣지 않는다.
+MAX_ACTIVE_SKILLS = 3
+SKILL_CHAR_BUDGET = 6000
 
 # 종료 사유 → done 이벤트 status 코드 (SSE 프로토콜 비파괴적 확장)
 _STATUS_CODES = {
@@ -122,22 +129,66 @@ def _load_room_memory(workspace: str) -> str:
     return ""
 
 
-def _load_skills(workspace: str) -> str:
-    """워크스페이스의 .forge/skills/*.md 를 모아 반환한다(축적된 재사용 절차)."""
+def _skill_terms(text: str) -> list[str]:
+    """매칭용 키워드: 영문/숫자 토큰 + 2자 이상 한글 런. 소문자화."""
+    return [t for t in re.findall(r"[a-z0-9]{2,}|[가-힣]{2,}", text.lower())]
+
+
+def _select_skills(workspace: str, query: str) -> str:
+    """요청과 관련된 skill만 골라 삽입한다(selective retrieval, vector DB 없음).
+
+    파일을 로컬에서 읽는 건 무료다 — 비용은 '프롬프트에 들어가는 것'뿐이므로,
+    모든 skill을 읽어 요청 키워드와의 겹침으로 점수를 매기고 상위 N개만,
+    문자 예산 안에서 삽입한다. 제목 일치는 가중치 3, 본문 일치는 1.
+    한글 교착어를 흡수하려고 부분 문자열 포함으로 매칭한다.
+    관련 skill이 없으면 빈 문자열(아무것도 삽입하지 않음)."""
     sdir = Path(workspace) / ".forge" / "skills"
     if not sdir.is_dir():
         return ""
-    blocks: list[str] = []
+    terms = set(_skill_terms(query))
+    if not terms:
+        return ""
+    scored: list[tuple[int, str, str]] = []
     for p in sorted(sdir.glob("*.md")):
         try:
-            blocks.append(f"### skill: {p.stem}\n" + p.read_text(encoding="utf-8"))
+            body = p.read_text(encoding="utf-8")
         except OSError:
             continue
+        stem_l = p.stem.lower()
+        body_l = body.lower()
+        score = sum(3 for t in terms if t in stem_l) + sum(1 for t in terms if t in body_l)
+        if score > 0:
+            scored.append((score, p.stem, body))
+    if not scored:
+        return ""
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    blocks: list[str] = []
+    used = 0
+    for _score, stem, body in scored[:MAX_ACTIVE_SKILLS]:
+        block = f"### skill: {stem}\n{body}"
+        if used + len(block) > SKILL_CHAR_BUDGET:
+            break
+        blocks.append(block)
+        used += len(block)
     return "\n\n".join(blocks)
 
 
+def _stable_prefix(role: str) -> str:
+    """호출마다 변하지 않는 프리픽스: BASE_PROMPT + role 지침.
+
+    prompt cache는 요청 토큰 프리픽스에 걸리므로, 이 부분을 맨 앞에 고정하면
+    같은 role의 모든 호출(스텝·태스크·세션 간)이 이 프리픽스를 캐시 히트한다.
+    memory/skills 같은 동적 부분은 뒤에 붙인다."""
+    return BASE_PROMPT + "\n\n" + _load_role(role)
+
+
+def _stable_prefix_hash(role: str) -> str:
+    return hashlib.sha256(_stable_prefix(role).encode("utf-8")).hexdigest()[:12]
+
+
 def _system_for(role: str, room_memory: str = "", skills: str = "") -> str:
-    parts = [BASE_PROMPT]
+    # 안정 프리픽스(BASE+role)를 먼저, 동적 tail(memory→skills)을 뒤에 둔다.
+    parts = [_stable_prefix(role)]
     global_mem = _load_global_memory()
     if global_mem:
         parts.append("\n\n## 전역 메모리 (GLOBAL_MEMORY.md)\n" + global_mem)
@@ -148,7 +199,6 @@ def _system_for(role: str, room_memory: str = "", skills: str = "") -> str:
             "\n\n## 축적된 Skill (재사용 가능한 해결 절차)\n"
             "관련 작업이면 아래 절차를 우선 활용하라.\n" + skills
         )
-    parts.append("\n\n" + _load_role(role))
     return "".join(parts)
 
 
@@ -188,6 +238,21 @@ class AgentRuntime:
                 return split
             split -= 1
         return 0
+
+    @staticmethod
+    def _should_compact(measured_input: int, budget: int) -> bool:
+        """압축 임계 판단(순수). measured_input은 provider 실측 입력 컨텍스트."""
+        return measured_input > budget * CONTEXT_COMPACT_RATIO
+
+    @staticmethod
+    def _should_block(measured_input: int, budget: int, compacted: bool) -> bool:
+        """95% hard block 판단(순수).
+
+        압축이 방금 성공했으면 다음 호출에서 줄어든 컨텍스트가 실측으로 재검증되므로
+        차단하지 않는다. 더 이상 압축할 수 없는데도 한도를 넘을 때만 차단한다.
+        completion(출력)은 다음 입력에 누적되지 않으므로 압박 계산에서 제외하고,
+        provider 실측 prompt_tokens(=방금 보낸 입력 크기)만 기준으로 쓴다."""
+        return measured_input > budget * CONTEXT_BLOCK_RATIO and not compacted
 
     @staticmethod
     def _plain_transcript(messages: list[dict]) -> str:
@@ -537,11 +602,16 @@ class AgentRuntime:
     ) -> tuple:
         route = self.router.select_model(role, retry_count, complexity)
         tool_schemas = tools if tools is not None else TOOL_SCHEMAS
-        await send("role_start", {"role": role, "model": route["model"], "thinking": route["thinking"]})
+        await send("role_start", {
+            "role": role, "model": route["model"], "thinking": route["thinking"],
+            "prefix_hash": _stable_prefix_hash(role),
+        })
         system_msg = {"role": "system", "content": _system_for(role, room_memory, skills)}
 
         total_prompt = 0
         total_completion = 0
+        total_hit = 0
+        total_miss = 0
 
         for step in range(step_base, step_base + MAX_STEPS):
             if session_id in self._cancel_sessions:
@@ -613,24 +683,39 @@ class AgentRuntime:
             if usage:
                 total_prompt += usage.get("prompt_tokens", 0)
                 total_completion += usage.get("completion_tokens", 0)
+                # provider 실측: cache_hit(캐시에서 제공, 저렴) vs cache_miss(정가).
+                # hit+miss == prompt_tokens 이므로 "cached"를 hit+miss로 보면 틀린다.
+                hit = usage.get("prompt_cache_hit_tokens", 0)
+                miss = usage.get("prompt_cache_miss_tokens", 0)
+                total_hit += hit
+                total_miss += miss
+                route["cache_hit"] = total_hit
+                route["cache_miss"] = total_miss
+                # 컨텍스트 압박 = provider가 실측한 이번 호출의 입력 컨텍스트(prompt_tokens).
+                # 이것이 곧 "방금 모델에 보낸 실제 input"이며 다음 호출도 이 근처에서 시작한다.
+                measured_input = usage.get("prompt_tokens", 0)
                 await send(
                     "context_usage",
                     {
-                        "prompt_tokens": usage.get("prompt_tokens", 0),
+                        "prompt_tokens": measured_input,
                         "completion_tokens": usage.get("completion_tokens", 0),
-                        "cached_tokens": usage.get("prompt_cache_hit_tokens", 0)
-                        + usage.get("prompt_cache_miss_tokens", 0),
+                        "cache_hit_tokens": hit,
+                        "cache_miss_tokens": miss,
+                        "cache_hit_ratio": round(hit / measured_input, 3) if measured_input else 0,
+                        "measured": True,
                     },
                 )
-                used = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
                 if session_id:
-                    await store.update_context_usage(session_id, used)
+                    await store.update_context_usage(session_id, measured_input)
                 # 압축 임계 초과 → 오래된 대화를 요약해 컨텍스트를 줄이고 계속(비파괴)
-                if session_id and used > settings.logical_budget * CONTEXT_COMPACT_RATIO:
-                    if await self._compact(all_messages, session_id):
+                compacted = False
+                if session_id and self._should_compact(measured_input, settings.logical_budget):
+                    compacted = await self._compact(all_messages, session_id)
+                    if compacted:
                         await send("compaction", {"covered": self._compaction[session_id]["covered"]})
-                # 압축 후에도(또는 압축 불가) 95%를 넘으면 최후의 안전장치로 중단
-                if used > settings.logical_budget * CONTEXT_BLOCK_RATIO:
+                # 최후의 안전장치: 압축으로도 못 줄이는데 한도를 넘을 때만 중단.
+                # 압축이 방금 성공했다면 다음 호출에서 실측으로 재검증되므로 차단하지 않는다.
+                if self._should_block(measured_input, settings.logical_budget, compacted):
                     return "context_blocked", total_prompt, total_completion, route
 
             assistant_msg: dict[str, Any] = {"role": "assistant", "content": "".join(content)}
@@ -784,7 +869,8 @@ class AgentRuntime:
         recent_calls: list[str] = []
         all_messages: list[dict] = [*history]
         room_memory = _load_room_memory(ws)
-        skills = _load_skills(ws)
+        # 요청과 관련된 skill만 선택 삽입(전량 삽입 금지 — skill이 많아질수록 절감).
+        skills = _select_skills(ws, goal)
 
         # 이미지가 포함된 요청이면 Vision 에이전트로 먼저 분석
         last_user = history[-1] if history and history[-1].get("role") == "user" else None
@@ -804,6 +890,8 @@ class AgentRuntime:
                     c,
                     route.get("thinking", False),
                     route.get("reasoning_effort", ""),
+                    route.get("cache_hit", 0),
+                    route.get("cache_miss", 0),
                 )
 
         # 0. Triage — 코드 작업 여부 + 복잡도(planner 모델 승격 판단)
