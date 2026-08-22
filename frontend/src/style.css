@@ -692,7 +692,7 @@ header .todo-btn {
 }
 
 .fs-item.dir {
-  color: #f0c76a;
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -1120,7 +1120,7 @@ main {
 .approval-head {
   font-size: 13px;
   font-weight: 600;
-  color: #f0c76a;
+  color: var(--accent);
   margin-bottom: 4px;
 }
 
@@ -1274,7 +1274,7 @@ footer {
 .modal-head {
   font-size: 13px;
   font-weight: 600;
-  color: #f0c76a;
+  color: var(--text);
   margin-bottom: 8px;
 }
 
