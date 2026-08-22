@@ -172,6 +172,9 @@ function startRunningPoll() {
         stopRunningPoll()
         sessionRunning.value = false
         await loadMessages(true) // 완료 결과 반영 — 이미 열린 방 새로고침이라 skeleton 생략
+      } else {
+        // 실행 중엔 태스크를 폴링해 칸반이 살아있게 한다(SSE 스트림이 끊겨도 최신).
+        loadTasks()
       }
     } catch {}
   }, 3000)
@@ -1188,7 +1191,7 @@ document.addEventListener('visibilitychange', () => {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="6" y1="9" x2="6" y2="15"/><path d="M18 6c0 4-6 3-6 9"/></svg>
           <span>Git</span>
         </div>
-        <div class="menu-item" @click="showKanban = true; showMenu = false">
+        <div class="menu-item" @click="showKanban = true; loadTasks(); showMenu = false">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 10l2 2 4-4"/><line x1="8" y1="16" x2="16" y2="16"/></svg>
           <span>칸반</span>
         </div>
@@ -1329,7 +1332,7 @@ document.addEventListener('visibilitychange', () => {
                   :key="j"
                   class="tool"
                   :class="t.status"
-                  :open="t.status === 'running'"
+                  :open="t.status === 'running' || !!(t.diff && t.diff.length)"
                 >
                   <summary>
                     <span class="tool-dot" :class="t.status"></span>
