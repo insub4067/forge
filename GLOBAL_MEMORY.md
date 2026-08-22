@@ -15,6 +15,13 @@ FORGE 에이전트가 모든 채팅방에서 공통으로 참고하는 전역 �
 
 <!-- 여러 방에서 반복되는 실패 패턴과 해결책 -->
 
+- **PWA 업데이트/캐시 stale 문제(해결됨)**: 수제 sw.js가 /assets를 cache-first로
+  캐싱해 새 배포가 화면에 반영되지 않았고, dist를 손으로 패치하는 잘못된 우회가
+  반복됐다. 해결: `vite-plugin-pwa`(workbox, registerType: autoUpdate)로 전환 —
+  배포마다 precache manifest가 갱신돼 새 버전을 확실히 감지·자동 교체한다
+  (trade-bot 프로젝트에서 검증된 구성). 앞으로 sw.js를 손으로 작성하거나
+  frontend/dist를 직접 수정하지 말 것 — 소스 수정 후 `npm run build`가 정답.
+
 ## 기술 결정
 
 <!-- 프로젝트 전반의 기술 결정 사항 -->
