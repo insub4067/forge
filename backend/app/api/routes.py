@@ -12,6 +12,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from ..config import settings
 from ..db import store
+from .. import errors as error_log
 from ..runtime.agent import AgentRuntime
 
 router = APIRouter()
@@ -116,6 +117,7 @@ async def chat(req: Request):
             new_history = await runtime.run(history, emit, session_id, workspace_path)
             await store.save_history(session_id, new_history)
         except Exception as err:
+            error_log.record("agent_run", str(err), session_id)
             await queue.put(
                 {"seq": 0, "type": "error", "data": {"message": str(err)}}
             )
@@ -306,6 +308,11 @@ async def admin_stats():
     stats["provider"] = settings.llm_provider
     stats["policy"] = runtime.router.get_policy()
     return stats
+
+
+@router.get("/admin/errors")
+async def admin_errors():
+    return {"errors": error_log.recent()}
 
 
 @router.get("/admin/model-policy")

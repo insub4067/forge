@@ -60,6 +60,8 @@ const showModelPicker = ref(false)
 const pickerRole = ref('')
 const adminBalance = ref(null)
 const adminPolicyOpen = ref(false)
+const adminErrors = ref([])
+const adminErrorsOpen = ref(false)
 const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
 const attachedImage = ref(null)
 const fileInput = ref(null)
@@ -120,15 +122,24 @@ async function loadBalance() {
   } catch {}
 }
 
+async function loadErrors() {
+  try {
+    const res = await fetch('/api/admin/errors')
+    if (res.ok) adminErrors.value = (await res.json()).errors || []
+  } catch {}
+}
+
 function openAdmin() {
   showAdmin.value = true
   loadAdmin()
   loadBalance()
+  loadErrors()
 }
 
 function refreshAdmin() {
   loadAdmin()
   loadBalance()
+  loadErrors()
 }
 
 function togglePolicy() {
@@ -1162,6 +1173,23 @@ onMounted(async () => {
             <span>{{ room.count }}회</span>
           </div>
           <div v-if="!adminStats.rooms.length" class="admin-sub">기록 없음</div>
+        </div>
+
+        <div class="admin-section">
+          <div class="admin-stat-title collapsible" @click="adminErrorsOpen = !adminErrorsOpen">
+            <span>에러 로그</span>
+            <div class="collapsible-right">
+              <span class="provider-summary">{{ adminErrors.length }}건</span>
+              <span class="chevron">{{ adminErrorsOpen ? '▾' : '▸' }}</span>
+            </div>
+          </div>
+          <template v-if="adminErrorsOpen">
+            <div v-if="!adminErrors.length" class="admin-sub">기록된 에러가 없습니다.</div>
+            <div v-for="(e, i) in adminErrors" :key="i" class="err-item">
+              <div class="err-meta">{{ e.at }} · {{ e.source }}</div>
+              <div class="err-msg">{{ e.message }}</div>
+            </div>
+          </template>
         </div>
 
         <div class="admin-version">v{{ version }}</div>

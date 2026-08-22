@@ -1572,3 +1572,21 @@ textarea:focus {
   color: #fff;
   border-color: var(--accent);
 }
+
+.err-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.err-item:last-child { border-bottom: none; }
+.err-meta {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.err-msg {
+  margin-top: 3px;
+  font-size: 12px;
+  color: #f0a3a3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-word;
+}
