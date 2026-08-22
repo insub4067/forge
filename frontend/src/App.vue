@@ -20,6 +20,28 @@ const busy = ref(false)
 const isAtBottom = ref(true)
 const autoApprove = ref(localStorage.getItem('forge_auto_approve') === '1')
 const sessionRunning = ref(false)
+const showSkills = ref(false)
+const skills = ref([])
+
+async function openSkills() {
+  showSkills.value = true
+  skills.value = []
+  const id = currentRoomId.value
+  if (!id) return
+  try {
+    const res = await fetch(`/api/rooms/${id}/skills`)
+    if (res.ok) skills.value = (await res.json()).skills || []
+  } catch {}
+}
+
+async function deleteSkill(name) {
+  const id = currentRoomId.value
+  if (!id || !confirm(`skill '${name}'을 삭제할까요?`)) return
+  try {
+    await fetch(`/api/rooms/${id}/skills/${encodeURIComponent(name)}`, { method: 'DELETE' })
+    await openSkills()
+  } catch {}
+}
 const activeQuestion = ref(null)
 const questionAnswer = ref('')
 const debug = ref('대기 중')
@@ -1113,6 +1135,10 @@ document.addEventListener('visibilitychange', () => {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 10l2 2 4-4"/><line x1="8" y1="16" x2="16" y2="16"/></svg>
           <span>칸반</span>
         </div>
+        <div class="menu-item" @click="openSkills(); showMenu = false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
+          <span>Skills</span>
+        </div>
         <div class="menu-item" @click="openAdmin(); showMenu = false">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           <span>관리자</span>
@@ -1452,6 +1478,25 @@ document.addEventListener('visibilitychange', () => {
           </template>
         </div>
       </template>
+    </div>
+
+    <div v-if="showSkills" class="kanban-overlay">
+      <div class="kanban-head">
+        <span class="kanban-title">Skills · 축적된 절차</span>
+        <button @click="showSkills = false">닫기</button>
+      </div>
+      <div class="admin-body">
+        <div v-if="!skills.length" class="admin-sub">
+          아직 저장된 skill이 없습니다. 에이전트가 반복될 만한 해결 절차를 발견하면 save_skill로 저장합니다.
+        </div>
+        <div v-for="s in skills" :key="s.name" class="admin-section">
+          <div class="skill-head">
+            <span class="skill-name">{{ s.name }}</span>
+            <button class="skill-del" @click="deleteSkill(s.name)">삭제</button>
+          </div>
+          <pre class="skill-content">{{ s.content }}</pre>
+        </div>
+      </div>
     </div>
 
     <div v-if="showAdmin" class="kanban-overlay">

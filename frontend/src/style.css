@@ -2181,3 +2181,33 @@ button {
   background: var(--accent);
   animation: pulse 1.2s ease-in-out infinite;
 }
+
+.skill-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.skill-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.skill-del {
+  background: none;
+  border: 1px solid var(--border);
+  color: #f87171;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.skill-content {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

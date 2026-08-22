@@ -370,6 +370,31 @@ async def update_model_policy(role: str, req: Request):
     return {"ok": ok}
 
 
+@router.get("/rooms/{session_id}/skills")
+async def list_skills(session_id: str):
+    ws = await _room_workspace(session_id)
+    sdir = Path(ws) / ".forge" / "skills"
+    skills = []
+    if sdir.is_dir():
+        for p in sorted(sdir.glob("*.md")):
+            try:
+                skills.append({"name": p.stem, "content": p.read_text(encoding="utf-8")})
+            except OSError:
+                continue
+    return {"skills": skills}
+
+
+@router.delete("/rooms/{session_id}/skills/{name}")
+async def delete_skill(session_id: str, name: str):
+    ws = await _room_workspace(session_id)
+    safe = re.sub(r"[^a-zA-Z0-9_-]+", "-", name).strip("-").lower()
+    p = Path(ws) / ".forge" / "skills" / f"{safe}.md"
+    if p.is_file():
+        p.unlink()
+        return {"deleted": True}
+    return {"deleted": False}
+
+
 @router.get("/rooms/{session_id}/runs")
 async def room_runs(session_id: str):
     return await store.session_agent_runs(session_id)
