@@ -168,11 +168,12 @@ async function createRoom() {
     const res = await fetch('/api/rooms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, workspace_path: newRoomPath.value.trim() }),
     })
     if (res.ok) {
       const room = await res.json()
       newRoomName.value = ''
+      newRoomPath.value = ''
       showCreateRoom.value = false
       await loadRooms()
       await selectRoom(room.id)
@@ -608,6 +609,9 @@ onMounted(async () => {
       <div class="modal">
         <div class="modal-head">새 채팅방</div>
         <input v-model="newRoomName" class="modal-field" placeholder="방 이름" />
+        <button type="button" class="modal-field ws-btn" @click="openWorkspacePicker(null)">
+          {{ newRoomPath || '워크스페이스 폴더 선택 (선택 사항)' }}
+        </button>
         <div class="modal-actions">
           <button class="no" @click="showCreateRoom = false">취소</button>
           <button class="ok" @click="createRoom">만들기</button>

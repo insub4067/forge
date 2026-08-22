@@ -462,6 +462,11 @@ header .todo-btn {
 .ws-btn {
   text-align: left;
   color: var(--muted);
+  font-family: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 header .version {
