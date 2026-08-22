@@ -1503,10 +1503,6 @@ document.addEventListener('visibilitychange', () => {
       </div>
     </main>
 
-    <button v-if="!isAtBottom" class="jump-bottom" @click="jumpToBottom" aria-label="맨 아래로">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
-    </button>
-
     <div v-if="viewerImages.length" class="image-viewer" @click="closeViewer"
          @touchstart.passive="viewerTouchStart" @touchend.passive="viewerTouchEnd">
       <img :src="viewerImages[viewerIndex]" alt="이미지" @click.stop />
@@ -1517,6 +1513,9 @@ document.addEventListener('visibilitychange', () => {
     </div>
 
     <footer>
+      <button v-if="!isAtBottom" class="jump-bottom" @click="jumpToBottom" aria-label="맨 아래로">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+      </button>
       <input ref="fileInput" type="file" multiple accept="image/*,.md,.txt,.log,.json,.csv,.yml,.yaml,.toml,.py,.js,.ts,.jsx,.tsx,.vue,.html,.css,.sh,.xml,.java,.go,.rs,.c,.cpp,.h,.sql,text/*" hidden @change="onFileChange" />
       <div class="composer">
     <div v-if="attachedText" class="file-chip">
