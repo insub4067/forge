@@ -2640,16 +2640,21 @@ button {
 
 /* IDE급 코드 뷰어 — 줄번호 gutter + 문법 하이라이팅 + 가로 스크롤 */
 .code-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto; /* 상하좌우 스크롤 담당 */
+  -webkit-overflow-scrolling: touch;
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12.5px;
   line-height: 1.55;
   background: #0d1117;
-  border-radius: 10px;
-  overflow: hidden;
 }
 .code-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   text-align: right;
@@ -2661,11 +2666,8 @@ button {
   flex-shrink: 0;
 }
 .code-body {
-  flex: 1;
   margin: 0;
   padding: 12px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
   background: #0d1117;
 }
 .code-body code {
