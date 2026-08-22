@@ -193,7 +193,12 @@ async def list_sessions():
 
 @router.get("/sessions/{session_id}/messages")
 async def get_messages(session_id: str):
-    return await store.load_history(session_id)
+    history = await store.load_history(session_id)
+    # 히스토리가 비었으면 컨텍스트 사용량도 0으로 자가 치유
+    # (과거 크래시로 대화는 사라지고 used_tokens만 남은 유령 상태 정리)
+    if not history:
+        await store.update_context_usage(session_id, 0)
+    return history
 
 
 @router.post("/approvals/{approval_id}")
