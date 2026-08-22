@@ -132,6 +132,7 @@ const adminPolicyOpen = ref(false)
 const adminErrors = ref([])
 const showSessionDetail = ref(false)
 const showRunHistory = ref(false)
+const showAllRuns = ref(false)
 const showErrorLog = ref(false)
 const sessionRuns = ref([])
 const sessionMetrics = ref(null)
@@ -1792,20 +1793,29 @@ document.addEventListener('visibilitychange', () => {
           </div>
           <div v-if="!adminStats.roles.length" class="admin-sub">기록 없음</div>
         </div>
-        <div v-if="adminStats" class="admin-section">
-          <div class="admin-stat-title">세션별 실행 이력</div>
-          <div v-for="room in adminStats.rooms" :key="room.session_id" class="admin-row">
-            <span>{{ roomTitle(room.session_id) }}</span>
-            <span>{{ room.count }}회</span>
-          </div>
-          <div v-if="!adminStats.rooms.length" class="admin-sub">기록 없음</div>
-        </div>
+        <button v-if="adminStats" class="detail-link" @click="showAllRuns = true">
+          세션별 실행 이력 {{ adminStats.rooms.length }}개 보기 →
+        </button>
 
         <button class="detail-link" @click="showErrorLog = true">
           에러 로그 {{ adminErrors.length }}건 보기 →
         </button>
 
         <div class="admin-version">v{{ version }}</div>
+      </div>
+    </div>
+
+    <div v-if="showAllRuns" class="kanban-overlay">
+      <div class="kanban-head">
+        <span class="kanban-title">세션별 실행 이력</span>
+        <button @click="showAllRuns = false">닫기</button>
+      </div>
+      <div class="admin-body">
+        <div v-if="!adminStats || !adminStats.rooms.length" class="admin-sub">기록 없음</div>
+        <div v-for="room in (adminStats ? adminStats.rooms : [])" :key="room.session_id" class="admin-row">
+          <span>{{ roomTitle(room.session_id) }}</span>
+          <span class="mono">{{ room.count }}회</span>
+        </div>
       </div>
     </div>
 
