@@ -30,6 +30,34 @@ const showWorkspacePicker = ref(false)
 const fsPath = ref('')
 const fsParent = ref(null)
 const fsEntries = ref([])
+const swipedRoomId = ref(null)
+const kanbanOpen = ref({
+  todo: true,
+  planning: true,
+  in_progress: true,
+  review: true,
+  done: true,
+})
+
+let touchStartX = 0
+let touchStartY = 0
+
+function onRoomTouchStart(e) {
+  touchStartX = e.touches[0].clientX
+  touchStartY = e.touches[0].clientY
+}
+
+function onRoomTouchEnd(r, e) {
+  const dx = e.changedTouches[0].clientX - touchStartX
+  const dy = e.changedTouches[0].clientY - touchStartY
+  if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
+    swipedRoomId.value = dx < 0 ? r.id : null
+  }
+}
+
+function toggleKanban(key) {
+  kanbanOpen.value[key] = !kanbanOpen.value[key]
+}
 
 const kanbanCols = [
   { key: 'todo', label: 'TODO' },
@@ -428,34 +456,38 @@ onMounted(async () => {
       <button @click="resetSession">+</button>
     </header>
 
-    <div v-if="showRooms" class="rooms-panel">
-      <div
-        v-for="r in rooms"
-        :key="r.id"
-        class="room-item"
-        :class="{ active: r.id === currentRoomId }"
-        @click="selectRoom(r.id)"
-      >
-        <svg class="ctx" viewBox="0 0 36 36">
-          <circle class="ctx-bg" cx="18" cy="18" r="15" pathLength="100" />
-          <circle
-            class="ctx-fg"
-            cx="18"
-            cy="18"
-            r="15"
-            pathLength="100"
-            :stroke-dasharray="`${ctxPct(r)} 100`"
-            :class="ctxClass(ctxPct(r))"
-          />
-        </svg>
-        <div class="room-info">
-          <div class="room-title">{{ r.title }}</div>
-          <div class="room-path">{{ r.workspace_path || '기본 워크스페이스' }}</div>
+    <div v-if="showRooms" class="rooms-overlay" @click="showRooms = false">
+      <div class="rooms-panel" @click.stop>
+        <div v-for="r in rooms" :key="r.id" class="room-swipe">
+          <button class="room-swipe-del" @click.stop="deleteRoom(r.id)">삭제</button>
+          <div
+            class="room-item"
+            :class="{ active: r.id === currentRoomId, swiped: swipedRoomId === r.id }"
+            @click="selectRoom(r.id)"
+            @touchstart="onRoomTouchStart"
+            @touchend="onRoomTouchEnd(r, $event)"
+          >
+            <svg class="ctx" viewBox="0 0 36 36">
+              <circle class="ctx-bg" cx="18" cy="18" r="15" pathLength="100" />
+              <circle
+                class="ctx-fg"
+                cx="18"
+                cy="18"
+                r="15"
+                pathLength="100"
+                :stroke-dasharray="`${ctxPct(r)} 100`"
+                :class="ctxClass(ctxPct(r))"
+              />
+            </svg>
+            <div class="room-info">
+              <div class="room-title">{{ r.title }}</div>
+              <div class="room-path">{{ r.workspace_path || '기본 워크스페이스' }}</div>
+            </div>
+            <span class="room-pct">{{ ctxPct(r) }}%</span>
+          </div>
         </div>
-        <span class="room-pct">{{ ctxPct(r) }}%</span>
-        <button class="room-del" @click.stop="deleteRoom(r.id)">×</button>
+        <div class="rooms-add" @click="showCreateRoom = true; showRooms = false">+ 새 방 만들기</div>
       </div>
-      <div class="rooms-add" @click="showCreateRoom = true; showRooms = false">+ 새 방 만들기</div>
     </div>
 
     <main ref="chatEl">
@@ -562,24 +594,30 @@ onMounted(async () => {
         <button @click="showKanban = false">닫기</button>
       </div>
       <div class="kanban-board">
-        <div v-for="col in kanbanCols" :key="col.key" class="kanban-col">
-          <div class="kanban-col-head">{{ col.label }}</div>
-          <div
-            v-for="t in tasks.filter((x) => x.status === col.key)"
-            :key="t.id"
-            class="kanban-card"
-          >
-            <div class="kanban-card-title">{{ t.title }}</div>
-            <div class="kanban-bar">
-              <div class="kanban-bar-fill" :style="{ width: (t.progress || 0) + '%' }"></div>
+        <div v-for="col in kanbanCols" :key="col.key" class="kanban-section">
+          <div class="kanban-col-head" @click="toggleKanban(col.key)">
+            <span>{{ col.label }}</span>
+            <span class="kanban-count">{{ tasks.filter((x) => x.status === col.key).length }}</span>
+          </div>
+          <div v-show="kanbanOpen[col.key]" class="kanban-cards">
+            <div
+              v-for="t in tasks.filter((x) => x.status === col.key)"
+              :key="t.id"
+              class="kanban-card"
+            >
+              <div class="kanban-card-title">{{ t.title }}</div>
+              <div class="kanban-bar">
+                <div class="kanban-bar-fill" :style="{ width: (t.progress || 0) + '%' }"></div>
+              </div>
             </div>
+            <div v-if="tasks.filter((x) => x.status === col.key).length === 0" class="kanban-empty">없음</div>
           </div>
         </div>
       </div>
     </div>
 
-    <div v-if="showWorkspacePicker" class="sheet-overlay" @click.self="showWorkspacePicker = false">
-      <div class="sheet">
+    <div v-if="showWorkspacePicker" class="sheet-overlay" @click="showWorkspacePicker = false">
+      <div class="sheet" @click.stop>
         <div class="sheet-head">
           <span class="sheet-title">폴더 선택</span>
           <button @click="showWorkspacePicker = false">닫기</button>
