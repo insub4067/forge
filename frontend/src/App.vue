@@ -247,13 +247,21 @@ function isLiveTurn(i) {
 }
 let mainStartX = 0
 let mainStartY = 0
+let scrollLocked = false
+let scrollUnlockTimer = null
 
 function onMainTouchStart(e) {
   mainStartX = e.touches[0].clientX
   mainStartY = e.touches[0].clientY
+  // 사용자가 스크롤 조작하는 동안 auto-scroll 잠금(스트리밍이 위로 읽기를 방해하지 않게)
+  scrollLocked = true
+  if (scrollUnlockTimer) clearTimeout(scrollUnlockTimer)
 }
 
 function onMainTouchEnd(e) {
+  // 손 뗀 뒤 관성 스크롤 여유를 두고 잠금 해제
+  if (scrollUnlockTimer) clearTimeout(scrollUnlockTimer)
+  scrollUnlockTimer = setTimeout(() => { scrollLocked = false }, 400)
   const dx = e.changedTouches[0].clientX - mainStartX
   const dy = e.changedTouches[0].clientY - mainStartY
   // 왼쪽 가장자리에서 오른쪽으로 스와이프 → 세션 드로어
@@ -799,9 +807,9 @@ function scrollBottom() {
   })
 }
 
-// 하단 근처에 있을 때만 따라 내려간다(읽고 있는 위치를 뺏지 않음).
+// 하단 근처에 있고, 사용자가 스크롤 조작 중이 아닐 때만 따라 내려간다(읽는 위치를 뺏지 않음).
 function maybeScrollBottom() {
-  if (isAtBottom.value) scrollBottom()
+  if (isAtBottom.value && !scrollLocked) scrollBottom()
 }
 
 // 버튼용 — 부드럽게 스크롤
@@ -1510,6 +1518,7 @@ document.addEventListener('visibilitychange', () => {
 
     <footer>
       <input ref="fileInput" type="file" multiple accept="image/*,.md,.txt,.log,.json,.csv,.yml,.yaml,.toml,.py,.js,.ts,.jsx,.tsx,.vue,.html,.css,.sh,.xml,.java,.go,.rs,.c,.cpp,.h,.sql,text/*" hidden @change="onFileChange" />
+      <div class="composer">
     <div v-if="attachedText" class="file-chip">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
       <span class="file-chip-name">{{ attachedText.name }}</span>
@@ -1528,7 +1537,6 @@ document.addEventListener('visibilitychange', () => {
       </div>
     </div>
 
-      <div class="composer">
         <textarea
           v-model="input"
           rows="1"
