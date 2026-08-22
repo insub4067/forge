@@ -2637,3 +2637,40 @@ button {
   gap: 8px;
   margin-top: 10px;
 }
+
+/* IDE급 코드 뷰어 — 줄번호 gutter + 문법 하이라이팅 + 가로 스크롤 */
+.code-view {
+  display: flex;
+  align-items: flex-start;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  background: #0d1117;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.code-gutter {
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+  padding: 12px 8px 12px 12px;
+  color: #6e7681;
+  user-select: none;
+  background: #0d1117;
+  border-right: 1px solid #21262d;
+  flex-shrink: 0;
+}
+.code-body {
+  flex: 1;
+  margin: 0;
+  padding: 12px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  background: #0d1117;
+}
+.code-body code {
+  white-space: pre;
+  background: none;
+  padding: 0;
+  color: #e6edf3;
+}

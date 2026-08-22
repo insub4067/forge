@@ -1,7 +1,31 @@
 <script setup>
-import { ref, reactive, nextTick, onMounted, watch } from 'vue'
+import { ref, reactive, nextTick, onMounted, watch, computed } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import hljs from 'highlight.js/lib/common'
+import 'highlight.js/styles/github-dark.css'
+
+const _EXT_LANG = {
+  js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
+  ts: 'typescript', tsx: 'typescript', vue: 'xml', html: 'xml', xml: 'xml',
+  py: 'python', rb: 'ruby', go: 'go', rs: 'rust', java: 'java', kt: 'kotlin',
+  c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', cs: 'csharp', php: 'php', swift: 'swift',
+  css: 'css', scss: 'scss', json: 'json', yml: 'yaml', yaml: 'yaml', toml: 'ini',
+  sh: 'bash', bash: 'bash', zsh: 'bash', sql: 'sql', md: 'markdown', dockerfile: 'dockerfile',
+}
+// 소스코드를 IDE처럼 문법 하이라이팅. 실패하면 이스케이프만.
+const highlightedContent = computed(() => {
+  const code = fileContent.value || ''
+  const ext = (viewingFile.value.split('.').pop() || '').toLowerCase()
+  const lang = _EXT_LANG[ext]
+  try {
+    if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value
+    return hljs.highlightAuto(code).value
+  } catch {
+    return code.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+  }
+})
+const fileLineCount = computed(() => (fileContent.value ? fileContent.value.split('\n').length : 0))
 
 // 단일 줄바꿈도 <br>로 — 답변 줄바꿈을 적극 반영
 marked.setOptions({ breaks: true, gfm: true })
@@ -2037,7 +2061,10 @@ document.addEventListener('visibilitychange', () => {
           {{ e.name }}
         </button>
       </div>
-      <pre v-else class="file-view">{{ fileContent }}</pre>
+      <div v-else class="code-view">
+        <div class="code-gutter"><span v-for="n in fileLineCount" :key="n">{{ n }}</span></div>
+        <pre class="code-body"><code v-html="highlightedContent"></code></pre>
+      </div>
     </div>
 
     <div v-if="showModelPicker" class="modal-overlay" style="z-index: 400" @click="showModelPicker = false">
