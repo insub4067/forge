@@ -3,6 +3,9 @@ import { ref, reactive, nextTick, onMounted, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
+// 단일 줄바꿈도 <br>로 — 답변 줄바꿈을 적극 반영
+marked.setOptions({ breaks: true, gfm: true })
+
 function renderMarkdown(text) {
   try {
     return DOMPurify.sanitize(marked.parse(text || ''))
@@ -617,7 +620,7 @@ function newUser(text) {
 }
 
 function newAssistant() {
-  const m = reactive({ role: 'assistant', phases: [], approval: null, context: null, state: null, doneMessage: '', compacted: false })
+  const m = reactive({ role: 'assistant', phases: [], approval: null, context: null, state: null, doneMessage: '', compacted: false, copied: false })
   messages.value.push(m)
   return m
 }
@@ -663,6 +666,34 @@ function phaseStatus(p) {
 
 function runningTool(p) {
   return p.tools.find((t) => t.status === 'running')
+}
+
+function assistantText(m) {
+  const parts = (m.phases || []).map((p) => p.text).filter(Boolean)
+  if (m.doneMessage) parts.push(m.doneMessage)
+  return parts.join('\n\n').trim()
+}
+
+function hasAssistantText(m) {
+  return assistantText(m).length > 0
+}
+
+async function copyMessage(m) {
+  const text = assistantText(m)
+  if (!text) return
+  // 피드백은 즉시(클립보드 응답을 기다리지 않음)
+  m.copied = true
+  setTimeout(() => { m.copied = false }, 1500)
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    document.body.appendChild(ta)
+    ta.select()
+    try { document.execCommand('copy') } catch {}
+    document.body.removeChild(ta)
+  }
 }
 
 function summarizeArgs(args) {
@@ -1180,6 +1211,14 @@ onMounted(async () => {
             >
               <span class="bubble-stop-dot"></span>중단
             </button>
+
+            <div v-if="hasAssistantText(m) && !(busy && i === messages.length - 1)" class="msg-actions">
+              <button class="msg-action" @click="copyMessage(m)">
+                <svg v-if="!m.copied" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                {{ m.copied ? '복사됨' : '복사' }}
+              </button>
+            </div>
           </template>
         </div>
       </div>

@@ -2107,3 +2107,58 @@ button {
   display: flex;
   flex-shrink: 0;
 }
+
+/* ===== 답변 가시성 개선 ===== */
+.text {
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.75;
+}
+.text p { margin: 11px 0; }
+.text strong, .text b {
+  font-weight: 700;
+  color: #fdfcf7;
+}
+.text h1, .text h2, .text h3, .text h4 {
+  color: #fdfcf7;
+  font-weight: 700;
+  margin: 20px 0 10px;
+}
+.text h1:first-child, .text h2:first-child, .text h3:first-child { margin-top: 0; }
+.text ul, .text ol { padding-left: 22px; margin: 10px 0; }
+.text li { margin: 6px 0; line-height: 1.7; }
+.text pre {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 12px 0;
+}
+.text pre code { color: var(--text); font-size: 13px; line-height: 1.6; }
+.text code {
+  background: var(--panel-2);
+  color: #f2c9b8;
+  font-size: 13.5px;
+}
+.text a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.text hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+
+/* 복사 등 응답 액션 */
+.msg-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.msg-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.msg-action:active { background: var(--panel); }
