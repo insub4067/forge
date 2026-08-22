@@ -1,11 +1,13 @@
 :root {
-  --bg: #0b0d12;
-  --panel: #161a22;
-  --panel-2: #1e2430;
-  --text: #e7eaf0;
-  --muted: #8a93a6;
-  --accent: #4f7cff;
-  --border: #232a38;
+  /* 따뜻한 차콜 다크 (Claude 계열) — 순수 블랙 대신 웜 톤 */
+  --bg: #262523;
+  --panel: #302f2c;
+  --panel-2: #3a3835;
+  --text: #f0eee6;
+  --muted: #a8a199;
+  --accent: #d97757;
+  --accent-soft: rgba(217, 119, 87, 0.16);
+  --border: #423f3a;
 }
 
 * {
@@ -870,7 +872,7 @@ main {
   font-weight: 700;
   letter-spacing: 0.5px;
   color: var(--accent);
-  background: rgba(79, 124, 255, 0.12);
+  background: var(--accent-soft);
   border-radius: 6px;
   padding: 3px 8px;
   margin-bottom: 8px;
@@ -1581,7 +1583,7 @@ footer {
 .gh-status.st-mod { color: #d29922; }
 .gh-status.st-new { color: #3fb950; }
 .gh-status.st-del { color: #f85149; }
-.gh-status.st-ren { color: #4f7cff; }
+.gh-status.st-ren { color: var(--accent); }
 .gh-file-path {
   flex: 1;
   min-width: 0;
@@ -1659,7 +1661,7 @@ footer {
   flex-shrink: 0;
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(79, 124, 255, 0.15);
+  background: var(--accent-soft);
   color: var(--accent);
   font-size: 11px;
   font-weight: 700;
