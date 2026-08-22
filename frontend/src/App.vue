@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, nextTick, onMounted } from 'vue'
+import { ref, reactive, nextTick, onMounted, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -971,6 +971,11 @@ async function cancelSession() {
 function resetSession() {
   showCreateRoom.value = true
 }
+
+// 작업 중 여부를 전역에 노출 — SW 업데이트가 작업 중 리로드하지 않도록(main.js)
+watch(busy, (v) => {
+  window.__forgeBusy = v
+})
 
 onMounted(async () => {
   await loadRooms()
