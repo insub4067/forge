@@ -769,6 +769,17 @@ function quickAction(text) {
   send()
 }
 
+function tokenBarPct(t) {
+  const roles = adminStats.value?.roles || []
+  const max = Math.max(1, ...roles.map((r) => r.tokens || 0))
+  return Math.round(((t || 0) / max) * 100)
+}
+
+function tokenShare(t) {
+  const total = adminStats.value?.total_tokens || 0
+  return total ? Math.round(((t || 0) / total) * 100) : 0
+}
+
 function toggleAutoApprove() {
   autoApprove.value = !autoApprove.value
   localStorage.setItem('forge_auto_approve', autoApprove.value ? '1' : '0')
@@ -1378,6 +1389,19 @@ onMounted(async () => {
           <div v-for="r in adminStats.roles" :key="r.role" class="admin-row">
             <span>{{ r.role }}</span>
             <span>{{ r.count }}회 · {{ r.percent }}%</span>
+          </div>
+          <div v-if="!adminStats.roles.length" class="admin-sub">기록 없음</div>
+        </div>
+        <div v-if="adminStats" class="admin-section">
+          <div class="admin-stat-title">에이전트 토큰 소비 ({{ adminStats.days }}일)</div>
+          <div v-for="r in adminStats.roles" :key="r.role" class="token-row">
+            <div class="token-row-head">
+              <span>{{ r.role }}</span>
+              <span class="mono">{{ formatTokens(r.tokens) }} · {{ tokenShare(r.tokens) }}%</span>
+            </div>
+            <div class="token-bar">
+              <div class="token-bar-fill" :style="{ width: tokenBarPct(r.tokens) + '%' }"></div>
+            </div>
           </div>
           <div v-if="!adminStats.roles.length" class="admin-sub">기록 없음</div>
         </div>
