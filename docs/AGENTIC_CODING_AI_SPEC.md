@@ -1,217 +1,172 @@
-# Forge Agentic Coding AI Product Specification v1.0
+# FORGE Agentic Coding AI Product Specification
 
-## 1. Overview
+> Version 1.1 · 2026-08-22
 
-Forge는 단순한 AI 코딩 채팅 도구가 아닌 사용자의 요구사항을 분석하고 계획을 수립하며 실제 개발 작업을 수행하는 Agentic Coding AI Harness를 목표로 한다.
+## 1. Product Vision
 
-핵심 목표:
+FORGE는 AI에게 코드 한 번 써달라고 요청하는 도구가 아니라, 프로젝트를 맡아 **계획·실행·검토·수정·재검증**하는 셀프호스팅 Agent Runtime이다.
 
-- 사용자 요구사항 분석
-- 작업 계획(Plan) 생성
-- TODO 기반 Task 관리
-- 코드 실행 및 검증
-- 진행 상황의 투명한 UI 제공
+핵심 제품 차별점:
 
----
+- DeepSeek Flash 중심의 저비용 반복 실행
+- 복잡하거나 실패한 경우에만 Pro escalation
+- Mac에서 장시간 실행
+- 모바일 PWA에서 원격 지휘·승인·관찰
+- context/cache/tool 비용을 계측하며 최적화
+- 성공 경험을 Skill로 저장·재사용
 
-## 2. Chat Room Based Workspace
+최상위 제품 지표는 **cost per successfully completed task**다.
 
-### Requirement
+## 2. Workspace / Room
 
-사용자는 여러 개의 Chat Room을 생성할 수 있어야 한다.
+각 Chat Room은 하나의 명시적 local workspace와 연결된다.
 
-각 Chat Room은 독립적인 작업 공간(Workspace)과 연결된다.
-
-Example:
-
-```
-Chat Room: Trade Bot
-Workspace: ~/Projects/trade-bot
-
-Chat Room: SmartBIMS
-Workspace: ~/Projects/SmartBIMS
+```text
+Room A → ~/Projects/trade-bot
+Room B → ~/Projects/SmartBIMS
 ```
 
-Chat Room은 다음 정보를 관리한다.
+신규 방은 workspace 선택이 필수다. 파일 브라우저와 Agent Tool은 이 workspace를 작업 경계로 삼는다.
 
-- 대화 기록
-- Workspace 경로
-- 프로젝트 Context
-- Agent 실행 상태
-- Task 목록
+각 Room은 다음을 가진다.
 
----
+- message history
+- workspace path
+- task/Kanban
+- context/metrics
+- selected/reusable Skills
+- running/final status
+- git checkpoint/history
 
-## 3. Workspace Model
+## 3. Agent Workflow
 
-```json
-{
-  "id": "chat_001",
-  "name": "Trade Bot Development",
-  "workspace_path": "~/Projects/trade-bot",
-  "status": "active"
-}
-```
-
-Workspace는 Agent가 접근하는 실제 로컬 프로젝트 폴더이다.
-
----
-
-## 4. Agent Workflow
-
-사용자의 요청은 즉시 코드 변경으로 이어지지 않는다.
-
-Flow:
-
-```
+```text
 User Request
-      ↓
-Requirement Analysis
-      ↓
-Repository Analysis
-      ↓
-Planning Agent
-      ↓
-Task Generation
-      ↓
-Execution Agent
-      ↓
-Review / Validation
-      ↓
-Result Report
-```
-
----
-
-## 5. Planning System
-
-Agent는 작업 전 실행 계획을 생성한다.
-
-Example:
-
-```
-Goal:
-로그인 기능 개선
-
-Tasks:
-1. 인증 구조 분석
-2. API Layer 확인
-3. Token Refresh 구현
-4. 테스트 작성
-5. 검증
-```
-
-사용자는 실행 전 Plan을 확인할 수 있다.
-
----
-
-## 6. Task Management
-
-모든 Agent 작업은 Task 단위로 관리한다.
-
-Task Status:
-
-```
-TODO
  ↓
-PLANNING
+Triage
  ↓
-IN_PROGRESS
+Planner
  ↓
-REVIEW
+Coder
  ↓
-DONE
+Reviewer
+ ├─ all tasks done → Complete
+ └─ defect → Debugger → Reviewer
 ```
 
-Task Example:
+Reviewer/Debugger loop는 최대 3회다. task 상태가 성공 판정의 authority다.
 
-```json
-{
-  "title": "Implement Token Refresh",
-  "status": "in_progress",
-  "progress": 60
-}
+## 4. Model Strategy
+
+FORGE는 강한 모델을 항상 쓰지 않는다.
+
+- Planner: Flash + medium, COMPLEX만 Pro + high
+- Coder: Flash
+- Reviewer: Flash + medium
+- Debugger: Flash, 마지막 복구만 Pro
+- Chat/Triage: Flash
+- Vision: Flash Vision
+
+기본 원칙: **Flash-first, Pro-on-demand**.
+
+## 5. Context / Cache
+
+- provider 실측 prompt token 기준 pressure
+- 75% 비파괴 compaction
+- 95% 최후 hard block
+- long tool result pruning
+- stable system/role prefix
+- cache hit/miss telemetry
+- Skill은 관련 상위 항목만 선택 삽입
+
+DB/history 원본과 모델에 보내는 projected surface는 분리한다.
+
+## 6. Tool / Permission
+
+Agent가 사용하는 주요 tool:
+
+```text
+read_file
+list_dir
+grep
+write_file
+edit_file
+bash
+ask_user
+update_tasks
+save_skill
 ```
 
----
+write/edit/bash/save_skill은 승인 대상이다. mutation 전 git SHA checkpoint를 기록한다. 읽기 전용 다중 tool은 병렬 prefetch 가능하다.
 
-## 7. Progress UI
+## 7. Self-Correction / Learning
 
-사용자는 Agent의 현재 작업 상태를 확인할 수 있어야 한다.
+Reviewer는 결과를 task 상태로 검증하고 Debugger가 결함을 수정한 뒤 Reviewer가 재검증한다.
 
-Example:
+여러 단계로 성공했고 반복 가치가 있는 절차는 `save_skill`로 `.forge/skills/*.md`에 저장할 수 있다. 저장은 승인 게이트를 통과하며, 다음 요청에서는 관련 Skill만 선택해서 context에 주입한다.
 
-```
-Project: Trade Bot
+## 8. Remote Experience
 
-Completed
-✓ Analyze strategy engine
-✓ Review risk manager
+모바일 UI의 목적은 IDE 복제가 아니라 Agent 운영이다.
 
-Running
-▶ Add stop loss rule
+지원:
 
-Pending
-○ Write tests
-○ Run simulation
+- 실시간 role/activity
+- thinking/text/tool/diff
+- approval/question
+- runtime steering
+- task/Kanban
+- Git changes/history/branch
+- file browser
+- Skill viewer
+- session metrics
 
-Progress: 70%
-```
+SSE가 끊기면 `/status` polling으로 Mac에서 실행 중인 Agent 상태를 계속 확인한다.
 
----
+## 9. Durability
 
-## 8. Execution Transparency
+현재:
 
-Agent는 모든 작업 로그를 기록한다.
+- PostgreSQL history/task/agent telemetry
+- `sessions.running`, `sessions.final_status`
+- JSONL durable event/action log
+- run crash 가시화
+- 서버 재시작 시 interrupted run reconcile
 
-Example:
+미완료:
 
-```
-12:01 Analyze repository
-12:05 Create implementation plan
-12:10 Modify risk.py
-12:15 Run tests
-12:20 Validation completed
-```
+- worker process 독립화
+- durable queue
+- replayable authoritative event stream
+- 프로세스 재시작 후 실제 run continuation
 
----
+따라서 현재는 **reconnect-friendly persistent Agent**지만 완전한 crash-resumable execution engine은 아니다.
 
-## 9. Architecture Direction
+## 10. Observability / Efficiency
 
-```
-                 Web UI / PWA
-                      |
-                 FastAPI Server
-                      |
-             Agent Orchestrator
-          /          |           \
- Planner Agent  Coding Agent  Review Agent
-                      |
-              Workspace Manager
-                      |
-             Local File System
-```
+FORGE는 다음을 role/session 단위로 측정한다.
 
----
+- input/output tokens
+- cache hit/miss
+- model/tool calls
+- retries/compactions
+- Pro calls
+- elapsed
+- selected skills
+- final status
+- estimated cost(가격 설정 시)
 
-## 10. Product Vision
+성공 기준의 기본값은 `final_status == completed`다.
 
-Forge의 목표는 AI에게 코드를 작성시키는 도구가 아니다.
+## 11. Product Direction
 
-AI 개발자가 하나의 프로젝트를 맡아 수행하는 환경을 만드는 것이다.
+우선순위:
 
-사용자는 목표를 제시하고 Agent는:
+1. 실제 benchmark로 비용/성공률 측정
+2. durable worker + run resume
+3. Tool Script/RPC로 model round-trip 감소
+4. scheduler/condition jobs + push
+5. Local/SSH/Docker execution backend
+6. isolated subagent는 실익 검증 후 도입
 
-- 프로젝트 이해
-- 계획 수립
-- 작업 분해
-- 코드 작성
-- 테스트
-- 결과 보고
-
-까지 수행한다.
-
----
-
-Version: 1.0
-Date: 2026-08-22
+FORGE는 거대한 agent framework를 만드는 것이 아니라 **작고 이해 가능한 Python runtime으로 높은 성공률/비용 효율을 만드는 것**을 목표로 한다.
