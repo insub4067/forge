@@ -83,7 +83,7 @@ async def create_room(req: Request):
     name = str(body.get("name", "")).strip() or "새 방"
     workspace_path = str(body.get("workspace_path", "")).strip()
     room_id = await store.create_room(name, workspace_path)
-    return {"id": room_id, "title": name, "workspace_path": workspace_path}
+    return await store.get_room(room_id)
 
 
 @router.get("/rooms")
@@ -94,6 +94,15 @@ async def list_rooms():
 @router.get("/rooms/{session_id}")
 async def get_room(session_id: str):
     return await store.get_room(session_id)
+
+
+@router.patch("/rooms/{session_id}")
+async def update_room(session_id: str, req: Request):
+    body = await req.json()
+    workspace_path = str(body.get("workspace_path", "")).strip()
+    if workspace_path:
+        await store.update_room_workspace(session_id, workspace_path)
+    return {"ok": True}
 
 
 @router.delete("/rooms/{session_id}")

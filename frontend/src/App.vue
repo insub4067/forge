@@ -31,6 +31,7 @@ const fsPath = ref('')
 const fsParent = ref(null)
 const fsEntries = ref([])
 const swipedRoomId = ref(null)
+const pickerRoomId = ref(null)
 const kanbanOpen = ref({
   todo: true,
   planning: true,
@@ -160,12 +161,11 @@ async function createRoom() {
     const res = await fetch('/api/rooms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, workspace_path: newRoomPath.value.trim() }),
+      body: JSON.stringify({ name }),
     })
     if (res.ok) {
       const room = await res.json()
       newRoomName.value = ''
-      newRoomPath.value = ''
       showCreateRoom.value = false
       await loadRooms()
       await selectRoom(room.id)
@@ -192,9 +192,13 @@ async function deleteRoom(id) {
   } catch {}
 }
 
-async function openWorkspacePicker() {
+async function openWorkspacePicker(roomId) {
+  pickerRoomId.value = roomId || null
   showWorkspacePicker.value = true
-  await navigateFs(newRoomPath.value || '')
+  const initial = roomId
+    ? rooms.value.find((r) => r.id === roomId)?.workspace_path || ''
+    : newRoomPath.value
+  await navigateFs(initial || '')
 }
 
 async function navigateFs(path) {
@@ -209,8 +213,19 @@ async function navigateFs(path) {
   } catch {}
 }
 
-function pickCurrentPath() {
-  newRoomPath.value = fsPath.value
+async function pickCurrentPath() {
+  if (pickerRoomId.value) {
+    try {
+      await fetch(`/api/rooms/${pickerRoomId.value}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_path: fsPath.value }),
+      })
+      await loadRooms()
+    } catch {}
+  } else {
+    newRoomPath.value = fsPath.value
+  }
   showWorkspacePicker.value = false
 }
 
@@ -490,7 +505,9 @@ onMounted(async () => {
             </svg>
             <div class="room-info">
               <div class="room-title">{{ r.title }}</div>
-              <div class="room-path">{{ r.workspace_path || '기본 워크스페이스' }}</div>
+              <div class="room-path" @click.stop="openWorkspacePicker(r.id)">
+                {{ r.workspace_path || '워크스페이스 설정' }}
+              </div>
             </div>
             <span class="room-pct">{{ ctxPct(r) }}%</span>
           </div>
@@ -584,9 +601,6 @@ onMounted(async () => {
       <div class="modal">
         <div class="modal-head">새 채팅방</div>
         <input v-model="newRoomName" class="modal-field" placeholder="방 이름" />
-        <button type="button" class="modal-field ws-btn" @click="openWorkspacePicker">
-          {{ newRoomPath || '워크스페이스 폴더 선택' }}
-        </button>
         <div class="modal-actions">
           <button class="no" @click="showCreateRoom = false">취소</button>
           <button class="ok" @click="createRoom">만들기</button>

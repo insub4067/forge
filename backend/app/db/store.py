@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 
 from sqlalchemy import delete, func, select
@@ -28,12 +29,22 @@ async def ensure_session(
         await s.commit()
 
 
-async def create_room(name: str, workspace_path: str) -> str:
+async def create_room(name: str, workspace_path: str = "") -> str:
     room_id = uuid.uuid4().hex
+    if not workspace_path:
+        workspace_path = os.path.expanduser("~")
     async with async_session() as s:
         s.add(Session(id=room_id, title=name, workspace_path=workspace_path))
         await s.commit()
     return room_id
+
+
+async def update_room_workspace(session_id: str, workspace_path: str) -> None:
+    async with async_session() as s:
+        sess = await s.get(Session, session_id)
+        if sess:
+            sess.workspace_path = workspace_path
+            await s.commit()
 
 
 async def get_room(session_id: str) -> dict | None:
