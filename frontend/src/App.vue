@@ -331,6 +331,7 @@ let mainStartX = 0
 let mainStartY = 0
 let scrollLocked = false
 let scrollUnlockTimer = null
+let scrollRaf = null
 
 function onMainTouchStart(e) {
   mainStartX = e.touches[0].clientX
@@ -338,6 +339,7 @@ function onMainTouchStart(e) {
   // 사용자가 스크롤 조작하는 동안 auto-scroll 잠금(스트리밍이 위로 읽기를 방해하지 않게)
   scrollLocked = true
   if (scrollUnlockTimer) clearTimeout(scrollUnlockTimer)
+  if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = null }
 }
 
 function onMainTouchEnd(e) {
@@ -1275,9 +1277,41 @@ function scrollBottom() {
   })
 }
 
+// 스트리밍 중 텍스트가 조금씩 늘어날 때 부드럽게 따라 내려간다.
+// 큰 이동(새 메시지 등장 등)은 즉시 점프해 답답함을 없앤다.
+function smoothScrollToBottom() {
+  const el = chatEl.value
+  if (!el) return
+  const target = el.scrollHeight - el.clientHeight
+  const current = el.scrollTop
+  const diff = target - current
+  if (Math.abs(diff) > 160) {
+    // 새 메시지·이미지 등 큰 높이 변화는 즉시(애니메이션이 오히려 답답)
+    el.scrollTop = target
+    if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = null }
+    return
+  }
+  if (scrollRaf) return // 이미 부드럽게 따라가는 중
+  const step = () => {
+    const el2 = chatEl.value
+    if (!el2) { scrollRaf = null; return }
+    const t = el2.scrollHeight - el2.clientHeight
+    const c = el2.scrollTop
+    const d = t - c
+    if (Math.abs(d) < 1.5) {
+      el2.scrollTop = t
+      scrollRaf = null
+      return
+    }
+    el2.scrollTop = c + d * 0.32
+    scrollRaf = requestAnimationFrame(step)
+  }
+  scrollRaf = requestAnimationFrame(step)
+}
+
 // 하단 근처에 있고, 사용자가 스크롤 조작 중이 아닐 때만 따라 내려간다(읽는 위치를 뺏지 않음).
 function maybeScrollBottom() {
-  if (isAtBottom.value && !scrollLocked) scrollBottom()
+  if (isAtBottom.value && !scrollLocked) smoothScrollToBottom()
 }
 
 // 버튼용 — 부드럽게 스크롤
