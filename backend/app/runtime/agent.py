@@ -5,6 +5,8 @@ import mimetypes
 import subprocess
 import time
 import uuid
+
+import httpx
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -152,12 +154,31 @@ class AgentRuntime:
             out.append(m)
         return out
 
+    @staticmethod
+    def _classify_error(err: Exception) -> str:
+        """LLM 오류를 recover 전략별로 분류: reasoning / transient / terminal."""
+        msg = str(err).lower()
+        if "reasoning_content" in msg:
+            return "reasoning"
+        if isinstance(err, (httpx.TimeoutException, httpx.TransportError)):
+            return "transient"
+        if any(c in msg for c in ("오류 429", "오류 500", "오류 502", "오류 503", "오류 504")):
+            return "transient"
+        if any(w in msg for w in ("timeout", "connection", "temporarily", "overloaded", "rate limit")):
+            return "transient"
+        return "terminal"
+
     async def _stream_with_recovery(self, model, messages, tool_schemas, thinking, effort, session_id):
-        """LLM 스트림을 호출하되, 요청 시점 오류(예: DeepSeek reasoning_content 400)로
-        아무 델타도 못 받고 죽으면 reasoning_content를 벗겨 1회 재시도한다.
-        긴 thinking tool-loop에서 스텝 하나가 죽어도 루프가 스스로 회복한다."""
-        attempts = [messages, self._strip_reasoning(messages)]
-        for i, msgs in enumerate(attempts):
+        """LLM 스트림을 호출하되 요청 시점 오류를 유형별로 회복한다.
+
+        - reasoning_content 400: reasoning을 벗겨 즉시 재시도(이후 스텝도 학습)
+        - 일시적 오류(429/5xx/timeout/connection): 백오프(1·2·4초) 후 최대 3회 재시도
+        - terminal(잘못된 요청·인증 등): 전파
+        긴 실행이 네트워크 블립이나 일시적 API 장애로 통째로 죽지 않게 한다."""
+        stripped = False
+        transient_attempts = 0
+        while True:
+            msgs = self._strip_reasoning(messages) if stripped else messages
             produced = False
             try:
                 async for delta in self._adapter_for(model).stream_chat(
@@ -167,13 +188,23 @@ class AgentRuntime:
                     yield delta
                 return
             except Exception as err:
-                # 델타를 이미 받았거나 마지막 시도면 회복 불가 → 전파
-                if produced or i == len(attempts) - 1:
+                # 델타를 이미 받은 뒤 실패하면 재시도 시 중복 위험 → 전파
+                if produced:
                     raise
-                # 이후 스텝은 미리 reasoning을 벗겨 반복 400을 피한다.
-                if session_id:
-                    self._strip_reasoning_sessions.add(session_id)
-                error_log.record("llm_recovered", f"스텝 오류 후 재시도: {err}", session_id)
+                kind = self._classify_error(err)
+                if kind == "reasoning" and not stripped:
+                    stripped = True
+                    if session_id:
+                        self._strip_reasoning_sessions.add(session_id)
+                    error_log.record("llm_recovered", f"reasoning 벗겨 재시도: {err}", session_id)
+                    continue
+                if kind == "transient" and transient_attempts < 3:
+                    transient_attempts += 1
+                    delay = 2 ** (transient_attempts - 1)  # 1, 2, 4초
+                    error_log.record("llm_retry", f"{delay}s 후 재시도({transient_attempts}): {err}", session_id)
+                    await asyncio.sleep(delay)
+                    continue
+                raise
 
     def resolve_approval(self, approval_id: str, decision: str) -> bool:
         fut = self.pending_approvals.pop(approval_id, None)
