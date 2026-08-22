@@ -2,7 +2,7 @@ import json
 
 from sqlalchemy import delete, func, select
 
-from .models import Message, Session
+from .models import Checkpoint, Message, Session
 from .session import async_session
 
 
@@ -53,3 +53,9 @@ async def list_sessions() -> list[dict]:
             {"id": sess.id, "title": sess.title, "count": count}
             for sess, count in result.all()
         ]
+
+
+async def save_checkpoint(session_id: str, step_no: int, git_sha: str) -> None:
+    async with async_session() as s:
+        s.add(Checkpoint(session_id=session_id, step_no=step_no, git_sha=git_sha))
+        await s.commit()

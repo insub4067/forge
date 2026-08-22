@@ -20,12 +20,17 @@
 - [x] postgres + redis 컨테이너 실행 (docker-compose)
 - [x] 문서화 — spec / architecture / feat / README
 
-## Phase 2 — Code Modification (다음)
+## Phase 2 — Code Modification (진행 중)
 
-- edit_file / write_file / bash 도구
-- 승인 게이트 (approval_request 이벤트)
-- Diff View
-- Checkpoint
+- [x] write_file / edit_file / bash 도구
+- [x] bash — Docker Sandbox 격리 실행 (non-root, 리소스 제한)
+- [x] 승인 게이트 — approval_request / approval_granted 이벤트 + `/api/approvals`
+- [x] 사용자 질문 — ask_user 도구 + question_request + `/api/questions`
+- [x] 보호 장치 — 동일 도구 3회 반복 감지, 컨텍스트 한도(95%) 중단
+- [x] 사용자 중단 — `/api/sessions/{id}/cancel`
+- [x] State 추적 — goal / files_changed / errors (state_update 이벤트)
+- [x] Checkpoint — 변경 도구 실행 전 git sha 기록
+- [ ] Diff View — PWA에서 변경 전/후 diff 표시
 
 ## Phase 3 — Remote Operation (예정)
 

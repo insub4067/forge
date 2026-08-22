@@ -240,6 +240,53 @@ main {
   opacity: 0.7;
 }
 
+.approval {
+  margin-top: 10px;
+  border: 1px solid #7a5c1e;
+  border-radius: 10px;
+  background: #201a0b;
+  padding: 12px;
+}
+
+.approval-head {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f0c76a;
+  margin-bottom: 4px;
+}
+
+.approval-tool {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-word;
+  margin-bottom: 10px;
+}
+
+.approval-btns {
+  display: flex;
+  gap: 8px;
+}
+
+.approval-btns button {
+  flex: 1;
+  padding: 8px 0;
+  border-radius: 8px;
+  border: none;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.approval-btns .ok {
+  background: #34d399;
+  color: #06231a;
+}
+
+.approval-btns .no {
+  background: #f87171;
+  color: #2a0606;
+}
+
 footer {
   display: flex;
   align-items: flex-end;
@@ -284,4 +331,80 @@ textarea:focus {
 
 #send:disabled {
   opacity: 0.4;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 24px;
+}
+
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.modal-head {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f0c76a;
+  margin-bottom: 8px;
+}
+
+.modal-question {
+  font-size: 16px;
+  line-height: 1.5;
+  margin-bottom: 16px;
+  white-space: pre-wrap;
+}
+
+.modal-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-options button {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 15px;
+  text-align: left;
+}
+
+.modal-input {
+  display: flex;
+  gap: 8px;
+}
+
+.modal-input input {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 11px 14px;
+  font-size: 15px;
+  outline: none;
+}
+
+.modal-input button {
+  padding: 0 16px;
+  border-radius: 10px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
 }

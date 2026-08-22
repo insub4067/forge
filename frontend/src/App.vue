@@ -4,6 +4,8 @@ import { ref, reactive, nextTick } from 'vue'
 const messages = ref([])
 const input = ref('')
 const busy = ref(false)
+const activeQuestion = ref(null)
+const questionAnswer = ref('')
 
 const sessionId = localStorage.getItem('forge_session') || crypto.randomUUID()
 localStorage.setItem('forge_session', sessionId)
@@ -21,7 +23,7 @@ function newUser(text) {
 }
 
 function newAssistant() {
-  const m = reactive({ role: 'assistant', thinking: '', text: '', tools: [] })
+  const m = reactive({ role: 'assistant', thinking: '', text: '', tools: [], approval: null })
   messages.value.push(m)
   return m
 }
@@ -55,6 +57,16 @@ function handleEvent(evt, assistant) {
       }
       break
     }
+    case 'approval_request':
+      assistant.approval = { id: d.id, tool: d.tool, args: d.args }
+      break
+    case 'approval_granted':
+      assistant.approval = null
+      break
+    case 'question_request':
+      activeQuestion.value = { id: d.id, question: d.question, options: d.options || [] }
+      questionAnswer.value = ''
+      break
     case 'error':
       assistant.text += '\n\n오류: ' + (d.message || '')
       break
@@ -127,6 +139,34 @@ function onKeydown(e) {
   }
 }
 
+async function decide(approval, decision) {
+  try {
+    await fetch(`/api/approvals/${approval.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    })
+  } catch {}
+}
+
+async function answerQuestion(q, answer) {
+  if (!answer) return
+  activeQuestion.value = null
+  try {
+    await fetch(`/api/questions/${q.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answer }),
+    })
+  } catch {}
+}
+
+async function cancelSession() {
+  try {
+    await fetch(`/api/sessions/${sessionId}/cancel`, { method: 'POST' })
+  } catch {}
+}
+
 function resetSession() {
   const id = crypto.randomUUID()
   localStorage.setItem('forge_session', id)
@@ -139,6 +179,7 @@ function resetSession() {
     <header>
       <span class="dot"></span>
       <h1>FORGE</h1>
+      <button v-if="busy" @click="cancelSession">중단</button>
       <button @click="resetSession">새로</button>
     </header>
 
@@ -168,6 +209,15 @@ function resetSession() {
               <pre>{{ t.status === 'running' ? '실행 중…' : (t.result || '(출력 없음)') }}</pre>
             </details>
 
+            <div v-if="m.approval" class="approval">
+              <div class="approval-head">도구 실행 승인이 필요합니다</div>
+              <div class="approval-tool">{{ m.approval.tool }} — {{ summarizeArgs(m.approval.args) }}</div>
+              <div class="approval-btns">
+                <button class="ok" @click="decide(m.approval, 'approve')">승인</button>
+                <button class="no" @click="decide(m.approval, 'reject')">거부</button>
+              </div>
+            </div>
+
             <div v-if="m.context" class="context">
               context {{ m.context.prompt_tokens + m.context.completion_tokens }} tokens
             </div>
@@ -187,5 +237,27 @@ function resetSession() {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
       </button>
     </footer>
+
+    <div v-if="activeQuestion" class="modal-overlay">
+      <div class="modal">
+        <div class="modal-head">확인이 필요합니다</div>
+        <div class="modal-question">{{ activeQuestion.question }}</div>
+        <div v-if="activeQuestion.options.length" class="modal-options">
+          <button
+            v-for="(o, i) in activeQuestion.options"
+            :key="i"
+            @click="answerQuestion(activeQuestion, o)"
+          >{{ o }}</button>
+        </div>
+        <div v-else class="modal-input">
+          <input
+            v-model="questionAnswer"
+            placeholder="답변을 입력하세요"
+            @keydown.enter="answerQuestion(activeQuestion, questionAnswer)"
+          />
+          <button @click="answerQuestion(activeQuestion, questionAnswer)">보내기</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>

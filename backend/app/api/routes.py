@@ -30,7 +30,7 @@ async def chat(req: Request):
 
     async def run_and_close() -> None:
         try:
-            new_history = await runtime.run(history, emit)
+            new_history = await runtime.run(history, emit, session_id)
             await store.save_history(session_id, new_history)
         except Exception as err:
             await queue.put(
@@ -62,3 +62,25 @@ async def list_sessions():
 @router.get("/sessions/{session_id}/messages")
 async def get_messages(session_id: str):
     return await store.load_history(session_id)
+
+
+@router.post("/approvals/{approval_id}")
+async def resolve_approval(approval_id: str, req: Request):
+    body = await req.json()
+    decision = str(body.get("decision", "reject"))
+    resolved = runtime.resolve_approval(approval_id, decision)
+    return {"resolved": resolved, "decision": decision}
+
+
+@router.post("/questions/{question_id}")
+async def answer_question(question_id: str, req: Request):
+    body = await req.json()
+    answer = str(body.get("answer", ""))
+    resolved = runtime.answer_question(question_id, answer)
+    return {"resolved": resolved}
+
+
+@router.post("/sessions/{session_id}/cancel")
+async def cancel_session(session_id: str):
+    runtime.cancel(session_id)
+    return {"cancelled": True}
