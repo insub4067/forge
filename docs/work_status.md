@@ -74,6 +74,7 @@
 - [x] 도구 결과 pruning — 모델 컨텍스트에서 긴 도구 결과를 앞뒤+오류만 남겨 축약(20k→~4k), UI는 전체 유지 (harness §3.1 / hermes H1)
 - [x] planner 최소 탐색 지침 — BASE_PROMPT에 전수 탐색 억제(planner 토큰 67% 완화 착수)
 - [x] Provider Error Recovery(부분) — reasoning_content 400 자가 회복
+- [x] planner를 flash 기본으로, triage COMPLEX 판정 시에만 pro 승격(planner 토큰 67% 절감)
 
 ---
 
@@ -109,8 +110,9 @@
 - [x] Skill 저장·로드 — save_skill 도구(승인 게이트)로 .forge/skills/*.md 저장, 시스템 프롬프트에 자동 로드·재사용. hermes §3
 - [x] 사용자 승인 후 저장 — save_skill이 승인 게이트를 통과(에이전트 제안 → 사용자 확인)
 - [x] Skills 뷰어 — 메뉴에서 축적된 skill 확인·삭제
+- [x] Session search — 메시지 내용 검색(드로어 검색창), 세션 이동. hermes §6
+- [x] 즐겨쓰는 개발 워크플로우를 skill로 저장(.forge/skills/*)
 - [ ] Skill 검색·선택 로드(현재는 전체 로드) + 사용 피드백 개선
-- [ ] Session search — 과거 대화 검색·요약 주입. hermes §6
 
 ### 큐 5 — Persistent / 확장
 
