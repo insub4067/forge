@@ -21,14 +21,16 @@ class DeepSeekAdapter:
             "model": self.model,
             "messages": messages,
             "stream": True,
-            "temperature": 0.2,
+            "stream_options": {"include_usage": True},
+            # DeepSeek V4의 기본값은 thinking=enabled이므로 반드시 명시한다.
+            "thinking": {"type": "enabled" if thinking else "disabled"},
         }
         if tools:
             payload["tools"] = tools
-        if reasoning_effort:
+        if thinking and reasoning_effort:
             payload["reasoning_effort"] = reasoning_effort
-        if thinking:
-            payload["extra_body"] = {"thinking": {"type": "enabled"}}
+        if not thinking:
+            payload["temperature"] = 0.2
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(600, connect=30)) as client:
             async with client.stream(
@@ -55,6 +57,16 @@ class DeepSeekAdapter:
                         chunk = json.loads(data)
                     except json.JSONDecodeError:
                         continue
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+
+                    choices = chunk.get("choices") or []
+                    delta = choices[0].get("delta", {}) if choices else {}
+                    usage = chunk.get("usage")
+
+                    # usage는 choices=[]인 별도 마지막 chunk로 올 수 있다.
+                    # 런타임이 동일 스트림에서 토큰 사용량을 처리할 수 있도록 병합한다.
+                    if usage:
+                        delta = dict(delta)
+                        delta["usage"] = usage
+
                     if delta:
                         yield delta
