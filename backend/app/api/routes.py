@@ -107,6 +107,9 @@ async def chat(req: Request):
     else:
         content = message
     history.append({"role": "user", "content": content})
+    # 사용자 메시지를 즉시 저장한다 — run이 크래시하거나 앱을 중간에 꺼도
+    # 사용자 턴이 유실되지 않도록.
+    await store.save_history(session_id, history)
 
     queue: asyncio.Queue = asyncio.Queue()
 

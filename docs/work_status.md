@@ -43,21 +43,42 @@
 
 ## Phase 3 — Remote Operation (진행 중)
 
-### 완료
+### 완료 — 원격 제어 · 모바일 UI
 
 - [x] 모바일 PWA 채팅 및 승인/질문 원격 제어
 - [x] PWA foreground 시 서비스 워커 업데이트 확인
-- [x] Git 변경 파일 / 파일별 diff / 커밋 히스토리 조회
-- [x] Git 브랜치 조회 및 전환
-- [x] 모바일 safe-area 대응
+- [x] Git 추적 화면 — GitHub Desktop 스타일(변경/히스토리/브랜치 탭, 파일별 diff, 커밋 상세)
+- [x] 모바일 safe-area 대응(헤더·푸터·드로어·오버레이 전역)
+- [x] 모바일 UI 개편 — 헤더 축소·좌측 세션 드로어(스와이프 오픈)·Quick Action·Composer 통합
+- [x] 컨텍스트 링 탭 → 세션 사용량 상세(컨텍스트 윈도우·누적 토큰·에이전트별)
+- [x] 관리자 — 에러 로그 진입점, 에이전트별 토큰 소비 카드
+- [x] 앱 실행 시 가장 최근 세션 랜딩
+- [x] 파일 브라우저 숨김 파일 토글
 
-### 예정
+### 완료 — Agent Loop 안정성/효율 (핵심)
 
+- [x] Triage — 일반 대화(chat, 읽기 전용 fast path)와 코드 작업(agent) 분리
+- [x] Reviewer → Debugger → Reviewer 상태 기반 자기수정 루프 (최대 3회, 초과 시 남은 문제 보고)
+- [x] Debugger 마지막 시도 Pro 승격 (retry_count 실제 연결)
+- [x] 종료 상태 구분 — done 이벤트 status
+- [x] LLM 스텝 오류 자가 회복 — reasoning_content 400에 죽지 않고 reasoning 벗겨 재시도(세션별 학습)
+- [x] 실행 중 사용자 메시지 개입 — 작업 대기(inject) / 계획 수정(중단 후 재시작)
+- [x] 도구 자동 승인 모드 — 세션별 플래그, 실행 중 토글
+- [x] 대화 지속성 — 사용자 메시지를 수신 즉시 저장(크래시·앱 종료에도 유실 방지)
+- [x] Agent Activity — role별 phase 활동 카드(텍스트 항상 표시, 도구 로그 접힘)
+- [x] 응답 생성 중 스크롤 위치 유지 + 맨아래 이동 화살표
+- [x] DeepSeek V4 raw HTTP thinking 명시 및 streaming usage 수집
+
+### 예정 (우선순위순)
+
+- [ ] **planner 탐색 예산 제한** — 측정상 planner가 전체 토큰의 67%(~103k/회)를 소비. 저비용 반복 철학 위반, 최우선 개선 대상
+- [ ] **Context Compaction** — tool result pruning + summary compaction (95% 중단 대신 압축 후 계속). `docs/proposal/deepseek-harness-adoption.md` §3
+- [ ] Provider Error Recovery 일반화 — 429/500/timeout backoff·재시도(현재 reasoning_content만 회복)
+- [ ] Durable Event Log + 세션 재개 — 서버 재시작·재접속 후 실행 상태 복구(Redis Streams). harness §4 / Phase B
 - [ ] worker/executor 서비스 분리
-- [ ] Redis Streams 기반 durable event log 및 재접속 복구
-- [ ] Web Push
-- [ ] Context Dashboard
-- [ ] HANDOFF 생성 및 새 세션 인계
+- [ ] Web Push, HANDOFF
+
+> 상세 로드맵: [`proposal/deepseek-harness-adoption.md`](proposal/deepseek-harness-adoption.md)
 
 ## Phase 4 — Advanced Extension (별도 프로젝트)
 
