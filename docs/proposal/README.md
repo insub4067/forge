@@ -35,8 +35,10 @@
 
 ## Product / Capability
 
+- [`global-workspace-skills.md`](global-workspace-skills.md) — Global+Workspace 2-tier skill: **G0/G1 구현됨**(병합·override·경계·save_skill scope·UI 배지, `~/.forge/skills` 인덱스 README). G3 telemetry·G4 promotion 미구현
+- [`recursive-self-improvement.md`](recursive-self-improvement.md) — bounded RSI: **설계 proposal**(telemetry→worktree→고정benchmark→사전식 게이트→사람 승인). 미구현. 선결은 R0 결정적 benchmark 하네스
 - [`tauri-desktop-host.md`](tauri-desktop-host.md) — Desktop Host / sidecar: proposal
-- [`web-search-tools.md`](web-search-tools.md) — bounded web search/fetch: proposal
+- [`web-search-tools.md`](web-search-tools.md) — bounded web search/fetch: proposal (보류 권장 — 실측 병목 근거 없음, planner 63% 등이 우선)
 - [`vision-agent.md`](vision-agent.md) — Vision: 일부 구현
 - [`scheduled-condition-jobs.md`](scheduled-condition-jobs.md) — 예약/조건 실행: **기반 구현 진행 중**
 - [`remote-terminal.md`](remote-terminal.md) — **v1 구현됨. 단, proposal의 Docker-only가 아니라 현재는 Mac host PTY**
