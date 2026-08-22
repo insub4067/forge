@@ -100,6 +100,14 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "build_frontend",
+            "description": "프론트엔드를 빌드한다(npm run build). 샌드박스가 아니라 host에서 node로 실행되므로 dist가 갱신돼 배포된다. frontend/ 소스(App.vue·style.css 등)를 고친 뒤 화면에 반영하려면 이 도구를 호출한다.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "ask_user",
             "description": "작업 중 사용자 확인·의견이 필요할 때 질문한다. 사용자 답변이 도구 결과로 반환된다.",
             "parameters": {
@@ -295,6 +303,23 @@ async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]
         diff = _make_diff(content, new_content, str(p))
         p.write_text(new_content, encoding="utf-8")
         return f"파일을 수정했습니다: {p}", diff
+    if name == "build_frontend":
+        import asyncio
+        import shutil
+        fe = Path(workspace) / "frontend"
+        if not (fe / "package.json").is_file():
+            return "frontend/package.json이 없어 빌드할 수 없습니다.", ""
+        npm = shutil.which("npm")
+        if not npm:
+            return "host에 npm이 없어 빌드할 수 없습니다.", ""
+        proc = await asyncio.create_subprocess_exec(
+            npm, "run", "build", cwd=str(fe),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+        tail = out.decode(errors="replace")[-1500:]
+        head = "빌드 성공\n" if proc.returncode == 0 else f"빌드 실패(exit {proc.returncode})\n"
+        return head + tail, ""
     if name == "bash":
         command = str(args["command"])
         for blocked in BLOCKED_COMMANDS:

@@ -3,12 +3,12 @@
 FORGE 자체 코드를 수정할 때 따르는 절차. "고치고 끝"이 아니라 검증까지 한다.
 
 ## 프론트엔드 (frontend/)
-1. `frontend/src/App.vue` / `frontend/src/style.css` **소스만** 수정한다.
-2. **빌드하지 마라.** 이 샌드박스에는 node가 없어 `npm run build`가 불가능하다.
-   `frontend/dist/**`(minified 번들)는 **절대 손대지 않는다** — 수동 수정은 앱을 깨뜨린다.
-   소스 변경 후 dist 빌드·배포는 **host가 처리**한다(네 역할은 소스 편집·커밋까지).
-3. 색은 하드코딩하지 말고 CSS 토큰(`var(--bg)`, `var(--panel)`, `var(--accent)` 등) 사용.
-4. 완료 보고 시 "dist에 반영해야 함" 같은 후속 단계를 만들지 마라 — 소스 커밋이면 충분하다.
+1. `frontend/src/App.vue` / `frontend/src/style.css` 소스를 수정한다.
+2. 빌드로 반영: **`build_frontend` 도구를 호출한다.** (host에서 `npm run build`가 돌아
+   dist가 갱신·배포된다. `bash`로 `npm run build`를 하지 마라 — 샌드박스엔 node가 없다.)
+   결과에 "빌드 성공"이 나오는지 확인하고, 실패하면 에러를 고쳐 다시 호출한다.
+3. `frontend/dist/**`(minified 번들)는 **손으로 수정하지 않는다** — `build_frontend`로만 갱신.
+4. 색은 하드코딩하지 말고 CSS 토큰(`var(--bg)`, `var(--panel)`, `var(--accent)` 등) 사용.
 
 ## 백엔드 (backend/)
 1. `backend/app/**` 수정.
