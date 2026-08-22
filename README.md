@@ -131,15 +131,16 @@ npm run build
 
 ## Documentation
 
-- [`docs/spec.md`](docs/spec.md) — current requirements and scope
-- [`docs/architecture.md`](docs/architecture.md) — actual system architecture
-- [`docs/agent-loop.md`](docs/agent-loop.md) — Agent Runtime flow
-- [`docs/feat.md`](docs/feat.md) — feature implementation status
-- [`docs/db-schema.md`](docs/db-schema.md) — database and telemetry schema
-- [`docs/benchmark.md`](docs/benchmark.md) — cost/performance benchmark methodology
-- [`docs/troubleshooting.md`](docs/troubleshooting.md) — operational issues and fixes
-- [`docs/work_status.md`](docs/work_status.md) — implementation status and next work
-- [`docs/proposal/`](docs/proposal/) — design proposals and adoption roadmaps
+Start with the [`docs/README.md`](docs/README.md) documentation index.
+
+- [`docs/core/`](docs/core/) — architecture, runtime flow, schema, requirements
+- [`docs/status/`](docs/status/) — implementation and feature status
+- [`docs/operations/`](docs/operations/) — benchmark and troubleshooting
+- [`docs/planning/`](docs/planning/) — roadmap and improvement plan
+- [`docs/proposal/`](docs/proposal/) — design proposals and adoption research
+- [`docs/archive/`](docs/archive/) — historical, non-authoritative documents
+
+`docs/agents/` contains **live runtime prompt files**, not ordinary documentation.
 
 ## Next Major Work
 
