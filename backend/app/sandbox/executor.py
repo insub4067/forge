@@ -1,7 +1,23 @@
 import asyncio
+import re
 import shlex
 
 from ..config import settings
+
+# 파괴적/위험 명령 차단(특히 host 모드에서 자동 승인 시 안전장치).
+# 개인 Mac을 되돌릴 수 없게 망가뜨리는 패턴만 최소로 막는다.
+_DANGEROUS = [
+    r"\brm\s+-rf?\s+(/|~|\$HOME|\.\.)(\s|/|$)",   # rm -rf / ~ $HOME ..
+    r":\(\)\s*\{",                                  # fork bomb
+    r"\bmkfs\b", r"\bdd\b[^|]*\bof=/dev/",          # 디스크 포맷/덮어쓰기
+    r">\s*/dev/(sd|disk|nvme)",                      # 블록 디바이스 직접 쓰기
+    r"\bshutdown\b", r"\breboot\b", r"\bhalt\b",
+    r"\bgit\b[^|]*\bpush\b[^|]*(-f|--force)\b.*\b(main|master)\b",  # 강제 push 보호
+]
+
+
+def _is_dangerous(command: str) -> bool:
+    return any(re.search(p, command) for p in _DANGEROUS)
 
 
 class DockerSandbox:
@@ -17,6 +33,8 @@ class DockerSandbox:
         timeout: int = 120,
         write: bool = False,
     ) -> str:
+        if _is_dangerous(command):
+            return "(차단됨: 파괴적/위험 명령으로 판단되어 실행하지 않았습니다.)"
         # 옵트인 host 모드: bash를 호스트에서 직접 실행(자기검증·풀파워). 기본은 docker.
         if settings.sandbox_mode == "host":
             return await self._run_host(command, timeout)
