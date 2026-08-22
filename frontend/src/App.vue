@@ -19,6 +19,7 @@ const input = ref('')
 const busy = ref(false)
 const isAtBottom = ref(true)
 const autoApprove = ref(localStorage.getItem('forge_auto_approve') === '1')
+const sessionRunning = ref(false)
 const activeQuestion = ref(null)
 const questionAnswer = ref('')
 const debug = ref('대기 중')
@@ -84,6 +85,44 @@ const kanbanOpen = ref({
 
 let touchStartX = 0
 let touchStartY = 0
+let runningPoll = null
+
+// 앱을 껐다 켰을 때 서버에서 세션이 아직 실행 중인지 확인 → 완료 시 자동 갱신
+async function checkRunning() {
+  const id = currentRoomId.value
+  if (!id || busy.value) return
+  try {
+    const res = await fetch(`/api/sessions/${id}/running`)
+    if (!res.ok) return
+    const { running } = await res.json()
+    sessionRunning.value = running
+    if (running) startRunningPoll()
+  } catch {}
+}
+
+function startRunningPoll() {
+  if (runningPoll) return
+  runningPoll = setInterval(async () => {
+    const id = currentRoomId.value
+    if (!id) return stopRunningPoll()
+    try {
+      const res = await fetch(`/api/sessions/${id}/running`)
+      const { running } = await res.json()
+      if (!running) {
+        stopRunningPoll()
+        sessionRunning.value = false
+        await loadMessages() // 완료 결과 반영
+      }
+    } catch {}
+  }, 3000)
+}
+
+function stopRunningPoll() {
+  if (runningPoll) {
+    clearInterval(runningPoll)
+    runningPoll = null
+  }
+}
 let mainStartX = 0
 let mainStartY = 0
 
@@ -460,11 +499,14 @@ async function loadMessages() {
 }
 
 async function selectRoom(id) {
+  stopRunningPoll()
+  sessionRunning.value = false
   currentRoomId.value = id
   localStorage.setItem('forge_room', id)
   showRooms.value = false
   await loadMessages()
   await loadTasks()
+  checkRunning()
 }
 
 async function loadTasks() {
@@ -1021,6 +1063,11 @@ onMounted(async () => {
   }
   await loadMessages()
   await loadTasks()
+  checkRunning()
+})
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkRunning()
 })
 </script>
 
@@ -1122,6 +1169,10 @@ onMounted(async () => {
         <div class="menu-item" @click="renameRoom(roomMenuId); roomMenuId = null">이름 변경</div>
         <div class="menu-item danger" @click="deleteRoom(roomMenuId); roomMenuId = null">삭제</div>
       </div>
+    </div>
+
+    <div v-if="sessionRunning && !busy" class="running-banner">
+      <span class="running-dot"></span>Mac에서 작업 진행 중 — 완료되면 자동으로 표시됩니다
     </div>
 
     <main ref="chatEl" @scroll.passive="onChatScroll" @touchstart.passive="onMainTouchStart" @touchend.passive="onMainTouchEnd">

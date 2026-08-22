@@ -223,6 +223,11 @@ async def cancel_session(session_id: str):
     return {"cancelled": True}
 
 
+@router.get("/sessions/{session_id}/running")
+async def session_running(session_id: str):
+    return {"running": runtime.is_running(session_id)}
+
+
 @router.post("/sessions/{session_id}/auto-approve")
 async def set_auto_approve(session_id: str, req: Request):
     body = await req.json()
