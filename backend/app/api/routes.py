@@ -122,6 +122,12 @@ async def chat(req: Request):
             await store.save_history(session_id, new_history)
         except Exception as err:
             error_log.record("agent_run", str(err), session_id)
+            # 크래시해도 응답이 조용히 사라지지 않게 오류 메시지를 히스토리에 남긴다.
+            history.append({
+                "role": "assistant",
+                "content": f"작업 중 오류가 발생해 중단했습니다: {str(err)[:300]}",
+            })
+            await store.save_history(session_id, history)
             await queue.put(
                 {"seq": 0, "type": "error", "data": {"message": str(err)}}
             )
