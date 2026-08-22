@@ -301,10 +301,7 @@ class AgentRuntime:
         route = self.router.select_model(role, retry_count)
         tool_schemas = tools if tools is not None else TOOL_SCHEMAS
         await send("role_start", {"role": role, "model": route["model"], "thinking": route["thinking"]})
-        messages: list[dict] = [
-            {"role": "system", "content": _system_for(role, room_memory)},
-            *all_messages,
-        ]
+        system_msg = {"role": "system", "content": _system_for(role, room_memory)}
 
         total_prompt = 0
         total_completion = 0
@@ -318,7 +315,6 @@ class AgentRuntime:
             if injected:
                 for text in injected:
                     user_msg = {"role": "user", "content": "[작업 중 사용자 메시지]\n" + text}
-                    messages.append(user_msg)
                     all_messages.append(user_msg)
                     await send("user_injected", {"content": text})
 
@@ -331,7 +327,7 @@ class AgentRuntime:
             last_emit = 0.0
 
             async for delta in self._adapter_for(route["model"]).stream_chat(
-                messages,
+                [system_msg, *all_messages],
                 tool_schemas,
                 thinking=route["thinking"],
                 reasoning_effort=route["reasoning_effort"],
@@ -407,7 +403,6 @@ class AgentRuntime:
             if tool_calls:
                 assistant_msg["tool_calls"] = tool_calls
 
-            messages.append(assistant_msg)
             all_messages.append(assistant_msg)
 
             if not tool_calls:
