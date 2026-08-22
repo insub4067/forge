@@ -396,6 +396,12 @@ function onKeydown(e) {
   }
 }
 
+function onInput(e) {
+  const el = e.target
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+}
+
 async function decide(approval, decision) {
   try {
     await fetch(`/api/approvals/${approval.id}`, {
@@ -545,6 +551,7 @@ onMounted(async () => {
         rows="1"
         placeholder="메시지를 입력하세요"
         @keydown="onKeydown"
+        @input="onInput"
       ></textarea>
       <button id="send" :disabled="busy" @click="send" aria-label="전송">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
