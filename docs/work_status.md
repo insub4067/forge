@@ -69,16 +69,50 @@
 - [x] 응답 생성 중 스크롤 위치 유지 + 맨아래 이동 화살표
 - [x] DeepSeek V4 raw HTTP thinking 명시 및 streaming usage 수집
 
-### 예정 (우선순위순)
+### 최근 부분 착수
 
-- [ ] **planner 탐색 예산 제한** — 측정상 planner가 전체 토큰의 67%(~103k/회)를 소비. 저비용 반복 철학 위반, 최우선 개선 대상
-- [ ] **Context Compaction** — tool result pruning + summary compaction (95% 중단 대신 압축 후 계속). `docs/proposal/deepseek-harness-adoption.md` §3
-- [ ] Provider Error Recovery 일반화 — 429/500/timeout backoff·재시도(현재 reasoning_content만 회복)
-- [ ] Durable Event Log + 세션 재개 — 서버 재시작·재접속 후 실행 상태 복구(Redis Streams). harness §4 / Phase B
-- [ ] worker/executor 서비스 분리
-- [ ] Web Push, HANDOFF
+- [x] 도구 결과 pruning — 모델 컨텍스트에서 긴 도구 결과를 앞뒤+오류만 남겨 축약(20k→~4k), UI는 전체 유지 (harness §3.1 / hermes H1)
+- [x] planner 최소 탐색 지침 — BASE_PROMPT에 전수 탐색 억제(planner 토큰 67% 완화 착수)
+- [x] Provider Error Recovery(부분) — reasoning_content 400 자가 회복
 
-> 상세 로드맵: [`proposal/deepseek-harness-adoption.md`](proposal/deepseek-harness-adoption.md)
+---
+
+## 작업큐 — 두 제안서 통합 로드맵
+
+> 출처: [`proposal/deepseek-harness-adoption.md`](proposal/deepseek-harness-adoption.md) (운영 생존 계층),
+> [`proposal/hermes-agent-adoption.md`](proposal/hermes-agent-adoption.md) (학습·비용·persistent)
+
+### 큐 1 — 비용/장기실행 기반 (최우선)
+
+- [ ] **Summary Compaction** — pruning 이후에도 압박이 높으면 오래된 history 구간을 요약 checkpoint로 치환(tool call/result pair 경계 보존). harness §3.2 / hermes H1
+- [ ] Context overflow → compact → retry (95% 중단 대신 압축 후 계속)
+- [ ] **Prompt-Cache-First** — 세션 중 system prompt·tool schema·stable memory 삽입 순서/직렬화 고정, 동적 상태는 tail. prefix hash로 변경 추적. hermes §4
+- [ ] Provider Error Recovery 일반화 — 429/500/timeout backoff·재시도(현재 reasoning만)
+
+### 큐 2 — Durable Runtime / 세션 재개
+
+- [ ] **Durable Event Log** — append-only 실행 이벤트 영속화(Redis Streams). harness §4 / hermes H4
+- [ ] Model Surface 분리 — 저장 로그 ≠ 모델 전달 메시지
+- [ ] 서버 재시작·모바일 재접속 후 세션 재개/replay
+- [ ] Agent Core ↔ PWA lifecycle 분리(브라우저 끊겨도 Core 지속). hermes §7
+
+### 큐 3 — Tool 효율
+
+- [ ] **Tool Script/RPC Mode** — 탐색성 다중 도구를 한 번에 묶어 model round-trip 감소(제한된 executor, mutation은 승인 통과). hermes §5
+- [ ] ToolExecutor 분리 + read-only 병렬 실행. harness §8 / hermes H3
+
+### 큐 4 — 학습 (Self-Improving Skills)
+
+- [ ] Skill 저장 포맷(SKILL.md) — 절차 지식(memory와 구분). hermes §3
+- [ ] Reviewer 기반 skill_candidate 이벤트 → 사용자 승인 후 저장
+- [ ] Skill 검색·선택 로드 + 사용 피드백 개선
+- [ ] Session search(SQLite FTS5) — 과거 대화 검색·요약 주입. hermes §6
+
+### 큐 5 — Persistent / 확장
+
+- [ ] Scheduled Autonomous Jobs(예약·조건 작업), Web Push. hermes §9
+- [ ] ExecutionBackend 추상화(Local→SSH→Docker). hermes §8
+- [ ] Isolated Subagents(독립 workstream 병렬, context 복제 금지). hermes §10
 
 ## Phase 4 — Advanced Extension (별도 프로젝트)
 
