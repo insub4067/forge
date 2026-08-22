@@ -172,16 +172,43 @@ const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-f
 const attachedImages = ref([]) // 여러 장 첨부
 const viewerImages = ref([]) // 전체화면 뷰어 이미지 목록
 const viewerIndex = ref(0)
+const imgScale = ref(1)
+const imgTx = ref(0)
+const imgTy = ref(0)
+function resetImgZoom() { imgScale.value = 1; imgTx.value = 0; imgTy.value = 0 }
 function openViewer(images, index = 0) {
   viewerImages.value = Array.isArray(images) ? images : [images]
   viewerIndex.value = index
+  resetImgZoom()
 }
 function closeViewer() { viewerImages.value = [] }
-function viewerNext() { if (viewerIndex.value < viewerImages.value.length - 1) viewerIndex.value++ }
-function viewerPrev() { if (viewerIndex.value > 0) viewerIndex.value-- }
+function viewerNext() { if (viewerIndex.value < viewerImages.value.length - 1) { viewerIndex.value++; resetImgZoom() } }
+function viewerPrev() { if (viewerIndex.value > 0) { viewerIndex.value--; resetImgZoom() } }
 let viewerTouchX = 0
-function viewerTouchStart(e) { viewerTouchX = e.changedTouches[0].clientX }
+let _imgPinchDist = 0, _imgPinchScale = 1
+let _imgPanX = 0, _imgPanY = 0, _imgStartTx = 0, _imgStartTy = 0
+function viewerTouchStart(e) {
+  if (e.touches.length === 2) {
+    _imgPinchDist = _touchDist(e.touches)
+    _imgPinchScale = imgScale.value
+  } else if (e.touches.length === 1) {
+    viewerTouchX = e.touches[0].clientX
+    _imgPanX = e.touches[0].clientX; _imgPanY = e.touches[0].clientY
+    _imgStartTx = imgTx.value; _imgStartTy = imgTy.value
+  }
+}
+function viewerTouchMove(e) {
+  if (e.touches.length === 2 && _imgPinchDist) {
+    e.preventDefault()
+    imgScale.value = Math.max(1, Math.min(5, _imgPinchScale * (_touchDist(e.touches) / _imgPinchDist)))
+  } else if (e.touches.length === 1 && imgScale.value > 1) {
+    e.preventDefault()
+    imgTx.value = _imgStartTx + (e.touches[0].clientX - _imgPanX)
+    imgTy.value = _imgStartTy + (e.touches[0].clientY - _imgPanY)
+  }
+}
 function viewerTouchEnd(e) {
+  if (imgScale.value > 1) return // 줌 중엔 스와이프 내비게이션 안 함(팬 우선)
   const dx = e.changedTouches[0].clientX - viewerTouchX
   if (Math.abs(dx) > 40) { dx < 0 ? viewerNext() : viewerPrev() }
 }
@@ -1659,8 +1686,9 @@ document.addEventListener('visibilitychange', () => {
     </main>
 
     <div v-if="viewerImages.length" class="image-viewer" @click="closeViewer"
-         @touchstart.passive="viewerTouchStart" @touchend.passive="viewerTouchEnd">
-      <img :src="viewerImages[viewerIndex]" alt="이미지" @click.stop />
+         @touchstart.passive="viewerTouchStart" @touchmove="viewerTouchMove" @touchend.passive="viewerTouchEnd">
+      <img :src="viewerImages[viewerIndex]" alt="이미지" @click.stop @dblclick="resetImgZoom"
+           :style="{ transform: `translate(${imgTx}px, ${imgTy}px) scale(${imgScale})` }" />
       <button class="image-viewer-close" @click="closeViewer" aria-label="닫기">✕</button>
       <button v-if="viewerIndex > 0" class="image-viewer-nav prev" @click.stop="viewerPrev" aria-label="이전">‹</button>
       <button v-if="viewerIndex < viewerImages.length - 1" class="image-viewer-nav next" @click.stop="viewerNext" aria-label="다음">›</button>
