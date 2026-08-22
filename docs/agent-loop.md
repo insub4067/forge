@@ -22,6 +22,51 @@ Next Action
 Repeat
 ```
 
+## 역할 파이프라인과 자기수정 루프
+
+`backend/app/runtime/agent.py`의 `AgentRuntime.run()`이 오케스트레이션한다.
+
+```
+User Goal
+ ↓
+Triage ──(chat)──→ 단일 Chat 패스 → 종료
+ │ (agent)
+ ↓
+Planner → Coder
+ ↓
+┌───────────────── 자기수정 루프 (최대 MAX_REVIEW_CYCLES회) ─────────────────┐
+│ Reviewer                                                                   │
+│   task 상태 확인                                                            │
+│     모든 task done      → completed (루프 종료)                              │
+│     debug task 존재     → Debugger → Reviewer 재검증 (다음 사이클)           │
+│     그 외 미완료(review) → Reviewer 재실행                                   │
+│ 사이클 초과             → review_limit (남은 문제 보고 후 종료)              │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **상태의 authority는 DB task 상태**다. Reviewer는 task를 `done` 또는 `debug`로,
+  Debugger는 수정 후 `review`로 되돌린다. Reviewer가 텍스트를 냈다고 성공이 아니라,
+  모든 task가 `done`이어야 전체 성공으로 판단한다.
+- Debugger는 매 시도 `retry_count`가 증가하며, 마지막 시도(`retry_count >= 3`)에서
+  `deepseek-v4-pro` + thinking으로 승격한다. `MAX_REVIEW_CYCLES = 3`과 맞물려
+  마지막 복구 시도에서만 Pro를 사용해 비용을 억제한다.
+- 한도 초과 시 단순 "최대 단계 초과"가 아니라 남은 task·관찰된 오류·시도 횟수를
+  보고한다.
+
+## 종료 상태
+
+`done` 이벤트의 `data.status`로 구분한다(SSE 프로토콜 비파괴적 확장).
+
+| status | 의미 |
+|---|---|
+| `completed` | 모든 task done, 정상 완료 |
+| `review_limit` | 자기수정 한도 초과, 남은 문제 보고 |
+| `cancelled` | 사용자 중단 |
+| `context_blocked` | 컨텍스트 한도(95%) 도달 |
+| `max_steps` | 역할 내 최대 스텝 초과 |
+| `repeated_tool_call` | 동일 도구 반복 감지 |
+| `failed` | 그 외 실패 |
+
 ## State 관리
 
 Agent는 매 반복마다 현재 상태를 유지한다.

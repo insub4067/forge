@@ -45,18 +45,21 @@
 ```
 User Request
     ↓
-Planner (계획 생성)
+Triage ──(chat)──→ 단일 Chat 패스
+    │ (agent)
     ↓
-Tool 실행
-    ↓
-Observation (결과 관찰)
-    ↓
-재계획 (필요 시 반복)
-    ↓
-완료 판단 → Report
+Planner → Coder → [ Reviewer ↔ Debugger 자기수정 루프 ] → Report
 ```
 
-필수 기능: Planning, Tool Loop, Retry, Step Limit, State 저장, Interrupt.
+- Triage가 일반 대화(chat)와 코드 작업(agent)을 분리한다.
+- Reviewer가 DB task 상태(`done`/`debug`)로 성공/결함을 판정하고, 결함이 있으면
+  Debugger가 수정 후 `review`로 되돌려 Reviewer가 재검증한다. 모든 task가 `done`이 될
+  때까지 최대 `MAX_REVIEW_CYCLES`(3)회 반복하고, 초과하면 남은 문제를 보고한다.
+- Debugger는 마지막 복구 시도에서만 Pro로 승격(`retry_count >= 3`)해 비용을 억제한다.
+
+자세한 흐름·종료 상태: [`agent-loop.md`](agent-loop.md).
+
+필수 기능: Planning, Tool Loop, Self-Correction, Retry, Step/Cycle Limit, State 저장, Interrupt.
 
 ## LLM Adapter 구조
 

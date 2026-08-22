@@ -37,6 +37,9 @@
 - [x] Vision Agent — 이미지 요청 사전 분석
 - [x] 실행 중 사용자 메시지 injection
 - [x] DeepSeek V4 raw HTTP thinking 명시 및 streaming usage 수집
+- [x] Reviewer → Debugger → Reviewer 상태 기반 자기수정 루프 (최대 3회, 초과 시 남은 문제 보고)
+- [x] Debugger 마지막 시도 Pro 승격 (retry_count 실제 연결)
+- [x] 종료 상태 구분 — done 이벤트 status (completed/review_limit/cancelled/context_blocked/max_steps/repeated_tool_call/failed)
 
 ## Phase 3 — Remote Operation (진행 중)
 
@@ -50,7 +53,6 @@
 
 ### 예정
 
-- [ ] Reviewer → Debugger → Reviewer 자동 재검증 루프
 - [ ] worker/executor 서비스 분리
 - [ ] Redis Streams 기반 durable event log 및 재접속 복구
 - [ ] Web Push

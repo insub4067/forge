@@ -18,6 +18,18 @@ from ..sandbox.executor import DockerSandbox
 MAX_STEPS = 30
 MAX_REPEATED_CALLS = 3
 CONTEXT_BLOCK_RATIO = 0.95
+# Reviewer↔Debugger 자기수정 루프의 최대 검증 사이클.
+# ModelRouter의 debugger Pro 승격 임계(retry_count>=3)와 맞물려,
+# 마지막(3번째) Debugger 시도가 Pro로 승격된다.
+MAX_REVIEW_CYCLES = 3
+
+# 종료 사유 → done 이벤트 status 코드 (SSE 프로토콜 비파괴적 확장)
+_STATUS_CODES = {
+    "cancelled": "cancelled",
+    "context_blocked": "context_blocked",
+    "repeated": "repeated_tool_call",
+    "max_steps": "max_steps",
+}
 
 EventSink = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -556,9 +568,9 @@ class AgentRuntime:
             )
             await record("chat", p, c, route)
             if status != "done":
-                await send("done", {"content": self._finish_message(status)})
+                await send("done", {"content": self._finish_message(status), "status": _STATUS_CODES.get(status, "failed")})
             else:
-                await send("done", {})
+                await send("done", {"status": "completed"})
             return all_messages
 
         # 1. Planner
@@ -568,7 +580,7 @@ class AgentRuntime:
         await record("planner", p, c, route)
         step_base += MAX_STEPS
         if status != "done":
-            await send("done", {"content": self._finish_message(status)})
+            await send("done", {"content": self._finish_message(status), "status": _STATUS_CODES.get(status, "failed")})
             return all_messages
 
         # 2. Coder
@@ -578,32 +590,59 @@ class AgentRuntime:
         await record("coder", p, c, route)
         step_base += MAX_STEPS
         if status != "done":
-            await send("done", {"content": self._finish_message(status)})
+            await send("done", {"content": self._finish_message(status), "status": _STATUS_CODES.get(status, "failed")})
             return all_messages
 
-        # 3. Reviewer
-        status, p, c, route = await self._run_role(
-            "reviewer", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
-        )
-        await record("reviewer", p, c, route)
-        step_base += MAX_STEPS
-        if status != "done":
-            await send("done", {"content": self._finish_message(status)})
-            return all_messages
+        # 3. Reviewer ↔ Debugger 자기수정 루프 (상태 기반 반복)
+        #    Reviewer가 task를 done/debug로, Debugger가 review로 되돌린다.
+        #    모든 task가 done이 될 때까지, 최대 MAX_REVIEW_CYCLES회 반복.
+        review_cycle = 0
+        debug_attempts = 0
+        tasks: list[dict] = []
+        final_status = "completed"
+        while True:
+            status, p, c, route = await self._run_role(
+                "reviewer", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
+            )
+            await record("reviewer", p, c, route)
+            step_base += MAX_STEPS
+            if status != "done":
+                await send("done", {"content": self._finish_message(status), "status": _STATUS_CODES.get(status, "failed")})
+                return all_messages
 
-        # 4. Debugger (reviewer가 debug 상태를 남긴 경우)
-        if session_id:
-            tasks = await store.list_tasks(session_id)
+            tasks = await store.list_tasks(session_id) if session_id else []
+            unfinished = [t for t in tasks if t.get("status") != "done"]
+            if not unfinished:
+                final_status = "completed"
+                break
+
+            review_cycle += 1
+            if review_cycle > MAX_REVIEW_CYCLES:
+                final_status = "review_limit"
+                break
+
+            # debug task가 있으면 Debugger로 수정 후 재검토(review 상태로 되돌림).
             if any(t.get("status") == "debug" for t in tasks):
+                debug_attempts += 1
+                # retry_count가 임계(3)에 도달하면 마지막 시도가 Pro로 승격된다.
                 status, p, c, route = await self._run_role(
-                    "debugger", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
+                    "debugger", all_messages, send, session_id, ws, state,
+                    recent_calls, step_base, room_memory, retry_count=debug_attempts,
                 )
                 await record("debugger", p, c, route)
+                step_base += MAX_STEPS
                 if status != "done":
-                    await send("done", {"content": self._finish_message(status)})
+                    await send("done", {"content": self._finish_message(status), "status": _STATUS_CODES.get(status, "failed")})
                     return all_messages
+            # debug는 없지만 아직 done이 아니면(review 등) 루프 재진입 → Reviewer 재실행
 
-        await send("done", {"content": "모든 작업을 완료했습니다."})
+        if final_status == "review_limit":
+            await send("done", {
+                "content": self._review_limit_message(tasks, state, debug_attempts),
+                "status": "review_limit",
+            })
+        else:
+            await send("done", {"content": "모든 작업을 완료했습니다.", "status": "completed"})
         return all_messages
 
     @staticmethod
@@ -615,3 +654,20 @@ class AgentRuntime:
         if status == "repeated":
             return "동일한 도구 호출이 반복되어 중단했습니다."
         return "최대 실행 단계를 초과했습니다."
+
+    @staticmethod
+    def _review_limit_message(tasks: list[dict], state: dict, attempts: int) -> str:
+        lines = [f"자동 수정 한도({MAX_REVIEW_CYCLES}회)에 도달해 종료했습니다."]
+        unfinished = [t for t in (tasks or []) if t.get("status") != "done"]
+        if unfinished:
+            lines.append("남은 문제:")
+            for t in unfinished:
+                lines.append(f"- {t.get('title', '')} ({t.get('status', '')})")
+        errors = (state or {}).get("errors") or []
+        if errors:
+            lines.append("관찰된 오류:")
+            for e in errors[-5:]:
+                lines.append(f"- {e}")
+        lines.append(f"자동 수정 시도: {attempts}회")
+        lines.append("새 세션에서 남은 문제를 직접 확인하거나 더 구체적인 지시를 주세요.")
+        return "\n".join(lines)
