@@ -40,9 +40,14 @@ const gitStatus = ref('')
 const gitDiff = ref('')
 const gitError = ref('')
 const gitLoading = ref(false)
+const gitTab = ref('changes') // 'changes' | 'history' | 'branches'
+const gitFiles = ref([])
+const gitLog = ref([])
+const gitDetail = ref(null) // { title, sub, diff, loading }
 const steerMode = ref('queue') // 'queue' = 작업큐 대기(기본), 'switch' = 중단 후 새로 시작
 const pendingSend = ref(null)
 const showFiles = ref(false)
+const showHidden = ref(false)
 const filePath = ref('')
 const fileParent = ref(null)
 const fileEntries = ref([])
@@ -155,6 +160,7 @@ async function loadGit() {
     return
   }
   gitError.value = ''
+  gitDetail.value = null
   gitLoading.value = true
   const get = async (path) => {
     try {
@@ -167,14 +173,70 @@ async function loadGit() {
     }
   }
   // 각 요청을 독립 처리 — 하나 실패해도 나머지는 표시한다.
-  const [b, s, d] = await Promise.all([get('git/branches'), get('git/status'), get('git/diff')])
+  const [b, s, l] = await Promise.all([get('git/branches'), get('git/status'), get('git/log')])
   if (b) {
     gitCurrent.value = b.current || ''
     gitBranches.value = b.branches || []
   }
-  if (s) gitStatus.value = s.output || ''
-  if (d) gitDiff.value = d.output || ''
+  if (s) {
+    gitStatus.value = s.output || ''
+    gitFiles.value = parseStatus(s.output || '')
+  }
+  if (l) gitLog.value = l.commits || []
   gitLoading.value = false
+}
+
+function parseStatus(raw) {
+  return raw
+    .split('\n')
+    .filter((line) => line.trim())
+    .map((line) => {
+      // git status --short는 "XY path"(2칸 코드+공백). 백엔드 _git의 strip()이
+      // 첫 줄 앞 공백을 먹어 정렬이 밀리므로, 구분 공백이 없으면 복원한다.
+      if (line[2] !== ' ') line = ' ' + line
+      const code = line.slice(0, 2)
+      let path = line.slice(3)
+      if (path.includes(' -> ')) path = path.split(' -> ')[1] // rename
+      path = path.replace(/^"|"$/g, '')
+      const c = code.replace(/\s/g, '')
+      let badge = 'M', cls = 'st-mod'
+      if (code.includes('?')) { badge = 'U'; cls = 'st-new' }
+      else if (c.includes('A')) { badge = 'A'; cls = 'st-new' }
+      else if (c.includes('D')) { badge = 'D'; cls = 'st-del' }
+      else if (c.includes('R')) { badge = 'R'; cls = 'st-ren' }
+      else if (c.includes('U')) { badge = '!'; cls = 'st-del' }
+      return { badge, cls, path }
+    })
+}
+
+async function openFileDiff(f) {
+  const id = currentRoomId.value
+  gitDetail.value = { title: f.path, sub: '변경 사항', diff: '', loading: true }
+  try {
+    const r = await fetch(`/api/rooms/${id}/git/file-diff?path=${encodeURIComponent(f.path)}`)
+    const d = await r.json()
+    gitDetail.value = { title: f.path, sub: '변경 사항', diff: d.diff || '', loading: false }
+  } catch {
+    gitDetail.value = { title: f.path, sub: '변경 사항', diff: '', loading: false }
+  }
+}
+
+async function openCommit(c) {
+  const id = currentRoomId.value
+  const sub = `${c.author} · ${c.date} · ${c.hash}`
+  gitDetail.value = { title: c.subject, sub, diff: '', loading: true }
+  try {
+    const r = await fetch(`/api/rooms/${id}/git/commit?hash=${encodeURIComponent(c.hash)}`)
+    const d = await r.json()
+    gitDetail.value = {
+      title: d.subject || c.subject,
+      sub: `${d.author || c.author} · ${d.date || c.date} · ${d.hash || c.hash}`,
+      diff: d.diff || '',
+      loading: false,
+    }
+  } catch {
+    gitDetail.value = { title: c.subject, sub, diff: '', loading: false }
+  }
 }
 
 async function checkoutBranch(branch) {
@@ -197,7 +259,9 @@ function openGit() {
 
 async function navigateFiles(path) {
   try {
-    const res = await fetch(`/api/fs/list?path=${encodeURIComponent(path || '')}`)
+    const res = await fetch(
+      `/api/fs/list?path=${encodeURIComponent(path || '')}&show_hidden=${showHidden.value}`
+    )
     if (res.ok) {
       const data = await res.json()
       filePath.value = data.path
@@ -207,6 +271,11 @@ async function navigateFiles(path) {
       fileContent.value = ''
     }
   } catch {}
+}
+
+function toggleHidden() {
+  showHidden.value = !showHidden.value
+  navigateFiles(filePath.value)
 }
 
 async function openFile(path) {
@@ -947,36 +1016,86 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-if="showGit" class="kanban-overlay">
-      <div class="kanban-head">
-        <span class="kanban-title">Git — {{ gitLoading ? '불러오는 중…' : (gitCurrent || '브랜치 없음') }}</span>
-        <div>
-          <button @click="loadGit">새로고침</button>
-          <button @click="showGit = false">닫기</button>
+    <div v-if="showGit" class="gh-overlay">
+      <div class="gh-head">
+        <div class="gh-repo">
+          <div class="gh-repo-name">{{ currentRoom()?.title || 'FORGE' }}</div>
+          <div class="gh-branch">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.492 2.492 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+            <span>{{ gitCurrent || '—' }}</span>
+          </div>
+        </div>
+        <div class="gh-head-actions">
+          <button class="gh-icon-btn" :disabled="gitLoading" @click="loadGit" aria-label="새로고침">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+          </button>
+          <button class="gh-close" @click="showGit = false">닫기</button>
         </div>
       </div>
-      <div class="git-body">
+
+      <div v-if="gitDetail" class="gh-detail">
+        <div class="gh-detail-head">
+          <button class="gh-back" @click="gitDetail = null">‹ 뒤로</button>
+        </div>
+        <div class="gh-detail-title">{{ gitDetail.title }}</div>
+        <div v-if="gitDetail.sub" class="gh-detail-sub">{{ gitDetail.sub }}</div>
+        <div v-if="gitDetail.loading" class="gh-empty">불러오는 중…</div>
+        <div v-else-if="gitDetail.diff" class="diff gh-diff">
+          <div v-for="(line, li) in diffLines(gitDetail.diff)" :key="li" :class="diffClass(line)">{{ line || ' ' }}</div>
+        </div>
+        <div v-else class="gh-empty">표시할 변경 내용이 없습니다.</div>
+      </div>
+
+      <template v-else>
+        <div class="gh-tabs">
+          <button :class="{ active: gitTab === 'changes' }" @click="gitTab = 'changes'">
+            변경<span v-if="gitFiles.length" class="gh-badge">{{ gitFiles.length }}</span>
+          </button>
+          <button :class="{ active: gitTab === 'history' }" @click="gitTab = 'history'">히스토리</button>
+          <button :class="{ active: gitTab === 'branches' }" @click="gitTab = 'branches'">브랜치</button>
+        </div>
+
         <div v-if="gitError" class="git-error">{{ gitError }}</div>
-        <div class="git-section">
-          <div class="git-section-title">브랜치 (탭하여 전환)</div>
-          <div v-if="!gitBranches.length" class="git-empty">(브랜치 없음)</div>
-          <div
-            v-for="b in gitBranches"
-            :key="b"
-            class="git-branch"
-            :class="{ current: b === gitCurrent }"
-            @click="checkoutBranch(b)"
-          >{{ b }}</div>
+
+        <div class="gh-content">
+          <template v-if="gitTab === 'changes'">
+            <div v-if="gitLoading" class="gh-empty">불러오는 중…</div>
+            <div v-else-if="!gitFiles.length" class="gh-empty">변경 사항이 없습니다.</div>
+            <div v-for="f in gitFiles" :key="f.path" class="gh-file" @click="openFileDiff(f)">
+              <span class="gh-status" :class="f.cls">{{ f.badge }}</span>
+              <span class="gh-file-path">{{ f.path }}</span>
+              <svg class="gh-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+            </div>
+          </template>
+
+          <template v-else-if="gitTab === 'history'">
+            <div v-if="gitLoading" class="gh-empty">불러오는 중…</div>
+            <div v-else-if="!gitLog.length" class="gh-empty">커밋이 없습니다.</div>
+            <div v-for="c in gitLog" :key="c.hash" class="gh-commit" @click="openCommit(c)">
+              <div class="gh-avatar">{{ (c.author || '?').slice(0, 1).toUpperCase() }}</div>
+              <div class="gh-commit-body">
+                <div class="gh-commit-subject">{{ c.subject }}</div>
+                <div class="gh-commit-meta">{{ c.author }} · {{ c.date }} · {{ c.hash }}</div>
+              </div>
+            </div>
+          </template>
+
+          <template v-else>
+            <div v-if="!gitBranches.length" class="gh-empty">브랜치가 없습니다.</div>
+            <div
+              v-for="b in gitBranches"
+              :key="b"
+              class="gh-branch-row"
+              :class="{ current: b === gitCurrent }"
+              @click="checkoutBranch(b)"
+            >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.492 2.492 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+              <span class="gh-branch-name">{{ b }}</span>
+              <span v-if="b === gitCurrent" class="gh-current-tag">현재</span>
+            </div>
+          </template>
         </div>
-        <div class="git-section">
-          <div class="git-section-title">변경 사항</div>
-          <pre class="git-pre">{{ gitStatus || '(변경 없음)' }}</pre>
-        </div>
-        <div class="git-section">
-          <div class="git-section-title">Diff (--stat)</div>
-          <pre class="git-pre">{{ gitDiff || '(diff 없음)' }}</pre>
-        </div>
-      </div>
+      </template>
     </div>
 
     <div v-if="showAdmin" class="kanban-overlay">
@@ -1053,6 +1172,12 @@ onMounted(async () => {
       <div class="fs-head">
         <button @click="showFiles = false">닫기</button>
         <span class="fs-title">{{ viewingFile || filePath }}</span>
+        <button
+          v-if="!viewingFile"
+          class="fs-hidden-toggle"
+          :class="{ active: showHidden }"
+          @click="toggleHidden"
+        >숨김 {{ showHidden ? 'ON' : 'OFF' }}</button>
         <button v-if="viewingFile" @click="viewingFile = ''; fileContent = ''">목록</button>
       </div>
       <div v-if="!viewingFile" class="fs-list">

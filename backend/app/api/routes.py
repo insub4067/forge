@@ -39,7 +39,7 @@ async def _room_workspace(session_id: str) -> str:
 
 
 @router.get("/fs/list")
-async def fs_list(path: str = ""):
+async def fs_list(path: str = "", show_hidden: bool = False):
     target = os.path.expanduser(path) if path else os.path.expanduser("~")
     if not os.path.isdir(target):
         target = os.path.expanduser("~")
@@ -50,7 +50,7 @@ async def fs_list(path: str = ""):
         names = []
     for name in names:
         full = os.path.join(target, name)
-        if name.startswith("."):
+        if not show_hidden and name.startswith("."):
             continue
         is_dir = os.path.isdir(full)
         entries.append({"name": name, "path": full, "is_dir": is_dir})
@@ -250,6 +250,40 @@ async def git_checkout(session_id: str, req: Request):
 async def git_diff(session_id: str):
     ws = await _room_workspace(session_id)
     return {"output": _git(ws, "diff", "--stat")}
+
+
+@router.get("/rooms/{session_id}/git/log")
+async def git_log(session_id: str):
+    ws = await _room_workspace(session_id)
+    raw = _git(ws, "log", "-20", "--pretty=format:%h|%s|%an|%ad", "--date=short")
+    commits = []
+    for line in raw.splitlines():
+        parts = line.split("|", 3)
+        if len(parts) == 4:
+            commits.append(
+                {"hash": parts[0], "subject": parts[1], "author": parts[2], "date": parts[3]}
+            )
+    return {"commits": commits}
+
+
+@router.get("/rooms/{session_id}/git/file-diff")
+async def git_file_diff(session_id: str, path: str = ""):
+    ws = await _room_workspace(session_id)
+    return {"diff": _git(ws, "diff", "--", path)}
+
+
+@router.get("/rooms/{session_id}/git/commit")
+async def git_commit(session_id: str, hash: str = ""):
+    ws = await _room_workspace(session_id)
+    raw = _git(ws, "show", "--pretty=format:%s|%an|%ad", "--date=short", hash)
+    subject = author = date = ""
+    diff = raw
+    if raw:
+        first, _, rest = raw.partition("\n")
+        if "|" in first:
+            subject, author, date = first.split("|", 2)
+            diff = rest
+    return {"subject": subject, "author": author, "date": date, "hash": hash, "diff": diff}
 
 
 _SEP = "\x1f"
