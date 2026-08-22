@@ -2,7 +2,9 @@
 
 ## 사용 모델
 
-- 기본: `deepseek-v4-pro`
+- 기본: `deepseek-v4-flash`
+- thinking: enabled
+- reasoning effort: medium (DeepSeek V4 호환 정책에 따라 실제 API에서 high로 매핑될 수 있음)
 - 설정: `REVIEWER_MODEL` 환경변수로 변경 가능
 
 ## 역할
