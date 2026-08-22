@@ -31,13 +31,32 @@
 - [x] State 추적 — goal / files_changed / errors (state_update 이벤트)
 - [x] Checkpoint — 변경 도구 실행 전 git sha 기록
 - [x] Diff View — write_file/edit_file 변경 전후 unified diff 표시
+- [x] Triage — 일반 대화와 코드 작업 분리
+- [x] 역할 파이프라인 — Planner → Coder → Reviewer → Debugger
+- [x] Model Router — 역할별 Pro / Flash / Vision 모델 정책
+- [x] Vision Agent — 이미지 요청 사전 분석
+- [x] 실행 중 사용자 메시지 injection
+- [x] DeepSeek V4 raw HTTP thinking 명시 및 streaming usage 수집
 
-## Phase 3 — Remote Operation (예정)
+## Phase 3 — Remote Operation (진행 중)
 
-- worker/executor 서비스 분리
-- Redis Streams (재접속·모바일 복구)
-- Web Push, Context Dashboard, HANDOFF
+### 완료
+
+- [x] 모바일 PWA 채팅 및 승인/질문 원격 제어
+- [x] PWA foreground 시 서비스 워커 업데이트 확인
+- [x] Git 변경 파일 / 파일별 diff / 커밋 히스토리 조회
+- [x] Git 브랜치 조회 및 전환
+- [x] 모바일 safe-area 대응
+
+### 예정
+
+- [ ] Reviewer → Debugger → Reviewer 자동 재검증 루프
+- [ ] worker/executor 서비스 분리
+- [ ] Redis Streams 기반 durable event log 및 재접속 복구
+- [ ] Web Push
+- [ ] Context Dashboard
+- [ ] HANDOFF 생성 및 새 세션 인계
 
 ## Phase 4 — Advanced Extension (별도 프로젝트)
 
-- Multi-Agent, MCP, Repository Intelligence, Vector Search, Vision Agent
+- Multi-Agent, MCP, Repository Intelligence, Vector Search, Vision Agent 고도화
