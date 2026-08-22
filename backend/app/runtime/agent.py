@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from ..config import settings
+from .. import errors as error_log
 from ..db import store
 from ..llm.factory import create_adapter
 from ..orchestrator.model_router import ModelRouter
@@ -113,11 +114,45 @@ class AgentRuntime:
         self._cancel_sessions: set[str] = set()
         self._injections: dict[str, list[str]] = {}
         self._running_sessions: set[str] = set()
+        # reasoning_content 400을 한 번 겪은 세션 — 이후 호출은 미리 reasoning을 벗긴다.
+        self._strip_reasoning_sessions: set[str] = set()
 
     def _adapter_for(self, model: str):
         if model not in self._adapters:
             self._adapters[model] = create_adapter(model)
         return self._adapters[model]
+
+    @staticmethod
+    def _strip_reasoning(messages: list[dict]) -> list[dict]:
+        out = []
+        for m in messages:
+            if isinstance(m, dict) and "reasoning_content" in m:
+                m = {k: v for k, v in m.items() if k != "reasoning_content"}
+            out.append(m)
+        return out
+
+    async def _stream_with_recovery(self, model, messages, tool_schemas, thinking, effort, session_id):
+        """LLM 스트림을 호출하되, 요청 시점 오류(예: DeepSeek reasoning_content 400)로
+        아무 델타도 못 받고 죽으면 reasoning_content를 벗겨 1회 재시도한다.
+        긴 thinking tool-loop에서 스텝 하나가 죽어도 루프가 스스로 회복한다."""
+        attempts = [messages, self._strip_reasoning(messages)]
+        for i, msgs in enumerate(attempts):
+            produced = False
+            try:
+                async for delta in self._adapter_for(model).stream_chat(
+                    msgs, tool_schemas, thinking=thinking, reasoning_effort=effort
+                ):
+                    produced = True
+                    yield delta
+                return
+            except Exception as err:
+                # 델타를 이미 받았거나 마지막 시도면 회복 불가 → 전파
+                if produced or i == len(attempts) - 1:
+                    raise
+                # 이후 스텝은 미리 reasoning을 벗겨 반복 400을 피한다.
+                if session_id:
+                    self._strip_reasoning_sessions.add(session_id)
+                error_log.record("llm_recovered", f"스텝 오류 후 재시도: {err}", session_id)
 
     def resolve_approval(self, approval_id: str, decision: str) -> bool:
         fut = self.pending_approvals.pop(approval_id, None)
@@ -315,11 +350,6 @@ class AgentRuntime:
         await send("role_start", {"role": role, "model": route["model"], "thinking": route["thinking"]})
         system_msg = {"role": "system", "content": _system_for(role, room_memory)}
 
-        # 이전 role(thinking on)이 남긴 reasoning_content는 이후 호출에서
-        # DeepSeek이 거부하므로 제거한다. 현재 role의 tool-loop 내부 reasoning은 유지.
-        for msg in all_messages:
-            msg.pop("reasoning_content", None)
-
         total_prompt = 0
         total_completion = 0
 
@@ -343,11 +373,16 @@ class AgentRuntime:
             usage: dict[str, int] = {}
             last_emit = 0.0
 
-            async for delta in self._adapter_for(route["model"]).stream_chat(
-                [system_msg, *all_messages],
+            call_messages = [system_msg, *all_messages]
+            if session_id in self._strip_reasoning_sessions:
+                call_messages = self._strip_reasoning(call_messages)
+            async for delta in self._stream_with_recovery(
+                route["model"],
+                call_messages,
                 tool_schemas,
-                thinking=route["thinking"],
-                reasoning_effort=route["reasoning_effort"],
+                route["thinking"],
+                route["reasoning_effort"],
+                session_id,
             ):
                 if delta.get("reasoning_content"):
                     reasoning.append(delta["reasoning_content"])
