@@ -68,6 +68,7 @@ const showSessionDetail = ref(false)
 const sessionRuns = ref([])
 const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
 const attachedImage = ref(null)
+const attachedText = ref(null) // { name, content, truncated }
 const fileInput = ref(null)
 const kanbanOpen = ref({
   todo: true,
@@ -802,7 +803,8 @@ function toggleAutoApprove() {
 async function send() {
   const text = input.value.trim()
   const imageUrl = attachedImage.value?.url
-  if (!text && !imageUrl) return
+  const att = attachedText.value
+  if (!text && !imageUrl && !att) return
   if (busy.value) {
     if (text) await steerDuringRun(text)
     return
@@ -810,20 +812,27 @@ async function send() {
   busy.value = true
   input.value = ''
   debug.value = '전송 중…'
-  console.log('[forge] send 시작:', text.slice(0, 60))
 
-  newUser(text || '[이미지]')
+  // 백엔드로 보낼 메시지에 파일 내용 포함
+  let payloadMsg = text
+  if (att) {
+    payloadMsg = `첨부 파일: ${att.name}\n\`\`\`\n${att.content}\n\`\`\`${att.truncated ? '\n(파일이 길어 일부만 첨부됨)' : ''}\n\n${text}`.trim()
+  }
+  const displayText = text || (att ? `[파일: ${att.name}]` : '[이미지]')
+
+  newUser(displayText)
   const assistant = newAssistant()
   isAtBottom.value = true
   scrollBottom()
   attachedImage.value = null
+  attachedText.value = null
 
   try {
-    const roomId = await ensureRoom(text || '이미지 분석')
+    const roomId = await ensureRoom(text || (att ? att.name : '이미지 분석'))
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: roomId, message: text, image_url: imageUrl, auto_approve: autoApprove.value }),
+      body: JSON.stringify({ session_id: roomId, message: payloadMsg, image_url: imageUrl, auto_approve: autoApprove.value }),
     })
     console.log('[forge] 응답:', res.status, res.headers.get('content-type'))
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
@@ -902,19 +911,33 @@ function onInput(e) {
 async function onFileChange(e) {
   const file = e.target.files[0]
   if (!file) return
-  const formData = new FormData()
-  formData.append('file', file)
-  try {
-    const res = await fetch('/api/upload', { method: 'POST', body: formData })
-    if (res.ok) {
-      attachedImage.value = await res.json()
-    }
-  } catch {}
+  if (file.type.startsWith('image/')) {
+    // 이미지 → 업로드 후 Vision 분석
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      const res = await fetch('/api/upload', { method: 'POST', body: formData })
+      if (res.ok) attachedImage.value = await res.json()
+    } catch {}
+  } else {
+    // 텍스트/코드 파일 → 내용을 읽어 메시지에 포함
+    try {
+      let content = await file.text()
+      const MAX = 200000
+      const truncated = content.length > MAX
+      if (truncated) content = content.slice(0, MAX)
+      attachedText.value = { name: file.name, content, truncated }
+    } catch {}
+  }
   e.target.value = ''
 }
 
 function removeImage() {
   attachedImage.value = null
+}
+
+function removeText() {
+  attachedText.value = null
 }
 
 async function decide(approval, decision) {
@@ -1153,6 +1176,15 @@ onMounted(async () => {
       </div>
     </main>
 
+    <div v-if="attachedText" class="file-chip">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+      <span class="file-chip-name">{{ attachedText.name }}</span>
+      <span v-if="attachedText.truncated" class="file-chip-note">일부</span>
+      <button class="file-chip-x" @click="removeText" aria-label="제거">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
     <div v-if="attachedImage" class="image-preview">
       <img :src="attachedImage.url" alt="첨부 이미지" />
       <button class="image-remove" @click="removeImage" aria-label="제거">
@@ -1165,7 +1197,7 @@ onMounted(async () => {
     </button>
 
     <footer>
-      <input ref="fileInput" type="file" accept="image/*" hidden @change="onFileChange" />
+      <input ref="fileInput" type="file" accept="image/*,.md,.txt,.log,.json,.csv,.yml,.yaml,.toml,.py,.js,.ts,.jsx,.tsx,.vue,.html,.css,.sh,.xml,.java,.go,.rs,.c,.cpp,.h,.sql,text/*" hidden @change="onFileChange" />
       <div class="composer">
         <textarea
           v-model="input"
@@ -1188,7 +1220,7 @@ onMounted(async () => {
             <button class="mode-chip small" :class="{ on: steerMode === 'switch' }" @click="steerMode = 'switch'">계획 수정</button>
           </template>
           <div class="composer-spacer"></div>
-          <button id="send" class="composer-send" :disabled="!input.trim() && !attachedImage" @click="send" aria-label="전송">
+          <button id="send" class="composer-send" :disabled="!input.trim() && !attachedImage && !attachedText" @click="send" aria-label="전송">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
           </button>
         </div>
