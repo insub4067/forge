@@ -32,7 +32,8 @@ Re-review / Done
 - Planner Flash-first, Pro-on-demand 모델 라우팅
 - Reviewer ↔ Debugger 상태 기반 자기수정 루프
 - read/write/edit/bash/grep/list 도구 + 승인 게이트
-- Docker Sandbox, git checkpoint, unified diff
+- Docker Sandbox 기본 실행 + `SANDBOX_MODE=host` 옵트인 host 실행
+- git checkpoint, unified diff
 - Tool result pruning + 75% context compaction + 95% hard block
 - DeepSeek cache hit/miss 계측 + stable prefix hash
 - selective Skill retrieval + `save_skill` 기반 Self-Improving Skills
@@ -47,6 +48,12 @@ Re-review / Done
 - 승인·질문 600초 timeout + cancel 시 pending future 해제
 - workspace 필수 선택 및 파일 브라우저 workspace 경계 제한
 - 모바일 PWA: 세션/칸반/Git/파일/Skills/metrics/승인·질문/실시간 활동
+- 첨부 이미지 채팅 썸네일 + 전체화면 이미지 뷰어
+- Skills 카드 collapsible UI
+
+## 실행 모드
+
+기본 `SANDBOX_MODE`는 Docker 격리 실행이다. 필요한 경우에만 `SANDBOX_MODE=host`로 호스트 직접 실행을 옵트인할 수 있다. host 모드는 자기검증과 로컬 도구 활용 범위가 넓지만 격리 수준이 낮으므로 신뢰된 개인 환경에서만 사용한다.
 
 ## Remote Runtime
 
