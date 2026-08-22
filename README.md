@@ -2,115 +2,64 @@
 
 **English** | [한국어](README.ko.md)
 
-A self-hosted **agentic coding runtime** that turns natural-language goals into an iterative plan → execute → review → fix → re-review workflow. FORGE is designed to run for long periods on a Mac while remaining controllable from a mobile PWA.
+A self-hosted **agentic coding runtime** that executes, reviews, and repairs work iteratively while running on a Mac and remaining controllable from a mobile PWA.
 
-FORGE optimizes for **completing the same task with equal or better success rates using fewer tokens, API calls, time, and cost**. The primary metric is not `tokens/task`, but **cost per successfully completed task**.
+FORGE optimizes for **equal or better task success with fewer tokens, API calls, time, and cost**. The primary metric is **cost per successfully completed task**.
 
 ```text
 User Goal
   ↓
 Triage (Flash)
-  ↓
-Planner (Flash by default / Pro only for COMPLEX tasks)
-  ↓
-Coder (Flash)
-  ↓
-Reviewer (Flash)
-  ↓
-Debugger (Flash → Pro only for the final recovery attempt)
-  ↓
-Re-review / Done
+  ├─ CHAT → Chat
+  ├─ SIMPLE → Coder → Reviewer
+  └─ COMPLEX → Planner → Coder → Reviewer
+                              ↓ when needed
+                         Debugger ↔ Reviewer
 ```
+
+SIMPLE tasks bypass the Planner to avoid unnecessary exploration and context retransmission. Planning is reserved for complex work.
 
 ## ⚠️ Security Warning
 
-FORGE is not a normal chat application. It is a coding agent that can read and modify files inside configured workspaces, execute shell commands, and change Git repositories.
+FORGE can modify files, execute shell commands, change Git repositories, and now exposes Mac remote capabilities including a **host PTY terminal, screen viewing, and camera viewing**. Do not expose a FORGE instance directly to the public Internet.
 
-**Do not expose a FORGE instance directly to the public Internet.** Unauthorized access could potentially allow someone to:
+A Cloudflare Tunnel alone is not authorization. Put remote deployments behind **Cloudflare Zero Trust / Access, Tailscale, a VPN, or another trusted access-control layer**. The project's development deployment uses explicit Cloudflare Zero Trust Access policies.
 
-- read or modify files inside accessible workspaces
-- execute shell commands
-- modify Git repositories
-- consume configured LLM API quota or credentials indirectly
-- gain broader access to the host when host execution mode is enabled
+The Host Terminal is effectively a remote shell. Application-level WebSocket authorization and network access controls must be independently verified.
 
-FORGE's application-level authentication should **not** be treated as a replacement for a proper network access-control layer. For remote access, place FORGE behind a trusted boundary such as **Cloudflare Zero Trust / Access, Tailscale, a VPN, or another authenticated private network**.
-
-The development deployment used by this project is protected by **explicit Cloudflare Zero Trust Access policies**. A Cloudflare Tunnel by itself does not provide user authorization; if you attach FORGE to a public hostname through a tunnel, configure Cloudflare Access policies separately.
-
-Keep the default Docker sandbox enabled whenever possible. `SANDBOX_MODE=host` should only be used in a trusted personal environment when you understand the implications. **Never expose host execution mode to an untrusted network.**
-
-## Current Status
-
-- Phase 1 — Agent Core: complete
-- Phase 2 — Code Modification: complete
-- Phase 3 — Remote Operation: in progress
-
-Implemented highlights:
+## Current Implementation
 
 - DeepSeek V4 streaming / tool calling / thinking
-- Flash-first, Pro-on-demand model routing
-- Reviewer ↔ Debugger state-based self-correction loop
-- read/write/edit/bash/grep/list tools with approval gates
+- SIMPLE Planner bypass + COMPLEX planning
+- Flash-first / Pro-on-demand routing
+- Reviewer ↔ Debugger self-correction loop
+- context pruning / 75% compaction / 95% hard block
+- cache telemetry + selective Self-Improving Skills
+- reasoning_content recovery and repeated-retry elimination per affected session
+- read/write/edit/bash/grep/list tools with approval boundaries
+- `build_frontend` host-build tool so FORGE can modify and production-build its own frontend
 - Docker Sandbox by default + opt-in `SANDBOX_MODE=host`
-- Git checkpoints and unified diffs
-- Tool-result pruning + 75% context compaction + 95% hard block
-- DeepSeek cache hit/miss telemetry + stable prefix hash
-- Selective Skill retrieval + `save_skill` Self-Improving Skills
-- Parallel prefetch for read-only tools
-- Recovery for 429/5xx/timeouts and `reasoning_content` errors
-- PostgreSQL persistence for sessions, messages, tasks, checkpoints, and agent runs
-- Agent-run telemetry for success rate, cost, cache efficiency, and Pro escalation
-- Concurrent-run guard per session and runtime message injection
-- Interrupted-run detection after server restart (true execution resume is not implemented yet)
-- JSONL durable action/event log
-- `/sessions/{id}/status` for running role, activity, approval/question waits, and idle state
-- 600-second approval/question timeout and cancellation cleanup
-- Required workspace selection and workspace-bound file APIs
-- Mobile PWA for sessions, Kanban, Git, files, Skills, metrics, approvals, questions, and live activity
-- Multi-image attachments with Vision analysis and swipeable fullscreen gallery
-- Model-surface image stripping for non-vision roles while preserving original history
-- Dedicated run-history and error-log detail views
-- `/status` recovery and polling when SSE disconnects before `done`
-- Collapsible Skills UI
+- PostgreSQL persistence / agent telemetry / JSONL event log
+- `/status` recovery after SSE loss and pending-approval restoration
+- mobile PWA organized around Sessions / Automation / Mac remote operation
+- Git / Files / Skills / Metrics / Kanban / Vision
+- view-only Mac screen
+- Mac host PTY + WebSocket + xterm.js Terminal
+- Mac camera via `imagesnap` JPEG polling PoC
+- scheduled-job foundations and workspace fallback
 
-## Execution Modes
+## Major Remaining Work
 
-The default execution mode is the isolated Docker sandbox. Host execution is available only as an explicit opt-in:
+- Durable Worker + authoritative event replay for true restart continuation
+- security review of Terminal / Screen / Camera authorization boundaries
+- complete Scheduled / Deferred / Condition Jobs + Web Push
+- Tool Script/RPC Mode
+- ExecutionBackend abstraction
+- bounded RSI pipeline: candidate → benchmark → promotion/rollback
 
-```bash
-SANDBOX_MODE=host
-```
-
-Host mode gives the agent broader access to local tools and makes self-verification easier, but provides substantially less isolation. Use it only in a trusted personal environment.
-
-## Remote Runtime
-
-An agent run can continue on the server after the browser SSE connection is lost. The PWA polls `/status` to recover the current role and activity. If the server process itself restarts, FORGE reconciles stale `sessions.running` state and records the interruption in history.
-
-**True durable resume from the exact execution step after a process restart is not implemented yet.** A separated durable worker and replayable authoritative event stream remain major roadmap items.
-
-## Efficiency Strategy
-
-1. Flash-first / Pro-on-demand routing
-2. Stable prompt prefixes and cache-hit tracking
-3. Inject only relevant Skills
-4. Model-free pruning of oversized tool results
-5. Parallel execution for safe read-only tools
-6. Non-destructive context compaction at 75% pressure
-7. Retry, Debugger, and Pro escalation only after failure
-8. Measure every optimization against `cost per successfully completed task`
+FORGE can already modify its own repository and perform parts of its own build workflow, but it is not treated as fully recursive self-improving until evaluation and promotion are automatically closed-loop.
 
 ## Getting Started
-
-### Requirements
-
-- Docker + Docker Compose
-- Python 3.12+
-- Node.js 18+
-- A supported DeepSeek API configuration
-
-### Backend and infrastructure
 
 ```bash
 docker compose up -d
@@ -121,7 +70,7 @@ cp ../.env.example ../.env
 .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8790
 ```
 
-### Frontend
+Frontend:
 
 ```bash
 cd frontend
@@ -131,24 +80,14 @@ npm run build
 
 ## Documentation
 
-Start with the [`docs/README.md`](docs/README.md) documentation index.
+Use [`docs/README.md`](docs/README.md) as the authoritative documentation index.
 
-- [`docs/core/`](docs/core/) — architecture, runtime flow, schema, requirements
-- [`docs/status/`](docs/status/) — implementation and feature status
-- [`docs/operations/`](docs/operations/) — benchmark and troubleshooting
-- [`docs/planning/`](docs/planning/) — roadmap and improvement plan
-- [`docs/proposal/`](docs/proposal/) — design proposals and adoption research
-- [`docs/archive/`](docs/archive/) — historical, non-authoritative documents
-
-`docs/agents/` contains **live runtime prompt files**, not ordinary documentation.
-
-## Next Major Work
-
-- True durable worker resume and event replay
-- Tool Script/RPC Mode
-- Scheduled / Condition Jobs + Web Push
-- ExecutionBackend abstraction (Local → SSH → Docker)
-- Isolated subagents after the runtime foundation is stable
+- `docs/core/` — current architecture and Agent loop
+- `docs/status/` — actual implementation status
+- `docs/operations/` — benchmarks and troubleshooting
+- `docs/planning/` — roadmap
+- `docs/proposal/` — proposals and adoption research
+- `docs/agents/` — **live runtime prompts**
 
 ## License
 
