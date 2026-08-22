@@ -64,6 +64,7 @@ BASE_PROMPT = """당신은 FORGE 에이전틱 코딩 에이전트의 일부입�
 - 응답은 한국어로 한다.
 - 응답에 이모지와 이미지를 넣지 않는다.
 - 코드를 추측하지 말고 파일을 읽어 확인한다.
+- 목표에 필요한 최소한의 파일만 읽는다. 전수 탐색하지 말고, 충분히 파악되면 즉시 다음 단계로 넘어간다.
 - 도구 호출 전에 진행 상황을 짧은 텍스트로 설명한다.
 - 같은 도구를 같은 인자로 반복 호출하지 않는다.
 
@@ -71,6 +72,25 @@ BASE_PROMPT = """당신은 FORGE 에이전틱 코딩 에이전트의 일부입�
 - 워크스페이스: 로컬 마운트 디렉터리
 - 도구: read_file, list_dir, grep, write_file, edit_file, bash, ask_user, update_tasks
 - write_file/edit_file/bash는 사용자 승인이 필요하다."""
+
+
+def _prune_tool_result(text: str, head: int = 2500, tail: int = 1200) -> str:
+    """모델에 보낼 도구 결과를 축약한다(model-free pruning).
+
+    긴 read_file/bash/grep 결과가 매 스텝 컨텍스트에 누적돼 폭증하는 것을 막는다.
+    앞·뒤를 보존하고 가운데를 생략하되, 오류/경고 라인은 함께 남긴다.
+    UI 표시는 원본을 쓰고, 이 축약본은 모델 컨텍스트(all_messages)에만 쓴다.
+    """
+    if len(text) <= head + tail + 300:
+        return text[:20_000]
+    error_lines = [
+        ln for ln in text.splitlines()
+        if any(k in ln.lower() for k in ("error", "오류", "fail", "warning", "traceback", "exception"))
+    ]
+    body = text[:head] + f"\n\n... {len(text) - head - tail}자 생략 ...\n\n" + text[-tail:]
+    if error_lines:
+        body += "\n\n[주요 오류/경고 라인]\n" + "\n".join(error_lines[:20])
+    return body
 
 
 def _load_role(role: str) -> str:
@@ -559,7 +579,7 @@ class AgentRuntime:
                 )
 
                 all_messages.append(
-                    {"role": "tool", "tool_call_id": tc["id"], "content": result[:20_000]}
+                    {"role": "tool", "tool_call_id": tc["id"], "content": _prune_tool_result(result)}
                 )
 
         return "max_steps", total_prompt, total_completion, route
