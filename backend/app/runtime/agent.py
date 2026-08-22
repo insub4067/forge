@@ -237,6 +237,22 @@ class AgentRuntime:
         st.update(fields)
         st["ts"] = time.monotonic()
 
+    @staticmethod
+    def _activity_label(event_type: str, data: dict) -> str | None:
+        """지금 무엇을 하는지 사람이 읽을 짧은 한 줄(스트림 끊겨도 /status로 노출)."""
+        if event_type == "tool_call":
+            name = data.get("name", "")
+            a = data.get("args") or {}
+            hint = a.get("command") or a.get("path") or a.get("query") or ""
+            return f"{name} · {str(hint)[:50]}" if hint else f"{name} 실행"
+        if event_type == "tool_result":
+            return f"{data.get('name', '')} 완료"
+        if event_type == "thinking_delta":
+            return "추론 중"
+        if event_type == "text_delta":
+            return "작성 중"
+        return None
+
     def get_status(self, session_id: str) -> dict:
         st = dict(self._status.get(session_id, {}))
         st["running"] = session_id in self._running_sessions
@@ -932,10 +948,13 @@ class AgentRuntime:
         async def send(event_type: str, data: dict[str, Any]) -> None:
             nonlocal seq
             seq += 1
-            # 라이브 상태 갱신(스트림이 끊겨도 /status로 조회 가능) + durable 이벤트 로그.
+            # 라이브 상태 갱신(스트림이 끊겨도 /status로 지금 뭘 하는지 조회 가능) + durable 이벤트 로그.
             fields: dict[str, Any] = {"last_event": event_type}
             if event_type == "role_start":
                 fields["role"] = data.get("role", "")
+            activity = self._activity_label(event_type, data)
+            if activity:
+                fields["activity"] = activity
             self._status_update(session_id, **fields)
             eventlog.record(session_id, seq, event_type, data)
             await emit({"seq": seq, "type": event_type, "data": data})

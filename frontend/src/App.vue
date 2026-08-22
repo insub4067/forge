@@ -167,17 +167,6 @@ async function fetchStatus(id) {
   return st
 }
 
-// 실행 중 배너 문구 — 승인/질문 대기 중이면 그 사실을 알려 사용자가 응답하게 유도한다.
-function runningBannerText() {
-  if (agentStatus.value && agentStatus.value.waiting_for === 'approval') {
-    return '승인 대기 중 — 위험한 작업 실행 전 확인이 필요합니다'
-  }
-  if (agentStatus.value && agentStatus.value.waiting_for === 'question') {
-    return '질문 대기 중 — 답변을 기다리고 있습니다'
-  }
-  return 'Mac에서 작업 진행 중 — 완료되면 자동으로 표시됩니다'
-}
-
 async function checkRunning() {
   const id = currentRoomId.value
   if (!id || busy.value) return
@@ -212,6 +201,29 @@ function stopRunningPoll() {
     clearInterval(runningPoll)
     runningPoll = null
   }
+}
+
+// 실행 배너 문구 — 무엇을 하는지/대기 중인지 항상 보이게(ROLE_LABELS는 아래에 정의됨).
+function runningBannerText() {
+  const s = agentStatus.value
+  if (!s) return 'Mac에서 작업 진행 중'
+  if (s.waiting_for === 'approval') return '승인 대기 중 — 확인이 필요합니다'
+  if (s.waiting_for === 'question') return '질문 대기 중 — 답변이 필요합니다'
+  const role = s.role ? (ROLE_LABELS[s.role] || s.role) : ''
+  const idle = s.idle_seconds != null ? ` · ${Math.round(s.idle_seconds)}초 전` : ''
+  if (s.activity) return `${role ? role + ' · ' : ''}${s.activity}${idle}`
+  if (role) return `${role} 진행 중${idle}`
+  return 'Mac에서 작업 진행 중'
+}
+// 상세 화면 없이도 "지금 무엇을" 한 줄로. 스트림 끊겨도 폴링으로 갱신.
+function liveActivityText() {
+  const s = agentStatus.value
+  return (s && s.activity) || 'Mac에서 작업 중'
+}
+
+// 실행 중(로컬 스트림 또는 서버 run)이며 마지막 메시지인가 — 복사/context 등 '끝난' UI를 숨기는 기준.
+function isLiveTurn(i) {
+  return (busy.value || sessionRunning.value) && i === messages.value.length - 1
 }
 let mainStartX = 0
 let mainStartY = 0
@@ -787,6 +799,7 @@ function newAssistant() {
 }
 
 const ROLE_LABELS = {
+  triage: '분류',
   planner: '계획',
   coder: '구현',
   reviewer: '검토',
@@ -1398,7 +1411,7 @@ document.addEventListener('visibilitychange', () => {
             </div>
 
             <div v-if="(busy || sessionRunning) && i === messages.length - 1" class="typing">
-              <span class="typing-label">{{ busy ? '작성 중' : 'Mac에서 작업 중' }}</span>
+              <span class="typing-label">{{ busy ? '작성 중' : liveActivityText() }}</span>
               <span class="typing-dots"><i></i><i></i><i></i></span>
             </div>
 
@@ -1427,12 +1440,12 @@ document.addEventListener('visibilitychange', () => {
 
             <div v-if="m.doneMessage" class="done-msg">{{ m.doneMessage }}</div>
 
-            <div v-if="m.context" class="context">
+            <div v-if="m.context && !isLiveTurn(i)" class="context">
               context {{ m.context.prompt_tokens + m.context.completion_tokens }} tokens<span
                 v-if="m.context.cache_hit_ratio != null"> · cache {{ Math.round(m.context.cache_hit_ratio * 100) }}%</span>
             </div>
 
-            <div v-if="hasAssistantText(m) && !(busy && i === messages.length - 1)" class="msg-actions">
+            <div v-if="hasAssistantText(m) && !isLiveTurn(i)" class="msg-actions">
               <button class="msg-action" @click="copyMessage(m)">
                 <svg v-if="!m.copied" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
