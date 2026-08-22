@@ -135,9 +135,22 @@ const showSessionDetail = ref(false)
 const sessionRuns = ref([])
 const sessionMetrics = ref(null)
 const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
-const attachedImage = ref(null)
-const viewerImage = ref(null)
-function openViewer(url) { viewerImage.value = url }
+const attachedImages = ref([]) // 여러 장 첨부
+const viewerImages = ref([]) // 전체화면 뷰어 이미지 목록
+const viewerIndex = ref(0)
+function openViewer(images, index = 0) {
+  viewerImages.value = Array.isArray(images) ? images : [images]
+  viewerIndex.value = index
+}
+function closeViewer() { viewerImages.value = [] }
+function viewerNext() { if (viewerIndex.value < viewerImages.value.length - 1) viewerIndex.value++ }
+function viewerPrev() { if (viewerIndex.value > 0) viewerIndex.value-- }
+let viewerTouchX = 0
+function viewerTouchStart(e) { viewerTouchX = e.changedTouches[0].clientX }
+function viewerTouchEnd(e) {
+  const dx = e.changedTouches[0].clientX - viewerTouchX
+  if (Math.abs(dx) > 40) { dx < 0 ? viewerNext() : viewerPrev() }
+}
 const attachedText = ref(null) // { name, content, truncated }
 const fileInput = ref(null)
 const kanbanOpen = ref({
@@ -592,14 +605,14 @@ async function loadMessages(isNew = false) {
     for (const m of data) {
       if (m.role === 'user') {
         let uContent = m.content
-        let uImage = null
+        let uImages = null
         if (Array.isArray(uContent)) {
-          const img = uContent.find((c) => c && c.type === 'image_url')
-          uImage = img?.image_url?.url || null
+          const imgs = uContent.filter((c) => c && c.type === 'image_url').map((c) => c.image_url?.url).filter(Boolean)
+          uImages = imgs.length ? imgs : null
           const txt = uContent.find((c) => c && c.type === 'text')
           uContent = (txt && txt.text) || '[이미지]'
         }
-        messages.value.push({ role: 'user', content: uContent, image: uImage })
+        messages.value.push({ role: 'user', content: uContent, images: uImages })
         bubble = null
       } else if (m.role === 'assistant') {
         if (!bubble) {
@@ -799,8 +812,8 @@ function onChatScroll() {
   isAtBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
 }
 
-function newUser(text, image) {
-  messages.value.push({ role: 'user', content: text, image: image || null })
+function newUser(text, images) {
+  messages.value.push({ role: 'user', content: text, images: images && images.length ? images : null })
 }
 
 function newAssistant() {
@@ -1038,9 +1051,9 @@ function toggleAutoApprove() {
 
 async function send() {
   const text = input.value.trim()
-  const imageUrl = attachedImage.value?.url
+  const imageUrls = attachedImages.value.map((a) => a.url).filter(Boolean)
   const att = attachedText.value
-  if (!text && !imageUrl && !att) return
+  if (!text && !imageUrls.length && !att) return
   if (busy.value) {
     if (text) await steerDuringRun(text)
     return
@@ -1056,11 +1069,11 @@ async function send() {
   }
   const displayText = text || (att ? `[파일: ${att.name}]` : '[이미지]')
 
-  newUser(displayText, imageUrl)
+  newUser(displayText, imageUrls)
   const assistant = newAssistant()
   isAtBottom.value = true
   scrollBottom()
-  attachedImage.value = null
+  attachedImages.value = []
   attachedText.value = null
 
   try {
@@ -1068,7 +1081,7 @@ async function send() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: roomId, message: payloadMsg, image_url: imageUrl, auto_approve: autoApprove.value }),
+      body: JSON.stringify({ session_id: roomId, message: payloadMsg, image_urls: imageUrls, auto_approve: autoApprove.value }),
     })
     console.log('[forge] 응답:', res.status, res.headers.get('content-type'))
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
@@ -1145,31 +1158,32 @@ function onInput(e) {
 }
 
 async function onFileChange(e) {
-  const file = e.target.files[0]
-  if (!file) return
-  if (file.type.startsWith('image/')) {
-    // 이미지 → 업로드 후 Vision 분석
-    const formData = new FormData()
-    formData.append('file', file)
-    try {
-      const res = await fetch('/api/upload', { method: 'POST', body: formData })
-      if (res.ok) attachedImage.value = await res.json()
-    } catch {}
-  } else {
-    // 텍스트/코드 파일 → 내용을 읽어 메시지에 포함
-    try {
-      let content = await file.text()
-      const MAX = 200000
-      const truncated = content.length > MAX
-      if (truncated) content = content.slice(0, MAX)
-      attachedText.value = { name: file.name, content, truncated }
-    } catch {}
+  const files = Array.from(e.target.files || [])
+  for (const file of files) {
+    if (file.type.startsWith('image/')) {
+      // 이미지 → 업로드(여러 장 누적)
+      const formData = new FormData()
+      formData.append('file', file)
+      try {
+        const res = await fetch('/api/upload', { method: 'POST', body: formData })
+        if (res.ok) attachedImages.value.push(await res.json())
+      } catch {}
+    } else {
+      // 텍스트/코드 파일 → 내용을 읽어 메시지에 포함(마지막 1개)
+      try {
+        let content = await file.text()
+        const MAX = 200000
+        const truncated = content.length > MAX
+        if (truncated) content = content.slice(0, MAX)
+        attachedText.value = { name: file.name, content, truncated }
+      } catch {}
+    }
   }
   e.target.value = ''
 }
 
-function removeImage() {
-  attachedImage.value = null
+function removeImage(idx) {
+  attachedImages.value.splice(idx, 1)
 }
 
 function removeText() {
@@ -1378,7 +1392,9 @@ document.addEventListener('visibilitychange', () => {
       <div v-for="(m, i) in messages" :key="i" class="msg" :class="m.role">
         <div class="bubble">
           <template v-if="m.role === 'user'">
-            <img v-if="m.image" :src="m.image" class="user-image" @click="openViewer(m.image)" alt="첨부 이미지" />
+            <div v-if="m.images && m.images.length" class="user-images">
+              <img v-for="(img, ii) in m.images" :key="ii" :src="img" class="user-image" @click="openViewer(m.images, ii)" alt="첨부 이미지" />
+            </div>
             <div v-if="m.content && m.content !== '[이미지]'" class="user-text">{{ m.content }}</div>
           </template>
 
@@ -1480,24 +1496,30 @@ document.addEventListener('visibilitychange', () => {
       </button>
     </div>
 
-    <div v-if="attachedImage" class="image-preview">
-      <img :src="attachedImage.url" alt="첨부 이미지" />
-      <button class="image-remove" @click="removeImage" aria-label="제거">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-      </button>
+    <div v-if="attachedImages.length" class="image-preview-row">
+      <div v-for="(img, ii) in attachedImages" :key="ii" class="image-preview">
+        <img :src="img.url" alt="첨부 이미지" @click="openViewer(attachedImages.map((a) => a.url), ii)" />
+        <button class="image-remove" @click="removeImage(ii)" aria-label="제거">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
     </div>
 
     <button v-if="!isAtBottom" class="jump-bottom" @click="jumpToBottom" aria-label="맨 아래로">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
     </button>
 
-    <div v-if="viewerImage" class="image-viewer" @click="viewerImage = null">
-      <img :src="viewerImage" alt="이미지" @click.stop />
-      <button class="image-viewer-close" @click="viewerImage = null" aria-label="닫기">✕</button>
+    <div v-if="viewerImages.length" class="image-viewer" @click="closeViewer"
+         @touchstart.passive="viewerTouchStart" @touchend.passive="viewerTouchEnd">
+      <img :src="viewerImages[viewerIndex]" alt="이미지" @click.stop />
+      <button class="image-viewer-close" @click="closeViewer" aria-label="닫기">✕</button>
+      <button v-if="viewerIndex > 0" class="image-viewer-nav prev" @click.stop="viewerPrev" aria-label="이전">‹</button>
+      <button v-if="viewerIndex < viewerImages.length - 1" class="image-viewer-nav next" @click.stop="viewerNext" aria-label="다음">›</button>
+      <div v-if="viewerImages.length > 1" class="image-viewer-count">{{ viewerIndex + 1 }} / {{ viewerImages.length }}</div>
     </div>
 
     <footer>
-      <input ref="fileInput" type="file" accept="image/*,.md,.txt,.log,.json,.csv,.yml,.yaml,.toml,.py,.js,.ts,.jsx,.tsx,.vue,.html,.css,.sh,.xml,.java,.go,.rs,.c,.cpp,.h,.sql,text/*" hidden @change="onFileChange" />
+      <input ref="fileInput" type="file" multiple accept="image/*,.md,.txt,.log,.json,.csv,.yml,.yaml,.toml,.py,.js,.ts,.jsx,.tsx,.vue,.html,.css,.sh,.xml,.java,.go,.rs,.c,.cpp,.h,.sql,text/*" hidden @change="onFileChange" />
       <div class="composer">
         <textarea
           v-model="input"
@@ -1520,7 +1542,7 @@ document.addEventListener('visibilitychange', () => {
             <button class="mode-chip small" :class="{ on: steerMode === 'switch' }" @click="steerMode = 'switch'">계획 수정</button>
           </template>
           <div class="composer-spacer"></div>
-          <button id="send" class="composer-send" :disabled="!input.trim() && !attachedImage && !attachedText" @click="send" aria-label="전송">
+          <button id="send" class="composer-send" :disabled="!input.trim() && !attachedImages.length && !attachedText" @click="send" aria-label="전송">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
           </button>
         </div>

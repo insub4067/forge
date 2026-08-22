@@ -132,11 +132,11 @@ async def chat(req: Request):
     if not history:
         await store.ensure_session(session_id, message[:40], workspace_path)
 
-    image_url = body.get("image_url")
-    if image_url:
-        content = [
-            {"type": "text", "text": message},
-            {"type": "image_url", "image_url": {"url": image_url}},
+    # 다중 이미지 지원(image_urls). 단일 image_url도 하위호환.
+    image_urls = body.get("image_urls") or ([body["image_url"]] if body.get("image_url") else [])
+    if image_urls:
+        content = [{"type": "text", "text": message}] + [
+            {"type": "image_url", "image_url": {"url": u}} for u in image_urls
         ]
     else:
         content = message
