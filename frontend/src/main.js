@@ -16,8 +16,11 @@ function showToast(msg) {
   setTimeout(() => el.classList.remove('show'), 3000)
 }
 
+let swRegistration = null
+
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').then((reg) => {
+    swRegistration = reg
     reg.addEventListener('updatefound', () => {
       const newWorker = reg.installing
       if (!newWorker) return
@@ -30,3 +33,13 @@ if ('serviceWorker' in navigator) {
     })
   })
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && swRegistration) {
+    swRegistration.update()
+  }
+})
+
+window.addEventListener('focus', () => {
+  if (swRegistration) swRegistration.update()
+})
