@@ -6,6 +6,7 @@ const input = ref('')
 const busy = ref(false)
 const activeQuestion = ref(null)
 const questionAnswer = ref('')
+const debug = ref('대기 중')
 
 const sessionId = localStorage.getItem('forge_session') || crypto.randomUUID()
 localStorage.setItem('forge_session', sessionId)
@@ -98,6 +99,8 @@ async function send() {
   if (!text || busy.value) return
   busy.value = true
   input.value = ''
+  debug.value = '전송 중…'
+  console.log('[forge] send 시작:', text.slice(0, 60))
 
   newUser(text)
   const assistant = newAssistant()
@@ -109,17 +112,26 @@ async function send() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId, message: text }),
     })
+    console.log('[forge] 응답:', res.status, res.headers.get('content-type'))
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
+    debug.value = '연결됨'
 
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
-    let eventType = ''
+    let chunkCount = 0
+    let eventCount = 0
 
     while (true) {
       const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
+      if (done) {
+        console.log('[forge] 스트림 종료. chunk:', chunkCount, '이벤트:', eventCount, 'text길이:', assistant.text.length)
+        break
+      }
+      chunkCount++
+      const decoded = decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+      if (chunkCount <= 3) console.log('[forge] chunk', chunkCount, value.length, '바이트:', decoded.slice(0, 120))
+      buffer += decoded
       let idx
       while ((idx = buffer.indexOf('\n\n')) !== -1) {
         const block = buffer.slice(0, idx)
@@ -131,15 +143,22 @@ async function send() {
           else if (line.startsWith('data: ')) data += line.slice(6)
         }
         if (data) {
+          eventCount++
           try {
             const evt = JSON.parse(data)
+            if (eventCount <= 5) console.log('[forge] 이벤트', eventCount, ':', evt.type)
             handleEvent({ type: evt.type, data: evt.data }, assistant)
-          } catch {}
+            debug.value = `이벤트 ${eventCount} · ${evt.type}`
+          } catch (e) {
+            console.log('[forge] 파싱 실패:', e, data.slice(0, 80))
+          }
         }
       }
     }
   } catch (err) {
+    console.error('[forge] 오류:', err)
     assistant.text += '\n\n오류: ' + (err.message || err)
+    debug.value = '오류: ' + (err.message || err)
   } finally {
     busy.value = false
     scrollBottom()
