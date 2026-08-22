@@ -623,7 +623,30 @@ function _mediaKind(path) {
   return 'text'
 }
 const pdfContainer = ref(null)
+const pdfScale = ref(1)
+let _pinchDist = 0
+let _pinchScale = 1
+function _touchDist(t) {
+  return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+}
+function pdfTouchStart(e) {
+  if (e.touches.length === 2) {
+    _pinchDist = _touchDist(e.touches)
+    _pinchScale = pdfScale.value
+  }
+}
+function pdfTouchMove(e) {
+  if (e.touches.length === 2 && _pinchDist) {
+    e.preventDefault() // 핀치 중 페이지 스크롤 방지
+    const s = _pinchScale * (_touchDist(e.touches) / _pinchDist)
+    pdfScale.value = Math.max(1, Math.min(4, s))
+  }
+}
+function pdfResetZoom() {
+  pdfScale.value = 1
+}
 async function renderPdf(url) {
+  pdfScale.value = 1
   await nextTick()
   const el = pdfContainer.value
   if (!el) return
@@ -2124,7 +2147,10 @@ document.addEventListener('visibilitychange', () => {
       <div v-else-if="viewerKind === 'audio'" class="media-view">
         <audio :src="mediaUrl" controls />
       </div>
-      <div v-else-if="viewerKind === 'pdf'" ref="pdfContainer" class="pdf-view"></div>
+      <div v-else-if="viewerKind === 'pdf'" class="pdf-view"
+           @touchstart.passive="pdfTouchStart" @touchmove="pdfTouchMove" @dblclick="pdfResetZoom">
+        <div ref="pdfContainer" class="pdf-pages" :style="{ transform: `scale(${pdfScale})` }"></div>
+      </div>
       <div v-else class="code-view">
         <div class="code-gutter"><span v-for="n in fileLineCount" :key="n">{{ n }}</span></div>
         <pre class="code-body"><code v-html="highlightedContent"></code></pre>

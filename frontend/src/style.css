@@ -2702,18 +2702,24 @@ button {
 .media-view audio {
   width: 100%;
 }
-/* PDF 전체 페이지 세로 스크롤 */
+/* PDF 전체 페이지 세로 스크롤 + 핀치 줌 시 상하좌우 팬 */
 .pdf-view {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow: auto;
   -webkit-overflow-scrolling: touch;
+  padding: 12px;
+  background: #333;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+.pdf-pages {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  padding: 12px;
-  background: #333;
+  transform-origin: top center;
+  width: fit-content;
+  margin: 0 auto;
 }
 .pdf-page {
   display: block;
