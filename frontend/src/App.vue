@@ -71,6 +71,8 @@ const chatEl = ref(null)
 
 const version = __APP_VERSION__
 
+const isMobile = window.matchMedia('(pointer: coarse)').matches
+
 function currentRoom() {
   return rooms.value.find((r) => r.id === currentRoomId.value) || null
 }
@@ -387,7 +389,8 @@ async function send() {
 }
 
 function onKeydown(e) {
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+  if (e.key !== 'Enter' || e.isComposing) return
+  if (!isMobile && !e.shiftKey) {
     e.preventDefault()
     send()
   }
@@ -574,13 +577,9 @@ onMounted(async () => {
       <div class="modal">
         <div class="modal-head">새 채팅방</div>
         <input v-model="newRoomName" class="modal-field" placeholder="방 이름" />
-        <input
-          v-model="newRoomPath"
-          class="modal-field"
-          placeholder="워크스페이스 폴더 선택"
-          readonly
-          @click="openWorkspacePicker"
-        />
+        <button type="button" class="modal-field ws-btn" @click="openWorkspacePicker">
+          {{ newRoomPath || '워크스페이스 폴더 선택' }}
+        </button>
         <div class="modal-actions">
           <button class="no" @click="showCreateRoom = false">취소</button>
           <button class="ok" @click="createRoom">만들기</button>
@@ -616,20 +615,17 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-if="showWorkspacePicker" class="sheet-overlay" @click="showWorkspacePicker = false">
-      <div class="sheet" @click.stop>
-        <div class="sheet-head">
-          <span class="sheet-title">폴더 선택</span>
-          <button @click="showWorkspacePicker = false">닫기</button>
-        </div>
-        <div class="fs-path">{{ fsPath }}</div>
-        <div class="fs-list">
-          <div v-if="fsParent" class="fs-item parent" @click="navigateFs(fsParent)">.. 상위 폴더</div>
-          <div v-for="e in fsEntries" :key="e.path" class="fs-item" @click="navigateFs(e.path)">
-            {{ e.name }}
-          </div>
-        </div>
-        <button class="sheet-select" @click="pickCurrentPath">현재 폴더 선택</button>
+    <div v-if="showWorkspacePicker" class="fs-overlay">
+      <div class="fs-head">
+        <button @click="showWorkspacePicker = false">취소</button>
+        <span class="fs-title">{{ fsPath }}</span>
+        <button class="fs-done" @click="pickCurrentPath">선택</button>
+      </div>
+      <div class="fs-list">
+        <button v-if="fsParent" class="fs-item parent" @click="navigateFs(fsParent)">.. 상위 폴더</button>
+        <button v-for="e in fsEntries" :key="e.path" class="fs-item" @click="navigateFs(e.path)">
+          {{ e.name }}
+        </button>
       </div>
     </div>
   </div>
