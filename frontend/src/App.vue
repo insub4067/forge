@@ -672,8 +672,8 @@ onMounted(async () => {
       </button>
     </footer>
 
-    <div v-if="activeQuestion" class="modal-overlay">
-      <div class="modal">
+    <div v-if="activeQuestion" class="modal-overlay" @click="activeQuestion = null">
+      <div class="modal" @click.stop>
         <div class="modal-head">확인이 필요합니다</div>
         <div class="modal-question">{{ activeQuestion.question }}</div>
         <div v-if="activeQuestion.options.length" class="modal-options">
@@ -694,8 +694,8 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-if="showCreateRoom" class="modal-overlay">
-      <div class="modal">
+    <div v-if="showCreateRoom" class="modal-overlay" @click="showCreateRoom = false">
+      <div class="modal" @click.stop>
         <div class="modal-head">새 채팅방</div>
         <input v-model="newRoomName" class="modal-field" placeholder="방 이름" />
         <button type="button" class="modal-field ws-btn" @click="openWorkspacePicker(null)">
