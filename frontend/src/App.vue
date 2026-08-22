@@ -371,6 +371,10 @@ async function pickCurrentPath() {
     } catch {}
   } else {
     newRoomPath.value = fsPath.value
+    if (!newRoomName.value) {
+      const parts = fsPath.value.split('/').filter(Boolean)
+      newRoomName.value = parts[parts.length - 1] || ''
+    }
   }
   showWorkspacePicker.value = false
 }
