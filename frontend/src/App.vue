@@ -917,7 +917,7 @@ onMounted(async () => {
       <pre v-else class="file-view">{{ fileContent }}</pre>
     </div>
 
-    <div v-if="showModelPicker" class="modal-overlay model-picker-overlay" @click="showModelPicker = false">
+    <div v-if="showModelPicker" class="modal-overlay" style="z-index: 400" @click="showModelPicker = false">
       <div class="modal" @click.stop>
         <div class="modal-head">{{ pickerRole }} 모델 선택</div>
         <div
