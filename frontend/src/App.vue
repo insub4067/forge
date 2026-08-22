@@ -78,6 +78,22 @@ const kanbanOpen = ref({
 
 let touchStartX = 0
 let touchStartY = 0
+let mainStartX = 0
+let mainStartY = 0
+
+function onMainTouchStart(e) {
+  mainStartX = e.touches[0].clientX
+  mainStartY = e.touches[0].clientY
+}
+
+function onMainTouchEnd(e) {
+  const dx = e.changedTouches[0].clientX - mainStartX
+  const dy = e.changedTouches[0].clientY - mainStartY
+  // 왼쪽 가장자리에서 오른쪽으로 스와이프 → 세션 드로어
+  if (mainStartX < 44 && dx > 60 && Math.abs(dx) > Math.abs(dy) * 1.4 && !showRooms.value) {
+    showRooms.value = true
+  }
+}
 
 function onRoomTouchStart(e) {
   touchStartX = e.touches[0].clientX
@@ -399,25 +415,38 @@ async function loadMessages() {
     if (!res.ok) return
     const data = await res.json()
     if (!Array.isArray(data)) return
+    // 도구 결과를 tool_call_id로 미리 매핑
+    const toolById = {}
+    for (const m of data) {
+      if (m.role === 'tool') toolById[m.tool_call_id] = m.content || ''
+    }
+    let bubble = null
     for (const m of data) {
       if (m.role === 'user') {
         messages.value.push({ role: 'user', content: m.content })
+        bubble = null
       } else if (m.role === 'assistant') {
-        const am = reactive({
-          role: 'assistant',
-          thinking: m.reasoning_content || '',
-          text: m.content || '',
-          tools: [],
-          approval: null,
+        if (!bubble) {
+          bubble = reactive({ role: 'assistant', phases: [], approval: null, context: null, state: null, doneMessage: '' })
+          messages.value.push(bubble)
+        }
+        const phase = reactive({
+          role: '', model: '', thinking: m.reasoning_content || '', text: m.content || '',
+          tools: [], collapsed: true, running: false,
         })
         for (const tc of m.tool_calls || []) {
           let args = {}
           try {
             args = JSON.parse(tc.function.arguments || '{}')
           } catch {}
-          am.tools.push({ name: tc.function.name, args, status: 'done', result: '' })
+          const result = toolById[tc.id] || ''
+          phase.tools.push({
+            name: tc.function.name, args, diff: '',
+            status: result.startsWith('오류') ? 'error' : 'done',
+            result,
+          })
         }
-        messages.value.push(am)
+        bubble.phases.push(phase)
       }
     }
     scrollBottom()
@@ -568,9 +597,52 @@ function newUser(text) {
 }
 
 function newAssistant() {
-  const m = reactive({ role: 'assistant', thinking: '', text: '', tools: [], approval: null, role_label: null })
+  const m = reactive({ role: 'assistant', phases: [], approval: null, context: null, state: null, doneMessage: '' })
   messages.value.push(m)
   return m
+}
+
+const ROLE_LABELS = {
+  planner: '계획',
+  coder: '구현',
+  reviewer: '검토',
+  debugger: '디버그',
+  chat: '응답',
+  vision: '이미지 분석',
+}
+
+function startPhase(m, role = '', model = '') {
+  m.phases.forEach((p) => {
+    p.collapsed = true
+    p.running = false
+  })
+  const p = reactive({ role, model, thinking: '', text: '', tools: [], collapsed: false, running: true })
+  m.phases.push(p)
+  return p
+}
+
+function activePhase(m) {
+  if (!m.phases.length) return startPhase(m)
+  return m.phases[m.phases.length - 1]
+}
+
+function phaseLabel(p) {
+  if (p.role && ROLE_LABELS[p.role]) return ROLE_LABELS[p.role]
+  const names = p.tools.map((t) => t.name)
+  if (names.some((n) => n === 'write_file' || n === 'edit_file')) return '편집'
+  if (names.includes('bash')) return '실행'
+  if (names.some((n) => ['read_file', 'list_dir', 'grep'].includes(n))) return '탐색'
+  return '응답'
+}
+
+function phaseStatus(p) {
+  if (p.running) return 'running'
+  if (p.tools.some((t) => t.status === 'error')) return 'error'
+  return 'done'
+}
+
+function runningTool(p) {
+  return p.tools.find((t) => t.status === 'running')
 }
 
 function summarizeArgs(args) {
@@ -595,24 +667,31 @@ function diffClass(line) {
 function handleEvent(evt, assistant) {
   const d = evt.data || {}
   switch (evt.type) {
+    case 'role_start':
+      startPhase(assistant, d.role, d.model)
+      break
     case 'thinking_delta':
-      assistant.thinking += d.content || ''
+      activePhase(assistant).thinking += d.content || ''
       break
     case 'text_delta':
-      assistant.text += d.content || ''
+      activePhase(assistant).text += d.content || ''
       break
     case 'tool_call':
-      assistant.tools.push({ name: d.name, args: d.args, status: 'running', result: '' })
+      activePhase(assistant).tools.push({ name: d.name, args: d.args, status: 'running', result: '', diff: '' })
       break
     case 'tool_result': {
-      const t = assistant.tools.find((x) => x.status === 'running')
+      const p = activePhase(assistant)
+      const t = [...p.tools].reverse().find((x) => x.status === 'running')
       if (t) {
-        t.status = 'done'
+        t.status = (d.result || '').startsWith('오류') ? 'error' : 'done'
         t.result = d.result || ''
         t.diff = d.diff || ''
       }
       break
     }
+    case 'state_update':
+      assistant.state = d
+      break
     case 'approval_request':
       assistant.approval = { id: d.id, tool: d.tool, args: d.args }
       break
@@ -626,19 +705,23 @@ function handleEvent(evt, assistant) {
     case 'task_update':
       tasks.value = d.tasks || []
       break
-    case 'role_start':
-      assistant.role_label = d.role
+    case 'user_injected':
+      activePhase(assistant).tools.push({
+        name: '사용자 메시지', args: {}, status: 'done', result: d.content || '', diff: '',
+      })
       break
     case 'error':
-      assistant.text += '\n\n오류: ' + (d.message || '')
+      activePhase(assistant).text += '\n\n오류: ' + (d.message || '')
       break
     case 'context_usage':
       assistant.context = d
       break
     case 'done':
-      if (d.content) {
-        assistant.text = d.content
-      }
+      assistant.phases.forEach((p) => {
+        p.running = false
+        p.collapsed = true
+      })
+      if (d.content) assistant.doneMessage = d.content
       break
   }
   scrollBottom()
@@ -711,7 +794,8 @@ async function send() {
     while (true) {
       const { done, value } = await reader.read()
       if (done) {
-        console.log('[forge] 스트림 종료. chunk:', chunkCount, '이벤트:', eventCount, 'text길이:', assistant.text.length)
+        // 스트림이 done 이벤트 없이 끝나도(에러 등) phase가 running에 멈추지 않도록 마무리
+        assistant.phases.forEach((p) => { p.running = false })
         break
       }
       chunkCount++
@@ -947,7 +1031,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <main ref="chatEl">
+    <main ref="chatEl" @touchstart.passive="onMainTouchStart" @touchend.passive="onMainTouchEnd">
       <div v-if="messages.length === 0" class="welcome">
         <div class="welcome-brand">FORGE</div>
         <p class="welcome-title">무엇을 작업할까요?</p>
@@ -965,25 +1049,51 @@ onMounted(async () => {
           <div v-if="m.role === 'user'" class="user-text">{{ m.content }}</div>
 
           <template v-if="m.role === 'assistant'">
-            <div v-if="m.role_label" class="role-badge">{{ m.role_label }}</div>
-
-            <details v-if="m.thinking" class="thinking">
-              <summary>추론</summary>
-              <div class="thinking-body">{{ m.thinking }}</div>
-            </details>
-
-            <div v-if="m.text" class="text" v-html="renderMarkdown(m.text)"></div>
-
-            <details v-for="(t, j) in m.tools" :key="j" class="tool" :class="{ running: t.status === 'running' }" open>
-              <summary>
-                <span class="tname">{{ t.name }}</span>
-                <span class="targs">{{ summarizeArgs(t.args) }}</span>
-              </summary>
-              <div v-if="t.diff" class="diff">
-                <div v-for="(line, li) in diffLines(t.diff)" :key="li" :class="diffClass(line)">{{ line || ' ' }}</div>
+            <div v-for="(p, pi) in m.phases" :key="pi" class="activity" :class="phaseStatus(p)">
+              <div
+                v-if="p.tools.length || p.thinking"
+                class="activity-head"
+                @click="p.collapsed = !p.collapsed"
+              >
+                <span class="activity-dot" :class="phaseStatus(p)"></span>
+                <span class="activity-label">{{ phaseLabel(p) }}</span>
+                <span v-if="p.running && runningTool(p)" class="activity-live">{{ runningTool(p).name }} 실행 중…</span>
+                <span v-else-if="p.tools.length" class="activity-count">도구 {{ p.tools.length }}</span>
+                <svg class="activity-chevron" :class="{ open: !p.collapsed }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
               </div>
-              <pre v-else>{{ t.status === 'running' ? '실행 중…' : (t.result || '(출력 없음)') }}</pre>
-            </details>
+
+              <div v-if="p.text" class="text" v-html="renderMarkdown(p.text)"></div>
+
+              <template v-if="!p.collapsed">
+                <details v-if="p.thinking" class="thinking">
+                  <summary>추론</summary>
+                  <div class="thinking-body">{{ p.thinking }}</div>
+                </details>
+
+                <details
+                  v-for="(t, j) in p.tools"
+                  :key="j"
+                  class="tool"
+                  :class="t.status"
+                  :open="t.status === 'running'"
+                >
+                  <summary>
+                    <span class="tool-dot" :class="t.status"></span>
+                    <span class="tname">{{ t.name }}</span>
+                    <span class="targs">{{ summarizeArgs(t.args) }}</span>
+                  </summary>
+                  <div v-if="t.diff" class="diff">
+                    <div v-for="(line, li) in diffLines(t.diff)" :key="li" :class="diffClass(line)">{{ line || ' ' }}</div>
+                  </div>
+                  <pre v-else>{{ t.status === 'running' ? '실행 중…' : (t.result || '(출력 없음)') }}</pre>
+                </details>
+              </template>
+            </div>
+
+            <div v-if="m.state && (m.state.files_changed?.length || m.state.errors?.length)" class="state-summary">
+              <span v-if="m.state.files_changed?.length" class="state-chip">변경 {{ m.state.files_changed.length }}</span>
+              <span v-if="m.state.errors?.length" class="state-chip err">오류 {{ m.state.errors.length }}</span>
+            </div>
 
             <div v-if="m.approval" class="approval">
               <div class="approval-head">도구 실행 승인이 필요합니다</div>
@@ -993,6 +1103,8 @@ onMounted(async () => {
                 <button class="no" @click="decide(m.approval, 'reject')">거부</button>
               </div>
             </div>
+
+            <div v-if="m.doneMessage" class="done-msg">{{ m.doneMessage }}</div>
 
             <div v-if="m.context" class="context">
               context {{ m.context.prompt_tokens + m.context.completion_tokens }} tokens

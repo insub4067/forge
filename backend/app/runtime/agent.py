@@ -303,6 +303,11 @@ class AgentRuntime:
         await send("role_start", {"role": role, "model": route["model"], "thinking": route["thinking"]})
         system_msg = {"role": "system", "content": _system_for(role, room_memory)}
 
+        # 이전 role(thinking on)이 남긴 reasoning_content는 이후 호출에서
+        # DeepSeek이 거부하므로 제거한다. 현재 role의 tool-loop 내부 reasoning은 유지.
+        for msg in all_messages:
+            msg.pop("reasoning_content", None)
+
         total_prompt = 0
         total_completion = 0
 

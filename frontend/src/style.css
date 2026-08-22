@@ -1844,3 +1844,95 @@ button {
   margin-top: 2px; font-size: 11px; color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+/* ===== Agent Activity 카드 ===== */
+.activity {
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--panel);
+}
+.activity.running {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+.activity.error {
+  border-color: color-mix(in srgb, #f87171 45%, var(--border));
+}
+.activity-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.activity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--muted);
+}
+.activity-dot.running { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.activity-dot.done { background: #3fb950; }
+.activity-dot.error { background: #f87171; }
+.activity-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.activity-live {
+  font-size: 12px;
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.activity-count {
+  font-size: 12px;
+  color: var(--muted);
+}
+.activity-chevron {
+  margin-left: auto;
+  color: var(--muted);
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+.activity-chevron.open { transform: rotate(180deg); }
+.activity .text {
+  padding: 0 12px 10px;
+}
+.activity .thinking,
+.activity .tool {
+  margin: 0 10px 8px;
+}
+.tool-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--muted);
+  margin-right: 2px;
+}
+.tool-dot.running { background: var(--accent); }
+.tool-dot.done { background: #3fb950; }
+.tool-dot.error { background: #f87171; }
+.state-summary {
+  display: flex;
+  gap: 6px;
+  margin: 6px 0 2px;
+}
+.state-chip {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+}
+.state-chip.err { color: #f87171; }
+.done-msg {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
