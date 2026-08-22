@@ -1398,11 +1398,11 @@ footer {
 .composer {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 12px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 20px;
-  padding: 8px 10px 6px;
+  padding: 10px 12px;
 }
 
 .composer:focus-within {
