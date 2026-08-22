@@ -1119,11 +1119,12 @@ main {
   align-items: flex-end;
 }
 
+/* 사용자 말풍선은 얕게 — 강조색 대신 패널색 알약(클로드식) */
 .msg.user .bubble {
-  background: var(--accent);
-  color: #fff;
-  border-radius: 20px 20px 6px 20px;
-  padding: 11px 16px;
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 18px;
+  padding: 10px 15px;
   max-width: 82%;
   word-break: break-word;
   font-size: 15.5px;
@@ -3109,3 +3110,4 @@ button {
   max-width: 100%;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
 }
+

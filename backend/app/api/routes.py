@@ -229,7 +229,7 @@ async def chat(req: Request):
 @router.post("/rooms")
 async def create_room(req: Request):
     body = await req.json()
-    name = str(body.get("name", "")).strip() or "새 방"
+    name = str(body.get("name", "")).strip() or "Forge"
     workspace_path = str(body.get("workspace_path", "")).strip()
     room_id = await store.create_room(name, workspace_path)
     return await store.get_room(room_id)

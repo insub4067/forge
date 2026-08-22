@@ -1003,8 +1003,7 @@ async function loadTasks() {
 }
 
 async function createRoom() {
-  const name = newRoomName.value.trim()
-  if (!name) return
+  const name = newRoomName.value.trim() || 'Forge'
   // 워크스페이스는 필수 — 미선택 시 홈으로 잘못 잡혀 git·skills가 깨진다.
   if (!newRoomPath.value.trim()) {
     alert('워크스페이스 폴더를 선택하세요.')
@@ -1326,10 +1325,8 @@ async function pickCurrentPath() {
     } catch {}
   } else {
     newRoomPath.value = fsPath.value
-    if (!newRoomName.value) {
-      const parts = fsPath.value.split('/').filter(Boolean)
-      newRoomName.value = parts[parts.length - 1] || ''
-    }
+    const parts = fsPath.value.split('/').filter(Boolean)
+    newRoomName.value = parts[parts.length - 1] || 'Forge'
   }
   showWorkspacePicker.value = false
 }
@@ -1340,7 +1337,7 @@ async function ensureRoom(text) {
     const res = await fetch('/api/rooms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: text.slice(0, 40), workspace_path: '' }),
+      body: JSON.stringify({ name: 'Forge', workspace_path: '' }),
     })
     if (res.ok) {
       const room = await res.json()
@@ -1657,6 +1654,9 @@ async function send() {
   busy.value = true
   input.value = ''
   debug.value = '전송 중…'
+  // 스트림이 done 없이 끊기면(폰 잠금·터널 재연결) 받은 만큼만 남아 본문이 잘린다.
+  let sawDone = false
+  let gotEvents = false
 
   // 백엔드로 보낼 메시지에 파일 내용 포함
   let payloadMsg = text
@@ -1713,6 +1713,8 @@ async function send() {
           eventCount++
           try {
             const evt = JSON.parse(data)
+            gotEvents = true
+            if (evt.type === 'done') sawDone = true
             if (eventCount <= 5) console.log('[forge] 이벤트', eventCount, ':', evt.type)
             handleEvent({ type: evt.type, data: evt.data }, assistant)
             debug.value = `이벤트 ${eventCount} · ${evt.type}`
@@ -1738,6 +1740,9 @@ async function send() {
       pendingSend.value = null
       input.value = t
       setTimeout(() => send(), 50)
+    } else if (gotEvents && !sawDone) {
+      // 끝까지 못 받았으면 서버 기록으로 되맞춘다(단일 진실 = 서버).
+      loadMessages(true)
     }
   }
 }
@@ -2342,7 +2347,7 @@ document.addEventListener('visibilitychange', () => {
     <div v-if="showCreateRoom" class="modal-overlay" @click="showCreateRoom = false">
       <div class="modal" @click.stop>
         <div class="modal-head">새 세션</div>
-        <input v-model="newRoomName" class="modal-field" placeholder="세션 이름" />
+        <input v-model="newRoomName" class="modal-field" placeholder="세션 이름 (기본: Forge)" />
         <button type="button" class="modal-field ws-btn" @click="openWorkspacePicker(null)">
           {{ newRoomPath || '워크스페이스 폴더 선택 (선택 사항)' }}
         </button>
