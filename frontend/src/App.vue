@@ -78,6 +78,13 @@ function currentRoom() {
   return rooms.value.find((r) => r.id === currentRoomId.value) || null
 }
 
+function shortPath(p) {
+  if (!p) return ''
+  const parts = p.split('/').filter(Boolean)
+  if (parts.length <= 2) return p
+  return parts.slice(-2).join('/')
+}
+
 function ctxPct(room) {
   const used = room?.used_tokens || 0
   const budget = room?.logical_budget || 262144
@@ -458,10 +465,6 @@ onMounted(async () => {
 <template>
   <div class="app">
     <header>
-      <button class="room-btn" @click="showRooms = !showRooms">
-        <span class="dot"></span>
-        <span class="room-name">{{ currentRoom()?.title || 'FORGE' }}</span>
-      </button>
       <svg class="ctx" viewBox="0 0 36 36">
         <circle class="ctx-bg" cx="18" cy="18" r="15" pathLength="100" />
         <circle
@@ -474,10 +477,14 @@ onMounted(async () => {
           :class="ctxClass(ctxPct(currentRoom()))"
         />
       </svg>
-      <span class="version">v{{ version }}</span>
-      <button @click="showKanban = true">칸반</button>
-      <button v-if="busy" @click="cancelSession">중단</button>
-      <button @click="resetSession">+</button>
+      <button class="room-btn" @click="showRooms = !showRooms">
+        <span class="room-title-main">{{ currentRoom()?.title || 'FORGE' }}</span>
+        <span class="room-sub">{{ shortPath(currentRoom()?.workspace_path) }}</span>
+      </button>
+      <button v-if="busy" class="stop-btn" @click="cancelSession">중단</button>
+      <button class="todo-btn" @click="showKanban = true" aria-label="칸반">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 10l2 2 4-4"/><line x1="8" y1="16" x2="16" y2="16"/></svg>
+      </button>
     </header>
 
     <div v-if="showRooms" class="rooms-overlay" @click="showRooms = false">
