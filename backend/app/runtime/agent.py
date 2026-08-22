@@ -24,6 +24,8 @@ CONTEXT_BLOCK_RATIO = 0.95
 # 이 비율을 넘으면 오래된 대화를 요약해 모델 컨텍스트를 압축한다(비파괴 — 표시/저장용 원본은 유지).
 CONTEXT_COMPACT_RATIO = 0.75
 COMPACT_KEEP_RECENT = 8
+# 부수효과·승인이 없는 읽기 전용 도구 — 한 응답에 여러 개면 병렬 실행 가능
+READ_ONLY_TOOLS = {"read_file", "list_dir", "grep"}
 # Reviewer↔Debugger 자기수정 루프의 최대 검증 사이클.
 # ModelRouter의 debugger Pro 승격 임계(retry_count>=3)와 맞물려,
 # 마지막(3번째) Debugger 시도가 Pro로 승격된다.
@@ -621,6 +623,20 @@ class AgentRuntime:
             if not tool_calls:
                 return "done", total_prompt, total_completion, route
 
+            # 읽기 전용 도구가 여러 개면 I/O만 병렬 prefetch(이벤트·순서는 루프에서 그대로 순차 처리).
+            prefetched: dict[str, tuple] = {}
+            readonly = [t for t in tool_calls if t["function"]["name"] in READ_ONLY_TOOLS]
+            if len(readonly) > 1:
+                async def _prefetch(t):
+                    try:
+                        a = json.loads(t["function"]["arguments"] or "{}")
+                        return t["id"], await execute_tool(t["function"]["name"], a, ws)
+                    except Exception as err:
+                        return t["id"], (f"오류: {err}", "")
+                results = await asyncio.gather(*[_prefetch(t) for t in readonly])
+                prefetched = dict(results)
+                await send("parallel_tools", {"count": len(readonly)})
+
             for tc in tool_calls:
                 if session_id in self._cancel_sessions:
                     return "cancelled", total_prompt, total_completion, route
@@ -685,7 +701,10 @@ class AgentRuntime:
 
                 diff = ""
                 try:
-                    result, diff = await execute_tool(name, args, ws)
+                    if tc["id"] in prefetched:
+                        result, diff = prefetched[tc["id"]]  # 병렬 prefetch된 읽기 결과
+                    else:
+                        result, diff = await execute_tool(name, args, ws)
                     if name in ("write_file", "edit_file") and not result.startswith("오류"):
                         state["files_changed"].append(str(args.get("path")))
                 except Exception as err:
