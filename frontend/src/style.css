@@ -1092,8 +1092,9 @@ main {
 
 .text {
   word-break: break-word;
-  font-size: 15.5px;
-  line-height: 1.72;
+  font-size: 15px;
+  line-height: 1.7;
+  letter-spacing: -0.011em;
 }
 
 .role-badge {
@@ -1393,7 +1394,8 @@ footer {
   left: 0;
   right: 0;
   bottom: 0;
-  padding: 10px 14px max(8px, env(safe-area-inset-bottom));
+  /* SafeArea를 상당 부분 무시하고 화면 하단에 밀착 → 개방감(Claude식) */
+  padding: 8px 12px max(8px, calc(env(safe-area-inset-bottom) - 20px));
   border-top: none;
   background: transparent;
   pointer-events: none;
@@ -2388,10 +2390,11 @@ button {
 /* ===== 답변 가시성 개선 ===== */
 .text {
   color: var(--text);
-  font-size: 16px;
-  line-height: 1.75;
+  font-size: 15px;
+  line-height: 1.7;
+  letter-spacing: -0.011em;
 }
-.text p { margin: 11px 0; }
+.text p { margin: 10px 0; }
 .text strong, .text b {
   font-weight: 700;
   color: var(--text);
