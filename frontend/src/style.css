@@ -818,7 +818,18 @@ main {
   color: var(--muted);
   margin: auto 0;
   padding: 0 8px;
+  animation: welcome-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+@keyframes welcome-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+/* 로고·타이틀·퀵액션 순차 등장 */
+.welcome-logo { animation: welcome-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.welcome-brand { animation: welcome-in 0.5s 0.06s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.welcome-title { animation: welcome-in 0.5s 0.12s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.welcome .sub { animation: welcome-in 0.5s 0.18s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.quick-actions { animation: welcome-in 0.5s 0.24s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
 .welcome-brand {
   font-size: 13px;
