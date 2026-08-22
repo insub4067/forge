@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+httpx
+sse-starlette
+sqlalchemy[asyncio]
+psycopg[binary]
+redis
+pydantic-settings
+python-dotenv
