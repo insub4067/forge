@@ -24,6 +24,24 @@ const showSkills = ref(false)
 const skills = ref([])
 const searchQuery = ref('')
 const searchResults = ref([])
+const theme = ref(localStorage.getItem('forge_theme') || 'dark')
+const THEMES = [
+  { id: 'dark', label: '코랄', c: '#d97757', bg: '#262523' },
+  { id: 'gold', label: '골드', c: '#d9a66f', bg: '#11100f' },
+  { id: 'paper', label: '페이퍼', c: '#a67c52', bg: '#faf5e6' },
+  { id: 'light', label: '라이트', c: '#8a6d3b', bg: '#ffffff' },
+]
+
+function applyTheme(id) {
+  if (id === 'dark') document.documentElement.removeAttribute('data-theme')
+  else document.documentElement.setAttribute('data-theme', id)
+}
+
+function setTheme(id) {
+  theme.value = id
+  localStorage.setItem('forge_theme', id)
+  applyTheme(id)
+}
 let searchTimer = null
 
 function onSearch() {
@@ -1100,6 +1118,8 @@ watch(busy, (v) => {
   window.__forgeBusy = v
 })
 
+applyTheme(theme.value)
+
 onMounted(async () => {
   await loadRooms()
   // 유효한 현재 세션이 없으면 가장 최근 세션으로 랜딩
@@ -1168,6 +1188,20 @@ document.addEventListener('visibilitychange', () => {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           <span>관리자</span>
         </div>
+        <div class="theme-row">
+          <span class="theme-label">테마</span>
+          <button
+            v-for="t in THEMES"
+            :key="t.id"
+            class="theme-swatch"
+            :class="{ active: theme === t.id }"
+            :style="{ background: t.bg }"
+            :title="t.label"
+            @click.stop="setTheme(t.id)"
+          >
+            <span class="theme-dot" :style="{ background: t.c }"></span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -1232,6 +1266,7 @@ document.addEventListener('visibilitychange', () => {
 
     <main ref="chatEl" @scroll.passive="onChatScroll" @touchstart.passive="onMainTouchStart" @touchend.passive="onMainTouchEnd">
       <div v-if="messages.length === 0" class="welcome">
+        <img src="/logo.svg" class="welcome-logo" alt="FORGE" />
         <div class="welcome-brand">FORGE</div>
         <p class="welcome-title">무엇을 작업할까요?</p>
         <p class="sub">{{ shortPath(currentRoom()?.workspace_path) || '워크스페이스 미설정' }}에서 자율로 작업합니다.</p>
@@ -1287,6 +1322,11 @@ document.addEventListener('visibilitychange', () => {
                   <pre v-else>{{ t.status === 'running' ? '실행 중…' : (t.result || '(출력 없음)') }}</pre>
                 </details>
               </template>
+            </div>
+
+            <div v-if="busy && i === messages.length - 1" class="typing">
+              <span class="typing-label">작성 중</span>
+              <span class="typing-dots"><i></i><i></i><i></i></span>
             </div>
 
             <div v-if="(m.state && (m.state.files_changed?.length || m.state.errors?.length)) || m.compacted" class="state-summary">
