@@ -138,6 +138,25 @@ TOOL_SCHEMAS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_skill",
+            "description": (
+                "이번 작업에서 발견한, 앞으로 반복될 만한 문제 해결 절차를 재사용 가능한 skill로 저장한다. "
+                "단순 사실(memory)이 아니라 '이런 상황에서 이렇게 확인·수정한다'는 절차를 담는다. "
+                "여러 단계로 성공했고 재사용 가치가 확실할 때만 호출한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "skill 식별자 (예: fastapi-sse-debug)"},
+                    "content": {"type": "string", "description": "절차를 담은 마크다운. 언제 쓰는지, 확인 순서, 명령/체크포인트."},
+                },
+                "required": ["name", "content"],
+            },
+        },
+    },
 ]
 
 # chat 에이전트는 읽기·질문만 — 코드 수정/실행 도구는 제외한다.
@@ -146,7 +165,7 @@ CHAT_TOOLS = [
     if t["function"]["name"] in {"read_file", "list_dir", "grep", "ask_user"}
 ]
 
-APPROVAL_REQUIRED = {"write_file", "edit_file", "bash"}
+APPROVAL_REQUIRED = {"write_file", "edit_file", "bash", "save_skill"}
 BLOCKED_COMMANDS = ["rm -rf", "git push", "sudo ", "chmod 777"]
 
 
@@ -231,6 +250,15 @@ async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]
         out: list[str] = []
         _grep(p, str(args["pattern"]), args.get("include"), out)
         return "\n".join(out[:100]) or "검색 결과 없음", ""
+    if name == "save_skill":
+        import re as _re
+        raw = str(args.get("name", "")).strip()
+        safe = _re.sub(r"[^a-zA-Z0-9_-]+", "-", raw).strip("-").lower() or "skill"
+        sdir = Path(workspace) / ".forge" / "skills"
+        sdir.mkdir(parents=True, exist_ok=True)
+        path = sdir / f"{safe}.md"
+        path.write_text(str(args.get("content", "")), encoding="utf-8")
+        return f"skill을 저장했습니다: {safe}", ""
     if name == "write_file":
         p = _resolve(workspace, str(args["path"]))
         old_text = p.read_text(encoding="utf-8", errors="replace") if p.exists() else ""

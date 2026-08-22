@@ -1038,12 +1038,6 @@ async function answerQuestion(q, answer) {
   } catch {}
 }
 
-async function cancelSession() {
-  try {
-    await fetch(`/api/sessions/${currentRoomId.value}/cancel`, { method: 'POST' })
-  } catch {}
-}
-
 function resetSession() {
   showCreateRoom.value = true
 }
@@ -1122,10 +1116,6 @@ document.addEventListener('visibilitychange', () => {
         <div class="menu-item" @click="openAdmin(); showMenu = false">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           <span>관리자</span>
-        </div>
-        <div v-if="busy" class="menu-item danger" @click="cancelSession(); showMenu = false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-          <span>중단</span>
         </div>
       </div>
     </div>
@@ -1254,14 +1244,6 @@ document.addEventListener('visibilitychange', () => {
             <div v-if="m.context" class="context">
               context {{ m.context.prompt_tokens + m.context.completion_tokens }} tokens
             </div>
-
-            <button
-              v-if="busy && i === messages.length - 1"
-              class="bubble-stop"
-              @click="cancelSession"
-            >
-              <span class="bubble-stop-dot"></span>중단
-            </button>
 
             <div v-if="hasAssistantText(m) && !(busy && i === messages.length - 1)" class="msg-actions">
               <button class="msg-action" @click="copyMessage(m)">

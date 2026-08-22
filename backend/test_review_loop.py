@@ -13,7 +13,7 @@ def make_runtime(role_status="done"):
     calls = []  # (role, retry_count)
 
     async def fake_run_role(role, all_messages, send, session_id, ws, state,
-                            recent_calls, step_base, room_memory="", retry_count=0, tools=None):
+                            recent_calls, step_base, room_memory="", retry_count=0, tools=None, skills=""):
         calls.append((role, retry_count))
         # 시나리오별로 role_status를 콜러블로 줄 수 있게
         st = role_status(role, len(calls)) if callable(role_status) else role_status

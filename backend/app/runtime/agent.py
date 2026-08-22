@@ -78,8 +78,9 @@ BASE_PROMPT = """당신은 FORGE 에이전틱 코딩 에이전트의 일부입�
 
 ## 환경
 - 워크스페이스: 로컬 마운트 디렉터리
-- 도구: read_file, list_dir, grep, write_file, edit_file, bash, ask_user, update_tasks
-- write_file/edit_file/bash는 사용자 승인이 필요하다."""
+- 도구: read_file, list_dir, grep, write_file, edit_file, bash, ask_user, update_tasks, save_skill
+- write_file/edit_file/bash/save_skill는 사용자 승인이 필요하다.
+- 축적된 Skill이 있으면 관련 작업에서 우선 활용한다. 여러 단계로 성공했고 앞으로 반복될 절차라면 save_skill로 저장해 다음에 재사용한다."""
 
 
 def _prune_tool_result(text: str, head: int = 2500, tail: int = 1200) -> str:
@@ -121,13 +122,32 @@ def _load_room_memory(workspace: str) -> str:
     return ""
 
 
-def _system_for(role: str, room_memory: str = "") -> str:
+def _load_skills(workspace: str) -> str:
+    """워크스페이스의 .forge/skills/*.md 를 모아 반환한다(축적된 재사용 절차)."""
+    sdir = Path(workspace) / ".forge" / "skills"
+    if not sdir.is_dir():
+        return ""
+    blocks: list[str] = []
+    for p in sorted(sdir.glob("*.md")):
+        try:
+            blocks.append(f"### skill: {p.stem}\n" + p.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    return "\n\n".join(blocks)
+
+
+def _system_for(role: str, room_memory: str = "", skills: str = "") -> str:
     parts = [BASE_PROMPT]
     global_mem = _load_global_memory()
     if global_mem:
         parts.append("\n\n## 전역 메모리 (GLOBAL_MEMORY.md)\n" + global_mem)
     if room_memory:
         parts.append("\n\n## 방 메모리 (ROOM_MEMORY.md)\n" + room_memory)
+    if skills:
+        parts.append(
+            "\n\n## 축적된 Skill (재사용 가능한 해결 절차)\n"
+            "관련 작업이면 아래 절차를 우선 활용하라.\n" + skills
+        )
     parts.append("\n\n" + _load_role(role))
     return "".join(parts)
 
@@ -502,11 +522,12 @@ class AgentRuntime:
         room_memory: str = "",
         retry_count: int = 0,
         tools: list[dict] | None = None,
+        skills: str = "",
     ) -> tuple:
         route = self.router.select_model(role, retry_count)
         tool_schemas = tools if tools is not None else TOOL_SCHEMAS
         await send("role_start", {"role": role, "model": route["model"], "thinking": route["thinking"]})
-        system_msg = {"role": "system", "content": _system_for(role, room_memory)}
+        system_msg = {"role": "system", "content": _system_for(role, room_memory, skills)}
 
         total_prompt = 0
         total_completion = 0
@@ -752,6 +773,7 @@ class AgentRuntime:
         recent_calls: list[str] = []
         all_messages: list[dict] = [*history]
         room_memory = _load_room_memory(ws)
+        skills = _load_skills(ws)
 
         # 이미지가 포함된 요청이면 Vision 에이전트로 먼저 분석
         last_user = history[-1] if history and history[-1].get("role") == "user" else None
@@ -779,7 +801,7 @@ class AgentRuntime:
         if triage_route == "chat":
             status, p, c, route = await self._run_role(
                 "chat", all_messages, send, session_id, ws, state, recent_calls,
-                step_base, room_memory, tools=CHAT_TOOLS,
+                step_base, room_memory, tools=CHAT_TOOLS, skills=skills,
             )
             await record("chat", p, c, route)
             if status != "done":
@@ -790,7 +812,7 @@ class AgentRuntime:
 
         # 1. Planner
         status, p, c, route = await self._run_role(
-            "planner", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
+            "planner", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory, skills=skills
         )
         await record("planner", p, c, route)
         step_base += MAX_STEPS
@@ -800,7 +822,7 @@ class AgentRuntime:
 
         # 2. Coder
         status, p, c, route = await self._run_role(
-            "coder", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
+            "coder", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory, skills=skills
         )
         await record("coder", p, c, route)
         step_base += MAX_STEPS
@@ -817,7 +839,7 @@ class AgentRuntime:
         final_status = "completed"
         while True:
             status, p, c, route = await self._run_role(
-                "reviewer", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory
+                "reviewer", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory, skills=skills
             )
             await record("reviewer", p, c, route)
             step_base += MAX_STEPS
@@ -842,7 +864,7 @@ class AgentRuntime:
                 # retry_count가 임계(3)에 도달하면 마지막 시도가 Pro로 승격된다.
                 status, p, c, route = await self._run_role(
                     "debugger", all_messages, send, session_id, ws, state,
-                    recent_calls, step_base, room_memory, retry_count=debug_attempts,
+                    recent_calls, step_base, room_memory, retry_count=debug_attempts, skills=skills,
                 )
                 await record("debugger", p, c, route)
                 step_base += MAX_STEPS
