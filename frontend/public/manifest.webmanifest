@@ -1,6 +1,6 @@
 {
-  "name": "FORGE",
-  "short_name": "FORGE",
+  "name": "에이전트",
+  "short_name": "에이전트",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0b0d12",
