@@ -62,6 +62,8 @@ const adminBalance = ref(null)
 const adminPolicyOpen = ref(false)
 const adminErrors = ref([])
 const adminErrorsOpen = ref(false)
+const showSessionDetail = ref(false)
+const sessionRuns = ref([])
 const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
 const attachedImage = ref(null)
 const fileInput = ref(null)
@@ -134,6 +136,40 @@ function openAdmin() {
   loadAdmin()
   loadBalance()
   loadErrors()
+}
+
+async function openSessionDetail() {
+  const id = currentRoomId.value
+  if (!id) return
+  showSessionDetail.value = true
+  sessionRuns.value = []
+  try {
+    const res = await fetch(`/api/rooms/${id}/runs`)
+    if (res.ok) sessionRuns.value = await res.json()
+  } catch {}
+}
+
+function sessionTokenTotals() {
+  let prompt = 0, completion = 0
+  for (const r of sessionRuns.value) {
+    prompt += r.prompt_tokens || 0
+    completion += r.completion_tokens || 0
+  }
+  return { prompt, completion, total: prompt + completion }
+}
+
+function sessionRoleBreakdown() {
+  const agg = {}
+  for (const r of sessionRuns.value) {
+    const k = r.role || '기타'
+    if (!agg[k]) agg[k] = { role: k, count: 0, prompt: 0, completion: 0 }
+    agg[k].count++
+    agg[k].prompt += r.prompt_tokens || 0
+    agg[k].completion += r.completion_tokens || 0
+  }
+  return Object.values(agg)
+    .map((a) => ({ ...a, total: a.prompt + a.completion }))
+    .sort((a, b) => b.total - a.total)
 }
 
 function refreshAdmin() {
@@ -807,7 +843,7 @@ onMounted(async () => {
         </span>
       </button>
       <button v-if="busy" class="stop-btn" @click="cancelSession">중단</button>
-      <button class="ctx-btn" @click="openAdmin" aria-label="컨텍스트 사용량">
+      <button class="ctx-btn" @click="openSessionDetail" aria-label="컨텍스트 사용량">
         <svg class="ctx" viewBox="0 0 36 36">
           <circle class="ctx-bg" cx="18" cy="18" r="15" pathLength="100" />
           <circle
@@ -1230,6 +1266,55 @@ onMounted(async () => {
         </div>
 
         <div class="admin-version">v{{ version }}</div>
+      </div>
+    </div>
+
+    <div v-if="showSessionDetail" class="kanban-overlay">
+      <div class="kanban-head">
+        <span class="kanban-title">{{ currentRoom()?.title || '세션' }} · 사용량</span>
+        <button @click="showSessionDetail = false">닫기</button>
+      </div>
+      <div class="admin-body">
+        <div class="admin-section">
+          <div class="admin-stat-title">컨텍스트 윈도우 (최근 호출)</div>
+          <div class="admin-big">{{ ctxPct(currentRoom()) }}%</div>
+          <div class="ctx-bar">
+            <div class="ctx-bar-fill" :class="ctxClass(ctxPct(currentRoom()))" :style="{ width: ctxPct(currentRoom()) + '%' }"></div>
+          </div>
+          <div class="admin-sub">
+            {{ formatTokens(currentRoom()?.used_tokens) }} / {{ formatTokens(currentRoom()?.logical_budget) }} tokens
+          </div>
+        </div>
+
+        <div class="admin-section">
+          <div class="admin-stat-title">누적 토큰 (세션 전체)</div>
+          <div class="admin-big">{{ formatTokens(sessionTokenTotals().total) }}</div>
+          <div class="admin-sub">
+            prompt {{ formatTokens(sessionTokenTotals().prompt) }} · completion {{ formatTokens(sessionTokenTotals().completion) }}
+          </div>
+        </div>
+
+        <div class="admin-section">
+          <div class="admin-stat-title">에이전트별 사용량</div>
+          <div v-for="a in sessionRoleBreakdown()" :key="a.role" class="admin-row">
+            <span>{{ a.role }} <span class="run-count">×{{ a.count }}</span></span>
+            <span class="mono">{{ formatTokens(a.total) }}</span>
+          </div>
+          <div v-if="!sessionRuns.length" class="admin-sub">기록 없음</div>
+        </div>
+
+        <div v-if="sessionRuns.length" class="admin-section">
+          <div class="admin-stat-title">실행 이력</div>
+          <div v-for="(r, i) in sessionRuns" :key="i" class="run-item">
+            <div class="run-head">
+              <span class="run-role">{{ r.role }}</span>
+              <span class="run-model">{{ r.model }}</span>
+            </div>
+            <div class="run-meta">
+              prompt {{ formatTokens(r.prompt_tokens) }} · completion {{ formatTokens(r.completion_tokens) }}<span v-if="r.thinking_enabled"> · thinking {{ r.reasoning_effort }}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 

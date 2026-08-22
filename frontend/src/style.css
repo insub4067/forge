@@ -1813,3 +1813,34 @@ button {
     transition-duration: 0.01ms !important;
   }
 }
+
+.ctx-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  overflow: hidden;
+  margin: 10px 0 6px;
+}
+.ctx-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+.ctx-bar-fill.ok { background: #34d399; }
+.ctx-bar-fill.notice { background: #f0c76a; }
+.ctx-bar-fill.warn { background: #f59e0b; }
+.ctx-bar-fill.danger { background: #f87171; }
+.ctx-bar-fill.crit { background: #ef4444; }
+.run-count { color: var(--muted); font-size: 12px; }
+.run-item { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.run-item:last-child { border-bottom: none; }
+.run-head { display: flex; justify-content: space-between; gap: 8px; }
+.run-role { font-size: 14px; font-weight: 600; }
+.run-model {
+  font-size: 12px; color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.run-meta {
+  margin-top: 2px; font-size: 11px; color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
