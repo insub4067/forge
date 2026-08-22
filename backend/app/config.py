@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # bash 실행 모드. "docker"(기본, 격리·안전) | "host"(호스트 직접 실행 — 자기검증·
     # 풀파워 가능하지만 에이전트가 맥 전체에 접근. 신뢰하는 개인 환경에서만 옵트인).
     sandbox_mode: str = "docker"
+    # Web Push (VAPID). public_key는 브라우저 구독용(비밀 아님). private key는 PEM 파일 경로.
+    vapid_public_key: str = "BEdgt7HlWXy3-F1M2MKCkcBrOuW0uWoUvg58WzYFA7z1GBVu9IRGy15NlRP-A1cWINwTO4x4n0HMOmgiukK3HCQ"
+    vapid_private_key_path: str = str(BASE_DIR / "vapid_private.pem")
+    vapid_subject: str = "mailto:insub4067@gmail.com"
 
 
 settings = Settings()
