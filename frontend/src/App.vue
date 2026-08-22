@@ -599,6 +599,12 @@ function maybeScrollBottom() {
   if (isAtBottom.value) scrollBottom()
 }
 
+// 버튼용 — 부드럽게 스크롤
+function jumpToBottom() {
+  if (chatEl.value) chatEl.value.scrollTo({ top: chatEl.value.scrollHeight, behavior: 'smooth' })
+  isAtBottom.value = true
+}
+
 function onChatScroll() {
   const el = chatEl.value
   if (!el) return
@@ -1154,7 +1160,7 @@ onMounted(async () => {
       </button>
     </div>
 
-    <button v-if="!isAtBottom" class="jump-bottom" @click="scrollBottom(); isAtBottom = true" aria-label="맨 아래로">
+    <button v-if="!isAtBottom" class="jump-bottom" @click="jumpToBottom" aria-label="맨 아래로">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
     </button>
 
