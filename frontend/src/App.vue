@@ -4,6 +4,9 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/github-dark.css'
+import * as pdfjsLib from 'pdfjs-dist'
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
 const _EXT_LANG = {
   js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
@@ -619,6 +622,34 @@ function _mediaKind(path) {
   for (const [kind, exts] of Object.entries(_MEDIA)) if (exts.includes(ext)) return kind
   return 'text'
 }
+const pdfContainer = ref(null)
+async function renderPdf(url) {
+  await nextTick()
+  const el = pdfContainer.value
+  if (!el) return
+  el.innerHTML = ''
+  try {
+    const pdf = await pdfjsLib.getDocument(url).promise
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    const cssWidth = Math.min(el.clientWidth || 360, 900)
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const page = await pdf.getPage(n)
+      const base = page.getViewport({ scale: 1 })
+      const scale = (cssWidth / base.width) * dpr
+      const vp = page.getViewport({ scale })
+      const canvas = document.createElement('canvas')
+      canvas.width = vp.width
+      canvas.height = vp.height
+      canvas.style.width = cssWidth + 'px'
+      canvas.style.height = (vp.height / dpr) + 'px'
+      canvas.className = 'pdf-page'
+      el.appendChild(canvas)
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise
+    }
+  } catch (e) {
+    el.textContent = 'PDF를 불러오지 못했습니다: ' + (e.message || e)
+  }
+}
 async function openFile(path) {
   const kind = _mediaKind(path)
   viewerKind.value = kind
@@ -627,6 +658,7 @@ async function openFile(path) {
     // 미디어는 원본 URL로 직접 재생/표시(텍스트로 읽지 않음)
     mediaUrl.value = `/api/fs/raw?path=${encodeURIComponent(path)}&session_id=${currentRoomId.value}`
     fileContent.value = ''
+    if (kind === 'pdf') renderPdf(mediaUrl.value)
     return
   }
   try {
@@ -2092,9 +2124,7 @@ document.addEventListener('visibilitychange', () => {
       <div v-else-if="viewerKind === 'audio'" class="media-view">
         <audio :src="mediaUrl" controls />
       </div>
-      <div v-else-if="viewerKind === 'pdf'" class="media-view">
-        <iframe :src="mediaUrl" class="pdf-frame" />
-      </div>
+      <div v-else-if="viewerKind === 'pdf'" ref="pdfContainer" class="pdf-view"></div>
       <div v-else class="code-view">
         <div class="code-gutter"><span v-for="n in fileLineCount" :key="n">{{ n }}</span></div>
         <pre class="code-body"><code v-html="highlightedContent"></code></pre>
