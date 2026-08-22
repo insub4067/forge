@@ -42,7 +42,7 @@
 - 429/5xx/timeout/connection 1/2/4초 backoff ✅
 - 이미 stream output이 발생한 뒤의 자동 retry 금지 ✅
 
-## Tool
+## Tool / Execution
 
 | Tool | 상태 | 승인 |
 |---|---|---|
@@ -56,7 +56,13 @@
 | update_tasks | ✅ | - |
 | save_skill | ✅ | 필요 |
 
-mutation 도구 실행 전 git SHA checkpoint를 기록하며 write/edit 결과는 unified diff로 노출한다.
+- Docker Sandbox 기본 실행 ✅
+- `SANDBOX_MODE=host` 옵트인 host 실행 ✅
+- `/workspace` 경로를 실제 workspace로 치환하는 host 실행 지원 ✅
+- mutation 전 git SHA checkpoint ✅
+- write/edit unified diff ✅
+
+host 모드는 격리를 우회하므로 신뢰된 개인 환경에서만 사용한다.
 
 ## Session / Persistence
 
@@ -82,9 +88,12 @@ mutation 도구 실행 전 git SHA checkpoint를 기록하며 write/edit 결과�
 - task 상태 전이 인라인 표시 ✅
 - Git changes/history/branch/diff ✅
 - workspace 경계 제한 파일 브라우저 ✅
-- Skills 확인/삭제 ✅
+- Skills 확인/삭제 + collapsible 카드 ✅
 - 세션 context/cache/efficiency metrics ✅
-- 4종 테마 + PWA 로고/홈화면 이름 ✅
+- 첨부 이미지 썸네일 + 전체화면 이미지 뷰어 ✅
+- 4종 테마 + FORGE 로고/PWA 이름 ✅
+- iOS safe-area ✅
+- history loading skeleton ✅
 - PWA 업데이트 무한 reload 방지 ✅
 - Web Push ⬜
 
@@ -92,6 +101,7 @@ mutation 도구 실행 전 git SHA checkpoint를 기록하며 write/edit 결과�
 
 - write/edit/bash/save_skill approval ✅
 - Docker Sandbox non-root/resource limit ✅
+- host 실행은 명시적 옵트인만 허용 ✅
 - session workspace 밖 `/fs/list`, `/fs/read` 접근 차단 ✅
 - cancel 시 pending approval/question 해제 ✅
 - event/action durable log ✅
