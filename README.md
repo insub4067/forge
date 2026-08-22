@@ -1,76 +1,116 @@
 # FORGE
 
-셀프호스팅 **Agent Runtime 기반 코딩 AI 플랫폼**. 자연어 요구사항을 받아 계획 → 실행 → 검토 → 수정 → 재검증을 반복하며, Mac에서 장시간 실행하고 모바일 PWA로 원격 제어한다.
+**English** | [한국어](README.ko.md)
 
-FORGE의 최상위 최적화 목표는 **동일하거나 더 높은 성공률을 유지하면서 더 적은 토큰·API 호출·시간·비용으로 작업을 끝내는 것**이다. 핵심 지표는 `tokens/task`가 아니라 **cost per successfully completed task**다.
+A self-hosted **agentic coding runtime** that turns natural-language goals into an iterative plan → execute → review → fix → re-review workflow. FORGE is designed to run for long periods on a Mac while remaining controllable from a mobile PWA.
+
+FORGE optimizes for **completing the same task with equal or better success rates using fewer tokens, API calls, time, and cost**. The primary metric is not `tokens/task`, but **cost per successfully completed task**.
 
 ```text
 User Goal
   ↓
 Triage (Flash)
   ↓
-Planner (Flash 기본 / COMPLEX만 Pro)
+Planner (Flash by default / Pro only for COMPLEX tasks)
   ↓
 Coder (Flash)
   ↓
 Reviewer (Flash)
   ↓
-Debugger (필요 시 Flash → 마지막 복구 Pro)
+Debugger (Flash → Pro only for the final recovery attempt)
   ↓
 Re-review / Done
 ```
 
-## 현재 상태
+## ⚠️ Security Warning
 
-- Phase 1 — Agent Core: 완료
-- Phase 2 — Code Modification: 완료
-- Phase 3 — Remote Operation: 진행 중
+FORGE is not a normal chat application. It is a coding agent that can read and modify files inside configured workspaces, execute shell commands, and change Git repositories.
 
-현재 구현된 핵심 기능:
+**Do not expose a FORGE instance directly to the public Internet.** Unauthorized access could potentially allow someone to:
+
+- read or modify files inside accessible workspaces
+- execute shell commands
+- modify Git repositories
+- consume configured LLM API quota or credentials indirectly
+- gain broader access to the host when host execution mode is enabled
+
+FORGE's application-level authentication should **not** be treated as a replacement for a proper network access-control layer. For remote access, place FORGE behind a trusted boundary such as **Cloudflare Zero Trust / Access, Tailscale, a VPN, or another authenticated private network**.
+
+The development deployment used by this project is protected by **explicit Cloudflare Zero Trust Access policies**. A Cloudflare Tunnel by itself does not provide user authorization; if you attach FORGE to a public hostname through a tunnel, configure Cloudflare Access policies separately.
+
+Keep the default Docker sandbox enabled whenever possible. `SANDBOX_MODE=host` should only be used in a trusted personal environment when you understand the implications. **Never expose host execution mode to an untrusted network.**
+
+## Current Status
+
+- Phase 1 — Agent Core: complete
+- Phase 2 — Code Modification: complete
+- Phase 3 — Remote Operation: in progress
+
+Implemented highlights:
 
 - DeepSeek V4 streaming / tool calling / thinking
-- Planner Flash-first, Pro-on-demand 모델 라우팅
-- Reviewer ↔ Debugger 상태 기반 자기수정 루프
-- read/write/edit/bash/grep/list 도구 + 승인 게이트
-- Docker Sandbox 기본 실행 + `SANDBOX_MODE=host` 옵트인 host 실행
-- git checkpoint, unified diff
-- Tool result pruning + 75% context compaction + 95% hard block
-- DeepSeek cache hit/miss 계측 + stable prefix hash
-- selective Skill retrieval + `save_skill` 기반 Self-Improving Skills
-- read-only tool 병렬 prefetch
-- 429/5xx/timeout 및 reasoning_content 오류 recovery
-- PostgreSQL 세션/메시지/태스크/agent run 영속화
-- Agent Run telemetry, 성공률·비용·cache·Pro 승격 지표 API
-- 동일 세션 동시 run 가드와 실행 중 메시지 injection
-- 서버 재시작 시 중단된 run 감지·정리(실행 자체 재개는 미구현)
+- Flash-first, Pro-on-demand model routing
+- Reviewer ↔ Debugger state-based self-correction loop
+- read/write/edit/bash/grep/list tools with approval gates
+- Docker Sandbox by default + opt-in `SANDBOX_MODE=host`
+- Git checkpoints and unified diffs
+- Tool-result pruning + 75% context compaction + 95% hard block
+- DeepSeek cache hit/miss telemetry + stable prefix hash
+- Selective Skill retrieval + `save_skill` Self-Improving Skills
+- Parallel prefetch for read-only tools
+- Recovery for 429/5xx/timeouts and `reasoning_content` errors
+- PostgreSQL persistence for sessions, messages, tasks, checkpoints, and agent runs
+- Agent-run telemetry for success rate, cost, cache efficiency, and Pro escalation
+- Concurrent-run guard per session and runtime message injection
+- Interrupted-run detection after server restart (true execution resume is not implemented yet)
 - JSONL durable action/event log
-- `/sessions/{id}/status` 기반 running/role/activity/승인·질문 대기 상태 조회
-- 승인·질문 600초 timeout + cancel 시 pending future 해제
-- workspace 필수 선택 및 파일 브라우저 workspace 경계 제한
-- 모바일 PWA: 세션/칸반/Git/파일/Skills/metrics/승인·질문/실시간 활동
-- 첨부 이미지 채팅 썸네일 + 전체화면 이미지 뷰어
-- Skills 카드 collapsible UI
+- `/sessions/{id}/status` for running role, activity, approval/question waits, and idle state
+- 600-second approval/question timeout and cancellation cleanup
+- Required workspace selection and workspace-bound file APIs
+- Mobile PWA for sessions, Kanban, Git, files, Skills, metrics, approvals, questions, and live activity
+- Multi-image attachments with Vision analysis and swipeable fullscreen gallery
+- Model-surface image stripping for non-vision roles while preserving original history
+- Dedicated run-history and error-log detail views
+- `/status` recovery and polling when SSE disconnects before `done`
+- Collapsible Skills UI
 
-## 실행 모드
+## Execution Modes
 
-기본 `SANDBOX_MODE`는 Docker 격리 실행이다. 필요한 경우에만 `SANDBOX_MODE=host`로 호스트 직접 실행을 옵트인할 수 있다. host 모드는 자기검증과 로컬 도구 활용 범위가 넓지만 격리 수준이 낮으므로 신뢰된 개인 환경에서만 사용한다.
+The default execution mode is the isolated Docker sandbox. Host execution is available only as an explicit opt-in:
+
+```bash
+SANDBOX_MODE=host
+```
+
+Host mode gives the agent broader access to local tools and makes self-verification easier, but provides substantially less isolation. Use it only in a trusted personal environment.
 
 ## Remote Runtime
 
-브라우저 SSE가 끊겨도 서버 run은 계속될 수 있으며 PWA는 `/status` 폴링으로 현재 role과 activity를 복구한다. 서버 프로세스 자체가 재시작된 경우 DB의 `sessions.running`을 reconcile해 중단 사실을 히스토리에 남긴다. **프로세스 재시작 후 실행 지점부터 자동 resume하는 durable worker는 아직 구현되지 않았다.**
+An agent run can continue on the server after the browser SSE connection is lost. The PWA polls `/status` to recover the current role and activity. If the server process itself restarts, FORGE reconciles stale `sessions.running` state and records the interruption in history.
 
-## 효율 전략
+**True durable resume from the exact execution step after a process restart is not implemented yet.** A separated durable worker and replayable authoritative event stream remain major roadmap items.
 
-1. Flash-first / Pro-on-demand
-2. Stable prompt prefix와 cache hit 추적
-3. 관련 Skill만 최대 N개 선택 삽입
-4. 긴 tool result model-free pruning
-5. read-only tool 병렬 실행
-6. 75% context pressure에서 비파괴 compaction
-7. 실패 시에만 retry / debugger / Pro escalation
-8. 실제 telemetry로 `cost per successfully completed task` 비교
+## Efficiency Strategy
 
-## 시작하기
+1. Flash-first / Pro-on-demand routing
+2. Stable prompt prefixes and cache-hit tracking
+3. Inject only relevant Skills
+4. Model-free pruning of oversized tool results
+5. Parallel execution for safe read-only tools
+6. Non-destructive context compaction at 75% pressure
+7. Retry, Debugger, and Pro escalation only after failure
+8. Measure every optimization against `cost per successfully completed task`
+
+## Getting Started
+
+### Requirements
+
+- Docker + Docker Compose
+- Python 3.12+
+- Node.js 18+
+- A supported DeepSeek API configuration
+
+### Backend and infrastructure
 
 ```bash
 docker compose up -d
@@ -81,7 +121,7 @@ cp ../.env.example ../.env
 .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8790
 ```
 
-프론트엔드:
+### Frontend
 
 ```bash
 cd frontend
@@ -89,26 +129,26 @@ npm install
 npm run build
 ```
 
-## 주요 문서
+## Documentation
 
-- [`docs/spec.md`](docs/spec.md) — 현재 요구사항과 범위
-- [`docs/architecture.md`](docs/architecture.md) — 실제 시스템 구조
-- [`docs/agent-loop.md`](docs/agent-loop.md) — Agent Runtime 흐름
-- [`docs/feat.md`](docs/feat.md) — 기능 구현 현황
-- [`docs/db-schema.md`](docs/db-schema.md) — DB/telemetry 구조
-- [`docs/benchmark.md`](docs/benchmark.md) — 비용·성능 benchmark 기준
-- [`docs/troubleshooting.md`](docs/troubleshooting.md) — 운영 이슈/해결 기록
-- [`docs/work_status.md`](docs/work_status.md) — 구현 상태와 다음 작업
-- [`docs/proposal/`](docs/proposal/) — 외부 Agent 설계 차용 제안(역사/로드맵 문서)
+- [`docs/spec.md`](docs/spec.md) — current requirements and scope
+- [`docs/architecture.md`](docs/architecture.md) — actual system architecture
+- [`docs/agent-loop.md`](docs/agent-loop.md) — Agent Runtime flow
+- [`docs/feat.md`](docs/feat.md) — feature implementation status
+- [`docs/db-schema.md`](docs/db-schema.md) — database and telemetry schema
+- [`docs/benchmark.md`](docs/benchmark.md) — cost/performance benchmark methodology
+- [`docs/troubleshooting.md`](docs/troubleshooting.md) — operational issues and fixes
+- [`docs/work_status.md`](docs/work_status.md) — implementation status and next work
+- [`docs/proposal/`](docs/proposal/) — design proposals and adoption roadmaps
 
-## 다음 핵심 과제
+## Next Major Work
 
-- 실제 worker 수준의 durable resume / event replay
+- True durable worker resume and event replay
 - Tool Script/RPC Mode
 - Scheduled / Condition Jobs + Web Push
-- ExecutionBackend(Local→SSH→Docker) 추상화
-- isolated subagent는 기반 안정화 이후 검토
+- ExecutionBackend abstraction (Local → SSH → Docker)
+- Isolated subagents after the runtime foundation is stable
 
-## 라이선스
+## License
 
 MIT
