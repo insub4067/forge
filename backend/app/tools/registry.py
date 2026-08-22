@@ -110,6 +110,34 @@ TOOL_SCHEMAS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_tasks",
+            "description": "작업 계획을 태스크 목록으로 등록·갱신한다. 작업 시작 시 계획을 등록하고, 진행에 따라 상태와 진행률을 갱신한다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["todo", "planning", "in_progress", "review", "done"],
+                                },
+                                "progress": {"type": "integer", "minimum": 0, "maximum": 100},
+                            },
+                            "required": ["title"],
+                        },
+                    }
+                },
+                "required": ["tasks"],
+            },
+        },
+    },
 ]
 
 APPROVAL_REQUIRED = {"write_file", "edit_file", "bash"}

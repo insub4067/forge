@@ -18,9 +18,12 @@ async def chat(req: Request):
     session_id = body.get("session_id") or uuid.uuid4().hex
     message = str(body.get("message", ""))
 
+    room = await store.get_room(session_id)
+    workspace_path = room["workspace_path"] if room else None
+
     history = await store.load_history(session_id)
     if not history:
-        await store.ensure_session(session_id, message[:40])
+        await store.ensure_session(session_id, message[:40], workspace_path)
     history.append({"role": "user", "content": message})
 
     queue: asyncio.Queue = asyncio.Queue()
@@ -30,7 +33,7 @@ async def chat(req: Request):
 
     async def run_and_close() -> None:
         try:
-            new_history = await runtime.run(history, emit, session_id)
+            new_history = await runtime.run(history, emit, session_id, workspace_path)
             await store.save_history(session_id, new_history)
         except Exception as err:
             await queue.put(
@@ -54,9 +57,33 @@ async def chat(req: Request):
     return EventSourceResponse(gen())
 
 
+@router.post("/rooms")
+async def create_room(req: Request):
+    body = await req.json()
+    name = str(body.get("name", "")).strip() or "새 방"
+    workspace_path = str(body.get("workspace_path", "")).strip()
+    room_id = await store.create_room(name, workspace_path)
+    return {"id": room_id, "title": name, "workspace_path": workspace_path}
+
+
+@router.get("/rooms")
+async def list_rooms():
+    return await store.list_rooms()
+
+
+@router.get("/rooms/{session_id}")
+async def get_room(session_id: str):
+    return await store.get_room(session_id)
+
+
+@router.get("/rooms/{session_id}/tasks")
+async def get_tasks(session_id: str):
+    return await store.list_tasks(session_id)
+
+
 @router.get("/sessions")
 async def list_sessions():
-    return await store.list_sessions()
+    return await store.list_rooms()
 
 
 @router.get("/sessions/{session_id}/messages")

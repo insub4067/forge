@@ -21,9 +21,11 @@ SYSTEM_PROMPT = """당신은 FORGE 에이전틱 코딩 에이전트입니다. �
 
 ## 작업 방식
 1. 요청을 분석하고 간단한 계획을 세운다.
-2. 필요한 도구를 호출해 코드베이스를 탐색·분석·수정한다.
-3. 관찰한 결과를 반성(reflection)하고 다음 행동을 결정한다.
-4. 완료하면 무엇을 했는지 간결하게 보고한다.
+2. 계획을 update_tasks 도구로 태스크 목록으로 등록한다.
+3. 필요한 도구를 호출해 코드베이스를 탐색·분석·수정한다.
+4. 태스크를 진행하며 상태(todo→in_progress→review→done)와 진행률을 update_tasks로 갱신한다.
+5. 관찰한 결과를 반성(reflection)하고 다음 행동을 결정한다.
+6. 완료하면 무엇을 했는지 간결하게 보고한다.
 
 ## 원칙
 - 코드를 추측하지 말고 반드시 파일을 읽어 확인한다.
@@ -70,10 +72,10 @@ class AgentRuntime:
         self._cancel_sessions.add(session_id)
 
     @staticmethod
-    async def _git_sha() -> str:
+    async def _git_sha(workspace: str) -> str:
         try:
             proc = await asyncio.create_subprocess_exec(
-                "git", "-C", settings.workspace, "rev-parse", "HEAD",
+                "git", "-C", workspace, "rev-parse", "HEAD",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -117,8 +119,13 @@ class AgentRuntime:
             self.pending_questions.pop(question_id, None)
 
     async def run(
-        self, history: list[dict], emit: EventSink, session_id: str = ""
+        self,
+        history: list[dict],
+        emit: EventSink,
+        session_id: str = "",
+        workspace: str | None = None,
     ) -> list[dict]:
+        ws = workspace or settings.workspace
         seq = 0
 
         async def send(event_type: str, data: dict[str, Any]) -> None:
@@ -199,6 +206,8 @@ class AgentRuntime:
                     },
                 )
                 used = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+                if session_id:
+                    await store.update_context_usage(session_id, used)
                 if used > settings.logical_budget * CONTEXT_BLOCK_RATIO:
                     await send(
                         "done",
@@ -268,6 +277,18 @@ class AgentRuntime:
                     )
                     continue
 
+                if name == "update_tasks":
+                    tasks = args.get("tasks", [])
+                    if session_id:
+                        await store.replace_tasks(session_id, tasks)
+                    await send("task_update", {"tasks": tasks})
+                    result = f"{len(tasks)}개 태스크를 등록했습니다."
+                    await send("tool_result", {"name": name, "result": result})
+                    messages.append(
+                        {"role": "tool", "tool_call_id": tc["id"], "content": result}
+                    )
+                    continue
+
                 if name in APPROVAL_REQUIRED:
                     decision = await self._request_approval(name, args, send)
                     if decision != "approve":
@@ -280,12 +301,12 @@ class AgentRuntime:
                     await send("approval_granted", {"name": name})
 
                 if name in APPROVAL_REQUIRED and session_id:
-                    sha = await self._git_sha()
+                    sha = await self._git_sha(ws)
                     await store.save_checkpoint(session_id, step, sha)
 
                 diff = ""
                 try:
-                    result, diff = await execute_tool(name, args, settings.workspace)
+                    result, diff = await execute_tool(name, args, ws)
                     if name in ("write_file", "edit_file") and not result.startswith("오류"):
                         state["files_changed"].append(str(args.get("path")))
                 except Exception as err:

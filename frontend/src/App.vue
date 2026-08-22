@@ -18,12 +18,145 @@ const activeQuestion = ref(null)
 const questionAnswer = ref('')
 const debug = ref('대기 중')
 
-const sessionId = localStorage.getItem('forge_session') || crypto.randomUUID()
-localStorage.setItem('forge_session', sessionId)
+const rooms = ref([])
+const currentRoomId = ref(localStorage.getItem('forge_room') || '')
+const showRooms = ref(false)
+const showCreateRoom = ref(false)
+const newRoomName = ref('')
+const newRoomPath = ref('')
+const tasks = ref([])
+const showKanban = ref(false)
+
+const kanbanCols = [
+  { key: 'todo', label: 'TODO' },
+  { key: 'planning', label: 'PLANNING' },
+  { key: 'in_progress', label: 'IN PROGRESS' },
+  { key: 'review', label: 'REVIEW' },
+  { key: 'done', label: 'DONE' },
+]
 
 const chatEl = ref(null)
 
 const version = __APP_VERSION__
+
+function currentRoom() {
+  return rooms.value.find((r) => r.id === currentRoomId.value) || null
+}
+
+function ctxPct(room) {
+  const used = room?.used_tokens || 0
+  const budget = room?.logical_budget || 262144
+  if (!budget) return 0
+  return Math.min(100, Math.round((used / budget) * 100))
+}
+
+function ctxClass(pct) {
+  if (pct >= 95) return 'crit'
+  if (pct >= 85) return 'danger'
+  if (pct >= 75) return 'warn'
+  if (pct >= 60) return 'notice'
+  return 'ok'
+}
+
+async function loadRooms() {
+  try {
+    const res = await fetch('/api/rooms')
+    if (res.ok) rooms.value = await res.json()
+  } catch {}
+}
+
+async function loadMessages() {
+  const id = currentRoomId.value
+  if (!id) return
+  messages.value = []
+  try {
+    const res = await fetch(`/api/sessions/${id}/messages`)
+    if (!res.ok) return
+    const data = await res.json()
+    if (!Array.isArray(data)) return
+    for (const m of data) {
+      if (m.role === 'user') {
+        messages.value.push({ role: 'user', content: m.content })
+      } else if (m.role === 'assistant') {
+        const am = reactive({
+          role: 'assistant',
+          thinking: m.reasoning_content || '',
+          text: m.content || '',
+          tools: [],
+          approval: null,
+        })
+        for (const tc of m.tool_calls || []) {
+          let args = {}
+          try {
+            args = JSON.parse(tc.function.arguments || '{}')
+          } catch {}
+          am.tools.push({ name: tc.function.name, args, status: 'done', result: '' })
+        }
+        messages.value.push(am)
+      }
+    }
+    scrollBottom()
+  } catch {}
+}
+
+async function selectRoom(id) {
+  currentRoomId.value = id
+  localStorage.setItem('forge_room', id)
+  showRooms.value = false
+  await loadMessages()
+  await loadTasks()
+}
+
+async function loadTasks() {
+  const id = currentRoomId.value
+  if (!id) {
+    tasks.value = []
+    return
+  }
+  try {
+    const res = await fetch(`/api/rooms/${id}/tasks`)
+    if (res.ok) tasks.value = await res.json()
+  } catch {}
+}
+
+async function createRoom() {
+  const name = newRoomName.value.trim()
+  if (!name) return
+  try {
+    const res = await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, workspace_path: newRoomPath.value.trim() }),
+    })
+    if (res.ok) {
+      const room = await res.json()
+      newRoomName.value = ''
+      newRoomPath.value = ''
+      showCreateRoom.value = false
+      await loadRooms()
+      await selectRoom(room.id)
+    }
+  } catch {}
+}
+
+async function ensureRoom(text) {
+  if (currentRoomId.value) return currentRoomId.value
+  try {
+    const res = await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: text.slice(0, 40), workspace_path: '' }),
+    })
+    if (res.ok) {
+      const room = await res.json()
+      currentRoomId.value = room.id
+      localStorage.setItem('forge_room', room.id)
+      await loadRooms()
+      return room.id
+    }
+  } catch {}
+  return crypto.randomUUID()
+}
 
 function scrollBottom() {
   nextTick(() => {
@@ -91,6 +224,9 @@ function handleEvent(evt, assistant) {
       activeQuestion.value = { id: d.id, question: d.question, options: d.options || [] }
       questionAnswer.value = ''
       break
+    case 'task_update':
+      tasks.value = d.tasks || []
+      break
     case 'error':
       assistant.text += '\n\n오류: ' + (d.message || '')
       break
@@ -119,10 +255,11 @@ async function send() {
   scrollBottom()
 
   try {
+    const roomId = await ensureRoom(text)
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId, message: text }),
+      body: JSON.stringify({ session_id: roomId, message: text }),
     })
     console.log('[forge] 응답:', res.status, res.headers.get('content-type'))
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
@@ -207,57 +344,73 @@ async function answerQuestion(q, answer) {
 
 async function cancelSession() {
   try {
-    await fetch(`/api/sessions/${sessionId}/cancel`, { method: 'POST' })
+    await fetch(`/api/sessions/${currentRoomId.value}/cancel`, { method: 'POST' })
   } catch {}
 }
 
 function resetSession() {
-  const id = crypto.randomUUID()
-  localStorage.setItem('forge_session', id)
-  location.reload()
+  showCreateRoom.value = true
 }
 
 onMounted(async () => {
-  try {
-    const res = await fetch(`/api/sessions/${sessionId}/messages`)
-    if (!res.ok) return
-    const data = await res.json()
-    if (!Array.isArray(data)) return
-    for (const m of data) {
-      if (m.role === 'user') {
-        messages.value.push({ role: 'user', content: m.content })
-      } else if (m.role === 'assistant') {
-        const am = reactive({
-          role: 'assistant',
-          thinking: m.reasoning_content || '',
-          text: m.content || '',
-          tools: [],
-          approval: null,
-        })
-        for (const tc of m.tool_calls || []) {
-          let args = {}
-          try {
-            args = JSON.parse(tc.function.arguments || '{}')
-          } catch {}
-          am.tools.push({ name: tc.function.name, args, status: 'done', result: '' })
-        }
-        messages.value.push(am)
-      }
-    }
-    scrollBottom()
-  } catch {}
+  await loadRooms()
+  await loadMessages()
 })
 </script>
 
 <template>
   <div class="app">
     <header>
-      <span class="dot"></span>
-      <h1>FORGE</h1>
+      <button class="room-btn" @click="showRooms = !showRooms">
+        <span class="dot"></span>
+        <span class="room-name">{{ currentRoom()?.title || 'FORGE' }}</span>
+      </button>
+      <svg class="ctx" viewBox="0 0 36 36">
+        <circle class="ctx-bg" cx="18" cy="18" r="15" pathLength="100" />
+        <circle
+          class="ctx-fg"
+          cx="18"
+          cy="18"
+          r="15"
+          pathLength="100"
+          :stroke-dasharray="`${ctxPct(currentRoom())} 100`"
+          :class="ctxClass(ctxPct(currentRoom()))"
+        />
+      </svg>
       <span class="version">v{{ version }}</span>
+      <button @click="showKanban = true">칸반</button>
       <button v-if="busy" @click="cancelSession">중단</button>
-      <button @click="resetSession">새로</button>
+      <button @click="resetSession">+</button>
     </header>
+
+    <div v-if="showRooms" class="rooms-panel">
+      <div
+        v-for="r in rooms"
+        :key="r.id"
+        class="room-item"
+        :class="{ active: r.id === currentRoomId }"
+        @click="selectRoom(r.id)"
+      >
+        <svg class="ctx" viewBox="0 0 36 36">
+          <circle class="ctx-bg" cx="18" cy="18" r="15" pathLength="100" />
+          <circle
+            class="ctx-fg"
+            cx="18"
+            cy="18"
+            r="15"
+            pathLength="100"
+            :stroke-dasharray="`${ctxPct(r)} 100`"
+            :class="ctxClass(ctxPct(r))"
+          />
+        </svg>
+        <div class="room-info">
+          <div class="room-title">{{ r.title }}</div>
+          <div class="room-path">{{ r.workspace_path || '기본 워크스페이스' }}</div>
+        </div>
+        <span class="room-pct">{{ ctxPct(r) }}%</span>
+      </div>
+      <div class="rooms-add" @click="showCreateRoom = true; showRooms = false">+ 새 방 만들기</div>
+    </div>
 
     <main ref="chatEl">
       <div v-if="messages.length === 0" class="welcome">
@@ -335,6 +488,44 @@ onMounted(async () => {
             @keydown.enter="answerQuestion(activeQuestion, questionAnswer)"
           />
           <button @click="answerQuestion(activeQuestion, questionAnswer)">보내기</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showCreateRoom" class="modal-overlay">
+      <div class="modal">
+        <div class="modal-head">새 채팅방</div>
+        <input v-model="newRoomName" class="modal-field" placeholder="방 이름" />
+        <input
+          v-model="newRoomPath"
+          class="modal-field"
+          placeholder="워크스페이스 경로 (예: ~/Projects/trade-bot)"
+        />
+        <div class="modal-actions">
+          <button class="no" @click="showCreateRoom = false">취소</button>
+          <button class="ok" @click="createRoom">만들기</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showKanban" class="kanban-overlay">
+      <div class="kanban-head">
+        <span class="kanban-title">{{ currentRoom()?.title || 'FORGE' }}</span>
+        <button @click="showKanban = false">닫기</button>
+      </div>
+      <div class="kanban-board">
+        <div v-for="col in kanbanCols" :key="col.key" class="kanban-col">
+          <div class="kanban-col-head">{{ col.label }}</div>
+          <div
+            v-for="t in tasks.filter((x) => x.status === col.key)"
+            :key="t.id"
+            class="kanban-card"
+          >
+            <div class="kanban-card-title">{{ t.title }}</div>
+            <div class="kanban-bar">
+              <div class="kanban-bar-fill" :style="{ width: (t.progress || 0) + '%' }"></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
