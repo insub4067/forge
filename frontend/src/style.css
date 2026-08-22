@@ -809,8 +809,9 @@ main {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  /* footer가 in-flow라 magic padding·safe-area 불필요 — 소량 여백만 */
-  padding: 18px 16px 8px;
+  /* footer가 in-flow라 magic padding·safe-area 불필요. 마지막 메시지와 composer
+     사이 개방감을 위해 하단 여백 확보(safe-area는 footer가 담당) */
+  padding: 18px 16px 32px;
   display: flex;
   flex-direction: column;
   gap: 20px;
