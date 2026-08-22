@@ -22,6 +22,10 @@ from ..tools.registry import APPROVAL_REQUIRED, CHAT_TOOLS, TOOL_SCHEMAS, execut
 from ..sandbox.executor import DockerSandbox
 
 MAX_STEPS = 30
+# planner는 "계획"이 목적 — 상세 탐색은 coder로 위임한다. 스텝을 낮춰 과탐색·비용 폭주를 막는다.
+# (실측: pro+high planner가 23 스텝·1.4M 토큰·5.5분을 소비.)
+PLANNER_MAX_STEPS = 12
+_ROLE_MAX_STEPS = {"planner": PLANNER_MAX_STEPS}
 MAX_REPEATED_CALLS = 3
 CONTEXT_BLOCK_RATIO = 0.95
 # 이 비율을 넘으면 오래된 대화를 요약해 모델 컨텍스트를 압축한다(비파괴 — 표시/저장용 원본은 유지).
@@ -727,7 +731,8 @@ class AgentRuntime:
         route["compactions"] = 0
         counters = {"retries": 0}
 
-        for step in range(step_base, step_base + MAX_STEPS):
+        role_max_steps = _ROLE_MAX_STEPS.get(role, MAX_STEPS)
+        for step in range(step_base, step_base + role_max_steps):
             if session_id in self._cancel_sessions:
                 return "cancelled", total_prompt, total_completion, route
 
