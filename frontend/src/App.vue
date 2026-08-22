@@ -1102,20 +1102,6 @@ document.addEventListener('visibilitychange', () => {
           <span v-if="busy" class="status-live">실행 중</span><template v-if="busy"> · </template>{{ shortPath(currentRoom()?.workspace_path) || 'Mobile Coding Agent' }}
         </span>
       </button>
-      <button class="ctx-btn" @click="openSessionDetail" aria-label="컨텍스트 사용량">
-        <svg class="ctx" viewBox="0 0 36 36">
-          <circle class="ctx-bg" cx="18" cy="18" r="15" pathLength="100" />
-          <circle
-            class="ctx-fg"
-            cx="18"
-            cy="18"
-            r="15"
-            pathLength="100"
-            :stroke-dasharray="`${ctxPct(currentRoom())} 100`"
-            :class="ctxClass(ctxPct(currentRoom()))"
-          />
-        </svg>
-      </button>
       <button class="todo-btn" @click="showMenu = !showMenu" aria-label="메뉴">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
       </button>
@@ -1123,6 +1109,14 @@ document.addEventListener('visibilitychange', () => {
 
     <div v-if="showMenu" class="menu-overlay" @click="showMenu = false">
       <div class="menu-panel" @click.stop>
+        <div class="menu-item" @click="openSessionDetail(); showMenu = false">
+          <svg class="ctx menu-ctx-ring" viewBox="0 0 36 36">
+            <circle class="ctx-bg" cx="18" cy="18" r="15" pathLength="100" />
+            <circle class="ctx-fg" cx="18" cy="18" r="15" pathLength="100" :stroke-dasharray="`${ctxPct(currentRoom())} 100`" :class="ctxClass(ctxPct(currentRoom()))" />
+          </svg>
+          <span>세션 사용량</span>
+          <span class="menu-ctx">Context {{ ctxPct(currentRoom()) }}%</span>
+        </div>
         <div class="menu-item" @click="openFiles(); showMenu = false">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
           <span>파일 브라우저</span>

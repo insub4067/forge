@@ -2211,3 +2211,8 @@ button {
   word-break: break-word;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+.menu-ctx-ring {
+  width: 20px;
+  height: 20px;
+}

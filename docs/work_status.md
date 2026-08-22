@@ -106,10 +106,11 @@
 
 ### 큐 4 — 학습 (Self-Improving Skills)
 
-- [ ] Skill 저장 포맷(SKILL.md) — 절차 지식(memory와 구분). hermes §3
-- [ ] Reviewer 기반 skill_candidate 이벤트 → 사용자 승인 후 저장
-- [ ] Skill 검색·선택 로드 + 사용 피드백 개선
-- [ ] Session search(SQLite FTS5) — 과거 대화 검색·요약 주입. hermes §6
+- [x] Skill 저장·로드 — save_skill 도구(승인 게이트)로 .forge/skills/*.md 저장, 시스템 프롬프트에 자동 로드·재사용. hermes §3
+- [x] 사용자 승인 후 저장 — save_skill이 승인 게이트를 통과(에이전트 제안 → 사용자 확인)
+- [x] Skills 뷰어 — 메뉴에서 축적된 skill 확인·삭제
+- [ ] Skill 검색·선택 로드(현재는 전체 로드) + 사용 피드백 개선
+- [ ] Session search — 과거 대화 검색·요약 주입. hermes §6
 
 ### 큐 5 — Persistent / 확장
 
