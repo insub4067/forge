@@ -32,6 +32,7 @@ const fsParent = ref(null)
 const fsEntries = ref([])
 const swipedRoomId = ref(null)
 const pickerRoomId = ref(null)
+const roomMenuId = ref(null)
 const showGit = ref(false)
 const gitCurrent = ref('')
 const gitBranches = ref([])
@@ -680,20 +681,26 @@ onMounted(async () => {
               />
             </svg>
             <div class="room-info">
-              <div class="room-title-row">
-                <span class="room-title">{{ r.title }}</span>
-                <button class="room-edit" @click.stop="renameRoom(r.id)" aria-label="이름 변경">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></svg>
-                </button>
-              </div>
+              <div class="room-title">{{ r.title }}</div>
               <div class="room-path" @click.stop="openWorkspacePicker(r.id)">
                 {{ r.workspace_path || '워크스페이스 설정' }}
               </div>
             </div>
             <span class="room-pct">{{ ctxPct(r) }}%</span>
+            <button class="room-more" @click.stop="roomMenuId = roomMenuId === r.id ? null : r.id" aria-label="메뉴">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+            </button>
           </div>
         </div>
         <div class="rooms-add" @click="showCreateRoom = true; showRooms = false">+ 새 방 만들기</div>
+      </div>
+    </div>
+
+    <div v-if="roomMenuId" class="menu-overlay" @click="roomMenuId = null">
+      <div class="menu-panel" @click.stop>
+        <div class="menu-item" @click="renameRoom(roomMenuId); roomMenuId = null">이름 변경</div>
+        <div class="menu-item" @click="openWorkspacePicker(roomMenuId); roomMenuId = null">워크스페이스 변경</div>
+        <div class="menu-item danger" @click="deleteRoom(roomMenuId); roomMenuId = null">삭제</div>
       </div>
     </div>
 
