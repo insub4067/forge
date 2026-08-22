@@ -459,6 +459,25 @@ header .todo-btn {
   font-weight: 600;
 }
 
+.fs-item.dir {
+  color: #f0c76a;
+  font-weight: 600;
+}
+
+.file-view {
+  flex: 1;
+  overflow-y: auto;
+  margin: 0;
+  padding: 16px;
+  background: var(--bg);
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
 .ws-btn {
   text-align: left;
   color: var(--muted);
@@ -572,6 +591,19 @@ main {
   word-break: break-word;
   font-size: 15px;
   line-height: 1.6;
+}
+
+.role-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  background: rgba(79, 124, 255, 0.12);
+  border-radius: 6px;
+  padding: 3px 8px;
+  margin-bottom: 8px;
+  text-transform: uppercase;
 }
 
 .text p {

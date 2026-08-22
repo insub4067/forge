@@ -14,6 +14,11 @@ class Settings(BaseSettings):
 
     deep_seek_api_key: str = ""
     deep_seek_model: str = "deepseek-v4-pro"
+    llm_provider: str = "deepseek"
+    planner_model: str = ""
+    coder_model: str = ""
+    reviewer_model: str = ""
+    debugger_model: str = ""
     database_url: str = "postgresql+psycopg://forge:forge@localhost:5432/forge"
     redis_url: str = "redis://localhost:6379"
     workspace: str = str(BASE_DIR.parent.parent)

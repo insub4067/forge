@@ -32,11 +32,23 @@ const fsParent = ref(null)
 const fsEntries = ref([])
 const swipedRoomId = ref(null)
 const pickerRoomId = ref(null)
+const showGit = ref(false)
+const gitCurrent = ref('')
+const gitBranches = ref([])
+const gitStatus = ref('')
+const gitDiff = ref('')
+const showFiles = ref(false)
+const filePath = ref('')
+const fileParent = ref(null)
+const fileEntries = ref([])
+const fileContent = ref('')
+const viewingFile = ref('')
 const kanbanOpen = ref({
   todo: true,
   planning: true,
   in_progress: true,
   review: true,
+  debug: true,
   done: true,
 })
 
@@ -60,11 +72,77 @@ function toggleKanban(key) {
   kanbanOpen.value[key] = !kanbanOpen.value[key]
 }
 
+async function loadGit() {
+  const id = currentRoomId.value
+  if (!id) return
+  try {
+    const [b, s, d] = await Promise.all([
+      fetch(`/api/rooms/${id}/git/branches`).then((r) => r.json()),
+      fetch(`/api/rooms/${id}/git/status`).then((r) => r.json()),
+      fetch(`/api/rooms/${id}/git/diff`).then((r) => r.json()),
+    ])
+    gitCurrent.value = b.current
+    gitBranches.value = b.branches || []
+    gitStatus.value = s.output
+    gitDiff.value = d.output
+  } catch {}
+}
+
+async function checkoutBranch(branch) {
+  const id = currentRoomId.value
+  if (!id) return
+  try {
+    await fetch(`/api/rooms/${id}/git/checkout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch }),
+    })
+    await loadGit()
+  } catch {}
+}
+
+function openGit() {
+  showGit.value = true
+  loadGit()
+}
+
+async function navigateFiles(path) {
+  try {
+    const res = await fetch(`/api/fs/list?path=${encodeURIComponent(path || '')}`)
+    if (res.ok) {
+      const data = await res.json()
+      filePath.value = data.path
+      fileParent.value = data.parent
+      fileEntries.value = data.entries
+      viewingFile.value = ''
+      fileContent.value = ''
+    }
+  } catch {}
+}
+
+async function openFile(path) {
+  try {
+    const res = await fetch(`/api/fs/read?path=${encodeURIComponent(path)}`)
+    if (res.ok) {
+      const data = await res.json()
+      viewingFile.value = data.path
+      fileContent.value = data.content
+    }
+  } catch {}
+}
+
+function openFiles() {
+  showFiles.value = true
+  const room = currentRoom()
+  navigateFiles(room?.workspace_path || '')
+}
+
 const kanbanCols = [
   { key: 'todo', label: 'TODO' },
   { key: 'planning', label: 'PLANNING' },
   { key: 'in_progress', label: 'IN PROGRESS' },
   { key: 'review', label: 'REVIEW' },
+  { key: 'debug', label: 'DEBUG' },
   { key: 'done', label: 'DONE' },
 ]
 
@@ -267,7 +345,7 @@ function newUser(text) {
 }
 
 function newAssistant() {
-  const m = reactive({ role: 'assistant', thinking: '', text: '', tools: [], approval: null })
+  const m = reactive({ role: 'assistant', thinking: '', text: '', tools: [], approval: null, role_label: null })
   messages.value.push(m)
   return m
 }
@@ -324,6 +402,9 @@ function handleEvent(evt, assistant) {
       break
     case 'task_update':
       tasks.value = d.tasks || []
+      break
+    case 'role_start':
+      assistant.role_label = d.role
       break
     case 'error':
       assistant.text += '\n\n오류: ' + (d.message || '')
@@ -483,6 +564,12 @@ onMounted(async () => {
         <span class="room-sub">{{ shortPath(currentRoom()?.workspace_path) }}</span>
       </button>
       <button v-if="busy" class="stop-btn" @click="cancelSession">중단</button>
+      <button class="todo-btn" @click="openFiles" aria-label="파일">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      </button>
+      <button class="todo-btn" @click="openGit" aria-label="Git">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="6" y1="9" x2="6" y2="15"/><path d="M18 6c0 4-6 3-6 9"/></svg>
+      </button>
       <button class="todo-btn" @click="showKanban = true" aria-label="칸반">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 10l2 2 4-4"/><line x1="8" y1="16" x2="16" y2="16"/></svg>
       </button>
@@ -535,6 +622,8 @@ onMounted(async () => {
           <div v-if="m.role === 'user'" class="user-text">{{ m.content }}</div>
 
           <template v-if="m.role === 'assistant'">
+            <div v-if="m.role_label" class="role-badge">{{ m.role_label }}</div>
+
             <details v-if="m.thinking" class="thinking">
               <summary>추론</summary>
               <div class="thinking-body">{{ m.thinking }}</div>
@@ -647,18 +736,71 @@ onMounted(async () => {
       </div>
     </div>
 
+    <div v-if="showGit" class="kanban-overlay">
+      <div class="kanban-head">
+        <span class="kanban-title">Git — {{ gitCurrent || '브랜치 없음' }}</span>
+        <button @click="showGit = false">닫기</button>
+      </div>
+      <div class="git-body">
+        <div class="git-section">
+          <div class="git-section-title">브랜치 (탭하여 전환)</div>
+          <div
+            v-for="b in gitBranches"
+            :key="b"
+            class="git-branch"
+            :class="{ current: b === gitCurrent }"
+            @click="checkoutBranch(b)"
+          >{{ b }}</div>
+        </div>
+        <div class="git-section">
+          <div class="git-section-title">변경 사항</div>
+          <pre class="git-pre">{{ gitStatus || '(변경 없음)' }}</pre>
+        </div>
+        <div class="git-section">
+          <div class="git-section-title">Diff (--stat)</div>
+          <pre class="git-pre">{{ gitDiff || '(diff 없음)' }}</pre>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showFiles" class="fs-overlay">
+      <div class="fs-head">
+        <button @click="showFiles = false">닫기</button>
+        <span class="fs-title">{{ viewingFile || filePath }}</span>
+        <button v-if="viewingFile" @click="viewingFile = ''; fileContent = ''">목록</button>
+      </div>
+      <div v-if="!viewingFile" class="fs-list">
+        <button v-if="fileParent" class="fs-item parent" @click="navigateFiles(fileParent)">.. 상위 폴더</button>
+        <button
+          v-for="e in fileEntries"
+          :key="e.path"
+          class="fs-item"
+          :class="{ dir: e.is_dir }"
+          @click="e.is_dir ? navigateFiles(e.path) : openFile(e.path)"
+        >
+          {{ e.name }}
+        </button>
+      </div>
+      <pre v-else class="file-view">{{ fileContent }}</pre>
+    </div>
+
     <div v-if="showWorkspacePicker" class="fs-overlay">
       <div class="fs-head">
         <button @click="showWorkspacePicker = false">취소</button>
         <span class="fs-title">{{ fsPath }}</span>
         <button class="fs-done" @click="pickCurrentPath">선택</button>
       </div>
-      <div class="fs-list">
-        <button v-if="fsParent" class="fs-item parent" @click="navigateFs(fsParent)">.. 상위 폴더</button>
-        <button v-for="e in fsEntries" :key="e.path" class="fs-item" @click="navigateFs(e.path)">
-          {{ e.name }}
-        </button>
-      </div>
+        <div class="fs-list">
+          <button v-if="fsParent" class="fs-item parent" @click="navigateFs(fsParent)">.. 상위 폴더</button>
+          <button
+            v-for="e in fsEntries.filter((x) => x.is_dir)"
+            :key="e.path"
+            class="fs-item dir"
+            @click="navigateFs(e.path)"
+          >
+            {{ e.name }}
+          </button>
+        </div>
     </div>
   </div>
 </template>

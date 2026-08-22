@@ -1,16 +1,36 @@
 import asyncio
 import json
 import os
+import subprocess
 import uuid
 
 from fastapi import APIRouter, Request
 from sse_starlette.sse import EventSourceResponse
 
+from ..config import settings
 from ..db import store
 from ..runtime.agent import AgentRuntime
 
 router = APIRouter()
 runtime = AgentRuntime()
+
+
+def _git(workspace: str, *args: str, timeout: int = 20) -> str:
+    try:
+        r = subprocess.run(
+            ["git", "-C", workspace, *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return (r.stdout + r.stderr).strip()
+    except Exception as err:
+        return f"오류: {err}"
+
+
+async def _room_workspace(session_id: str) -> str:
+    room = await store.get_room(session_id)
+    return room["workspace_path"] if room and room["workspace_path"] else settings.workspace
 
 
 @router.get("/fs/list")
@@ -25,11 +45,25 @@ async def fs_list(path: str = ""):
         names = []
     for name in names:
         full = os.path.join(target, name)
-        if name.startswith(".") or not os.path.isdir(full):
+        if name.startswith("."):
             continue
-        entries.append({"name": name, "path": full, "is_dir": True})
+        is_dir = os.path.isdir(full)
+        entries.append({"name": name, "path": full, "is_dir": is_dir})
     parent = os.path.dirname(target) if target != "/" else None
     return {"path": target, "parent": parent, "entries": entries}
+
+
+@router.get("/fs/read")
+async def fs_read(path: str = ""):
+    p = os.path.expanduser(path) if path else ""
+    if not p or not os.path.isfile(p):
+        return {"path": p, "content": "파일이 아닙니다."}
+    try:
+        with open(p, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        return {"path": p, "content": content[:50_000]}
+    except Exception as err:
+        return {"path": p, "content": f"오류: {err}"}
 
 
 @router.post("/chat")
@@ -146,3 +180,34 @@ async def answer_question(question_id: str, req: Request):
 async def cancel_session(session_id: str):
     runtime.cancel(session_id)
     return {"cancelled": True}
+
+
+@router.get("/rooms/{session_id}/git/status")
+async def git_status(session_id: str):
+    ws = await _room_workspace(session_id)
+    return {"output": _git(ws, "status", "--short")}
+
+
+@router.get("/rooms/{session_id}/git/branches")
+async def git_branches(session_id: str):
+    ws = await _room_workspace(session_id)
+    current = _git(ws, "branch", "--show-current")
+    raw = _git(ws, "branch")
+    branches = [b.lstrip("* ").strip() for b in raw.splitlines() if b.strip()]
+    return {"current": current, "branches": branches}
+
+
+@router.post("/rooms/{session_id}/git/checkout")
+async def git_checkout(session_id: str, req: Request):
+    ws = await _room_workspace(session_id)
+    body = await req.json()
+    branch = str(body.get("branch", "")).strip()
+    if not branch:
+        return {"output": "브랜치를 지정하세요."}
+    return {"output": _git(ws, "checkout", branch)}
+
+
+@router.get("/rooms/{session_id}/git/diff")
+async def git_diff(session_id: str):
+    ws = await _room_workspace(session_id)
+    return {"output": _git(ws, "diff", "--stat")}

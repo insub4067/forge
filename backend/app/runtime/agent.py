@@ -3,11 +3,12 @@ import json
 import subprocess
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from ..config import settings
 from ..db import store
-from ..llm.deepseek import DeepSeekAdapter
+from ..llm.factory import create_adapter
 from ..tools.registry import APPROVAL_REQUIRED, TOOL_SCHEMAS, execute_tool
 from ..sandbox.executor import DockerSandbox
 
@@ -17,42 +18,57 @@ CONTEXT_BLOCK_RATIO = 0.95
 
 EventSink = Callable[[dict[str, Any]], Awaitable[None]]
 
-SYSTEM_PROMPT = """당신은 FORGE 에이전틱 코딩 에이전트입니다. 로컬 코드베이스에서 자율적으로 작업을 수행합니다.
+AGENTS_DIR = Path(__file__).resolve().parent.parent.parent / "docs" / "agents"
 
-## 작업 방식
-1. 요청을 분석하고 간단한 계획을 세운다.
-2. 계획을 update_tasks 도구로 태스크 목록으로 등록한다.
-3. 필요한 도구를 호출해 코드베이스를 탐색·분석·수정한다.
-4. 태스크를 진행하며 상태(todo→in_progress→review→done)와 진행률을 update_tasks로 갱신한다.
-5. 관찰한 결과를 반성(reflection)하고 다음 행동을 결정한다.
-6. 완료하면 무엇을 했는지 간결하게 보고한다.
+BASE_PROMPT = """당신은 FORGE 에이전틱 코딩 에이전트의 일부입니다. 아래 역할 지침을 따르며 로컬 코드베이스에서 작업합니다.
 
-## 원칙
-- 코드를 추측하지 말고 반드시 파일을 읽어 확인한다.
-- 변경은 요청과 관련된 최소한으로 한다.
+## 공통 원칙
 - 응답은 한국어로 한다.
-- 응답에 이모지를 사용하지 않는다.
-- 응답에 이미지나 이미지 링크를 넣지 않는다.
+- 응답에 이모지와 이미지를 넣지 않는다.
+- 코드를 추측하지 말고 파일을 읽어 확인한다.
 - 도구 호출 전에 진행 상황을 짧은 텍스트로 설명한다.
-- 같은 도구를 같은 인자로 반복 호출하지 않는다. 결과가 바뀌지 않으면 다른 접근을 취한다.
-
-## 사용자 확인
-- 설계 방향·기술 선택·범위 등 중요한 결정이 필요하면 ask_user 도구로 질문한다.
-- 사소한 것은 스스로 판단하고 진행한다.
+- 같은 도구를 같은 인자로 반복 호출하지 않는다.
 
 ## 환경
 - 워크스페이스: 로컬 마운트 디렉터리
-- 도구: read_file, list_dir, grep, write_file, edit_file, bash, ask_user
+- 도구: read_file, list_dir, grep, write_file, edit_file, bash, ask_user, update_tasks
 - write_file/edit_file/bash는 사용자 승인이 필요하다."""
+
+
+def _load_role(role: str) -> str:
+    path = AGENTS_DIR / f"{role}.md"
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+    return ""
+
+
+def _system_for(role: str) -> str:
+    return BASE_PROMPT + "\n\n" + _load_role(role)
+
+
+def _role_model(role: str) -> str:
+    mapping = {
+        "planner": settings.planner_model,
+        "coder": settings.coder_model,
+        "reviewer": settings.reviewer_model,
+        "debugger": settings.debugger_model,
+    }
+    return mapping.get(role) or settings.deep_seek_model
 
 
 class AgentRuntime:
     def __init__(self):
-        self.adapter = DeepSeekAdapter(settings.deep_seek_api_key, settings.deep_seek_model)
         self.sandbox = DockerSandbox()
+        self._adapters: dict[str, Any] = {}
         self.pending_approvals: dict[str, asyncio.Future] = {}
         self.pending_questions: dict[str, asyncio.Future] = {}
         self._cancel_sessions: set[str] = set()
+
+    def _adapter_for(self, role: str):
+        model = _role_model(role)
+        if model not in self._adapters:
+            self._adapters[model] = create_adapter(model)
+        return self._adapters[model]
 
     def resolve_approval(self, approval_id: str, decision: str) -> bool:
         fut = self.pending_approvals.pop(approval_id, None)
@@ -118,37 +134,26 @@ class AgentRuntime:
         finally:
             self.pending_questions.pop(question_id, None)
 
-    async def run(
+    async def _run_role(
         self,
-        history: list[dict],
-        emit: EventSink,
-        session_id: str = "",
-        workspace: str | None = None,
-    ) -> list[dict]:
-        ws = workspace or settings.workspace
-        seq = 0
+        role: str,
+        all_messages: list[dict],
+        send: Callable[[str, dict], Awaitable[None]],
+        session_id: str,
+        ws: str,
+        state: dict,
+        recent_calls: list[str],
+        step_base: int,
+    ) -> str:
+        await send("role_start", {"role": role})
+        messages: list[dict] = [
+            {"role": "system", "content": _system_for(role)},
+            *all_messages,
+        ]
 
-        async def send(event_type: str, data: dict[str, Any]) -> None:
-            nonlocal seq
-            seq += 1
-            await emit({"seq": seq, "type": event_type, "data": data})
-
-        self._cancel_sessions.discard(session_id)
-
-        goal = ""
-        for m in reversed(history):
-            if m.get("role") == "user":
-                goal = str(m.get("content", ""))[:200]
-                break
-        state: dict[str, Any] = {"goal": goal, "files_changed": [], "errors": []}
-        recent_calls: list[str] = []
-
-        messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}, *history]
-
-        for step in range(MAX_STEPS):
+        for step in range(step_base, step_base + MAX_STEPS):
             if session_id in self._cancel_sessions:
-                await send("done", {"content": "사용자가 중단했습니다."})
-                break
+                return "cancelled"
 
             reasoning: list[str] = []
             content: list[str] = []
@@ -158,7 +163,7 @@ class AgentRuntime:
             usage: dict[str, int] = {}
             last_emit = 0.0
 
-            async for delta in self.adapter.stream_chat(messages, TOOL_SCHEMAS):
+            async for delta in self._adapter_for(role).stream_chat(messages, TOOL_SCHEMAS):
                 if delta.get("reasoning_content"):
                     reasoning.append(delta["reasoning_content"])
                     reasoning_buf.append(delta["reasoning_content"])
@@ -209,13 +214,7 @@ class AgentRuntime:
                 if session_id:
                     await store.update_context_usage(session_id, used)
                 if used > settings.logical_budget * CONTEXT_BLOCK_RATIO:
-                    await send(
-                        "done",
-                        {
-                            "content": f"컨텍스트 한도({int(CONTEXT_BLOCK_RATIO * 100)}%)에 도달해 중단했습니다. 새 세션에서 계속 진행하세요."
-                        },
-                    )
-                    break
+                    return "context_blocked"
 
             assistant_msg: dict[str, Any] = {"role": "assistant", "content": "".join(content)}
             if reasoning:
@@ -235,15 +234,14 @@ class AgentRuntime:
                 assistant_msg["tool_calls"] = tool_calls
 
             messages.append(assistant_msg)
+            all_messages.append(assistant_msg)
 
             if not tool_calls:
-                await send("done", {"content": "".join(content)})
-                break
+                return "done"
 
             for tc in tool_calls:
                 if session_id in self._cancel_sessions:
-                    await send("done", {"content": "사용자가 중단했습니다."})
-                    return messages[1:]
+                    return "cancelled"
 
                 name = tc["function"]["name"]
                 try:
@@ -260,11 +258,10 @@ class AgentRuntime:
                     result = f"동일한 도구 호출이 {MAX_REPEATED_CALLS}회 연속 반복되어 중단합니다."
                     await send("tool_call", {"name": name, "args": args})
                     await send("tool_result", {"name": name, "result": result})
-                    messages.append(
+                    all_messages.append(
                         {"role": "tool", "tool_call_id": tc["id"], "content": result}
                     )
-                    await send("done", {"content": result})
-                    return messages[1:]
+                    return "repeated"
 
                 await send("tool_call", {"name": name, "args": args})
 
@@ -272,7 +269,7 @@ class AgentRuntime:
                     answer = await self._ask_user(args, send)
                     result = answer if answer else "(응답 없음)"
                     await send("tool_result", {"name": name, "result": result})
-                    messages.append(
+                    all_messages.append(
                         {"role": "tool", "tool_call_id": tc["id"], "content": result}
                     )
                     continue
@@ -284,7 +281,7 @@ class AgentRuntime:
                     await send("task_update", {"tasks": tasks})
                     result = f"{len(tasks)}개 태스크를 등록했습니다."
                     await send("tool_result", {"name": name, "result": result})
-                    messages.append(
+                    all_messages.append(
                         {"role": "tool", "tool_call_id": tc["id"], "content": result}
                     )
                     continue
@@ -294,7 +291,7 @@ class AgentRuntime:
                     if decision != "approve":
                         result = "사용자가 실행을 거부했습니다."
                         await send("tool_result", {"name": name, "result": result})
-                        messages.append(
+                        all_messages.append(
                             {"role": "tool", "tool_call_id": tc["id"], "content": result}
                         )
                         continue
@@ -319,10 +316,87 @@ class AgentRuntime:
                     {"name": name, "result": result[:20_000], "diff": diff[:10_000]},
                 )
 
-                messages.append(
+                all_messages.append(
                     {"role": "tool", "tool_call_id": tc["id"], "content": result[:20_000]}
                 )
-        else:
-            await send("done", {"content": "최대 실행 단계를 초과했습니다."})
 
-        return messages[1:]  # system 제외하고 반환
+        return "max_steps"
+
+    async def run(
+        self,
+        history: list[dict],
+        emit: EventSink,
+        session_id: str = "",
+        workspace: str | None = None,
+    ) -> list[dict]:
+        ws = workspace or settings.workspace
+        seq = 0
+
+        async def send(event_type: str, data: dict[str, Any]) -> None:
+            nonlocal seq
+            seq += 1
+            await emit({"seq": seq, "type": event_type, "data": data})
+
+        self._cancel_sessions.discard(session_id)
+
+        goal = ""
+        for m in reversed(history):
+            if m.get("role") == "user":
+                goal = str(m.get("content", ""))[:200]
+                break
+        state: dict[str, Any] = {"goal": goal, "files_changed": [], "errors": []}
+        recent_calls: list[str] = []
+        all_messages: list[dict] = [*history]
+
+        step_base = 0
+
+        # 1. Planner
+        status = await self._run_role(
+            "planner", all_messages, send, session_id, ws, state, recent_calls, step_base
+        )
+        step_base += MAX_STEPS
+        if status != "done":
+            await send("done", {"content": self._finish_message(status)})
+            return all_messages
+
+        # 2. Coder
+        status = await self._run_role(
+            "coder", all_messages, send, session_id, ws, state, recent_calls, step_base
+        )
+        step_base += MAX_STEPS
+        if status != "done":
+            await send("done", {"content": self._finish_message(status)})
+            return all_messages
+
+        # 3. Reviewer
+        status = await self._run_role(
+            "reviewer", all_messages, send, session_id, ws, state, recent_calls, step_base
+        )
+        step_base += MAX_STEPS
+        if status != "done":
+            await send("done", {"content": self._finish_message(status)})
+            return all_messages
+
+        # 4. Debugger (reviewer가 debug 상태를 남긴 경우)
+        if session_id:
+            tasks = await store.list_tasks(session_id)
+            if any(t.get("status") == "debug" for t in tasks):
+                status = await self._run_role(
+                    "debugger", all_messages, send, session_id, ws, state, recent_calls, step_base
+                )
+                if status != "done":
+                    await send("done", {"content": self._finish_message(status)})
+                    return all_messages
+
+        await send("done", {"content": "모든 작업을 완료했습니다."})
+        return all_messages
+
+    @staticmethod
+    def _finish_message(status: str) -> str:
+        if status == "cancelled":
+            return "사용자가 중단했습니다."
+        if status == "context_blocked":
+            return f"컨텍스트 한도({int(CONTEXT_BLOCK_RATIO * 100)}%)에 도달해 중단했습니다. 새 세션에서 계속 진행하세요."
+        if status == "repeated":
+            return "동일한 도구 호출이 반복되어 중단했습니다."
+        return "최대 실행 단계를 초과했습니다."

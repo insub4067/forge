@@ -126,7 +126,7 @@ TOOL_SCHEMAS: list[dict] = [
                                 "title": {"type": "string"},
                                 "status": {
                                     "type": "string",
-                                    "enum": ["todo", "planning", "in_progress", "review", "done"],
+                                    "enum": ["todo", "planning", "in_progress", "review", "debug", "done"],
                                 },
                                 "progress": {"type": "integer", "minimum": 0, "maximum": 100},
                             },
