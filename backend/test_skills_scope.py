@@ -17,6 +17,7 @@ def main():
         gdir = Path(home) / ".forge" / "skills"
         with mock.patch.object(S, "GLOBAL_SKILLS_DIR", gdir):
             _mk(home, "git-recovery", "global git")   # global
+            _mk(home, "README", "인덱스")             # README는 skill 아님(제외)
             _mk(ws1, "frontend-build", "ws1 build")   # ws1 only
             _mk(ws1, "git-recovery", "ws1 override")  # 같은 이름 override
             _mk(ws2, "trade-strategy", "ws2 only")
@@ -24,6 +25,8 @@ def main():
             n1 = {s["name"]: s for s in S.iter_skills(ws1)}
             n2 = {s["name"]: s for s in S.iter_skills(ws2)}
 
+            # 0) README는 skill로 잡히지 않는다(인덱스 파일)
+            assert "readme" not in [k.lower() for k in n1], "README 제외"
             # 1) global이 모든 ws에서 보인다
             assert "git-recovery" in n1 and "git-recovery" in n2, "global 가시성"
             # 2) workspace skill은 다른 ws에서 안 보인다

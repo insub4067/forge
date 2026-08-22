@@ -23,6 +23,8 @@ def iter_skills(workspace: str) -> list[dict]:
         if not sdir.is_dir():
             continue
         for p in sorted(sdir.glob("*.md")):
+            if p.stem.lower() == "readme":  # 인덱스 파일 — skill 아님, 주입 제외
+                continue
             try:
                 content = p.read_text(encoding="utf-8")
             except OSError:
