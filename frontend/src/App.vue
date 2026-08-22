@@ -95,6 +95,10 @@ function roomTitle(id) {
   return rooms.value.find((r) => r.id === id)?.title || id.slice(0, 8)
 }
 
+function menuRoom() {
+  return rooms.value.find((r) => r.id === roomMenuId.value) || null
+}
+
 async function loadAdmin() {
   try {
     const res = await fetch('/api/admin/stats')
@@ -780,7 +784,7 @@ onMounted(async () => {
     <div v-if="roomMenuId" class="menu-overlay" @click="roomMenuId = null">
       <div class="menu-panel" @click.stop>
         <div class="menu-item" @click="renameRoom(roomMenuId); roomMenuId = null">이름 변경</div>
-        <div class="menu-item" @click="openWorkspacePicker(roomMenuId); roomMenuId = null">워크스페이스 변경</div>
+        <div v-if="!menuRoom()?.workspace_locked" class="menu-item" @click="openWorkspacePicker(roomMenuId); roomMenuId = null">워크스페이스 변경</div>
         <div class="menu-item danger" @click="deleteRoom(roomMenuId); roomMenuId = null">삭제</div>
       </div>
     </div>

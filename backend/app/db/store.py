@@ -32,10 +32,18 @@ async def ensure_session(
 
 async def create_room(name: str, workspace_path: str = "") -> str:
     room_id = uuid.uuid4().hex
+    locked = bool(workspace_path)
     if not workspace_path:
         workspace_path = os.path.expanduser("~")
     async with async_session() as s:
-        s.add(Session(id=room_id, title=name, workspace_path=workspace_path))
+        s.add(
+            Session(
+                id=room_id,
+                title=name,
+                workspace_path=workspace_path,
+                workspace_locked=locked,
+            )
+        )
         await s.commit()
     return room_id
 
@@ -65,6 +73,7 @@ async def get_room(session_id: str) -> dict | None:
             "id": sess.id,
             "title": sess.title,
             "workspace_path": sess.workspace_path,
+            "workspace_locked": sess.workspace_locked,
         }
 
 
@@ -115,6 +124,7 @@ async def list_rooms() -> list[dict]:
                 "id": sess.id,
                 "title": sess.title,
                 "workspace_path": sess.workspace_path,
+                "workspace_locked": sess.workspace_locked,
                 "count": count,
                 "used_tokens": sess.used_tokens,
                 "logical_budget": sess.logical_budget,

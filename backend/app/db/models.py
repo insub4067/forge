@@ -15,6 +15,7 @@ class Session(Base):
     title: Mapped[str] = mapped_column(String, default="")
     workspace_id: Mapped[str] = mapped_column(String, default="")
     workspace_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    workspace_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String, default="active")
     model: Mapped[str] = mapped_column(String, default="")
     logical_budget: Mapped[int] = mapped_column(Integer, default=262144)
