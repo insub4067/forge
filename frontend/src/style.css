@@ -1394,8 +1394,8 @@ footer {
   left: 0;
   right: 0;
   bottom: 0;
-  /* SafeArea를 상당 부분 무시하고 화면 하단에 밀착 → 개방감(Claude식) */
-  padding: 8px 12px max(8px, calc(env(safe-area-inset-bottom) - 20px));
+  /* SafeArea 무시하고 화면 하단에 밀착 → 개방감(Claude식) */
+  padding: 8px 12px 10px;
   border-top: none;
   background: transparent;
   pointer-events: none;

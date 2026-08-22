@@ -57,12 +57,39 @@ if ('serviceWorker' in navigator) {
   })
 }
 
+// 로드된 프론트 asset 해시(배포 판별용) — sw.js가 안 바뀌어도 asset 해시는 배포마다 바뀐다.
+function currentAssetHash() {
+  const s = document.querySelector('script[src*="/assets/index-"]')
+  const m = s && s.src.match(/index-([\w-]+)\.js/)
+  return m ? m[1] : ''
+}
+const loadedAssetHash = currentAssetHash()
+
+// 포어그라운드 복귀 시 새 배포가 있으면 상단 토스트 + 자동 리로드로 리소스 갱신.
+async function checkResourceUpdate() {
+  if (window.__forgeBusy) return // 작업 중이면 미룸(SSE 스트림 끊김 방지)
+  try {
+    const res = await fetch('/index.html?_=' + Date.now(), { cache: 'no-store' })
+    if (!res.ok) return
+    const html = await res.text()
+    const m = html.match(/\/assets\/index-([\w-]+)\.js/)
+    const latest = m ? m[1] : ''
+    if (!latest || !loadedAssetHash || latest === loadedAssetHash) return
+    // 같은 버전으로 두 번 리로드 방지(루프 차단). 새 배포가 또 나오면 해시가 달라 다시 동작.
+    if (sessionStorage.getItem('forge_reloaded_to') === latest) return
+    sessionStorage.setItem('forge_reloaded_to', latest)
+    showToast('새 버전으로 업데이트합니다…')
+    setTimeout(() => window.location.reload(), 900)
+  } catch {}
+}
+
 // 포그라운드 복귀 시 즉시 업데이트 확인
 function checkUpdate() {
   if (swRegistration) swRegistration.update()
 }
 function onForeground() {
   checkUpdate()
+  checkResourceUpdate() // asset 해시 비교로 새 배포 자동 반영
   // 작업 중이라 미뤄둔 업데이트가 있고 지금 유휴면 적용
   if (window.__forgeUpdateReady && !window.__forgeBusy && window.__forgeApplyUpdate) {
     window.__forgeApplyUpdate()
