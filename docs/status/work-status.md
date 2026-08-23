@@ -33,7 +33,8 @@ FORGE는 **저렴한 모델을 강한 Harness 안에서 실행해 품질을 프�
 - [x] deterministic R0 benchmark 21 tasks + quality tests
 - [x] bounded RSI promotion gate
 - [x] Mac Terminal / Screen / Camera PoC
-- [x] 예약 작업 기반
+- [x] 예약 작업 기반 (one-shot/daily/interval, timezone, restart 복원)
+- [x] 예약 작업 durability (DST 안전 daily, retry 정책, 원자적 claim 중복 방지)
 
 ## 품질 보증 상태
 

@@ -7,36 +7,12 @@ plan/code/review는 기존 AgentRuntime이 그대로 담당한다.
 import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone as _tz
-from zoneinfo import ZoneInfo
 
 from .db import store
 from . import errors as error_log
+from .schedule_calc import compute_next as _compute_next
 
 _TASK = None
-
-
-def _compute_next(job: dict, from_utc: datetime) -> datetime | None:
-    """반복 잡의 다음 실행 시각(aware UTC). one-shot이면 None."""
-    rec = job.get("recurrence") or ""
-    tz = ZoneInfo(job.get("timezone") or "Asia/Seoul")
-    if rec == "interval":
-        try:
-            mins = max(1, int(job.get("recurrence_value") or "60"))
-        except ValueError:
-            mins = 60
-        return from_utc + timedelta(minutes=mins)
-    if rec == "daily":
-        try:
-            hh, mm = (job.get("recurrence_value") or "09:00").split(":")
-            hh, mm = int(hh), int(mm)
-        except ValueError:
-            hh, mm = 9, 0
-        local_now = from_utc.astimezone(tz)
-        nxt = local_now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-        if nxt <= local_now:
-            nxt += timedelta(days=1)
-        return nxt.astimezone(_tz.utc)
-    return None
 
 
 async def run_job(job: dict) -> None:
@@ -50,6 +26,10 @@ async def run_job(job: dict) -> None:
     await store.ensure_session(sid, job.get("name") or "예약 작업", job.get("workspace_path"))
     if runtime.is_running(sid):
         return  # 이전 실행 진행 중 → 중복 AgentRun 생성 금지
+
+    # 원자적 선점 — 조회와 실행 사이 경합에서도 중복 실행을 막는다.
+    if not await store.claim_job(job["id"]):
+        return  # 다른 스케줄러가 이미 선점
 
     await store.update_job(job["id"], {"status": "running"})
     runtime.set_auto_approve(sid, bool(job.get("auto_approve", True)))
@@ -75,7 +55,20 @@ async def run_job(job: dict) -> None:
     now = datetime.now(_tz.utc)
     nxt = _compute_next(job, now)
     fields = {"last_run_at": now.replace(tzinfo=None), "last_result": result[:500]}
-    if nxt:
+    failed = not result.startswith("완료")
+    if failed:
+        # 재시도 정책: 남은 시도가 있으면 짧은 지연 후 재시도, 아니면 실패 상태로 남긴다.
+        retries = int(job.get("retries") or 0)
+        max_retries = int(job.get("max_retries") or 0)
+        if retries < max_retries:
+            fields.update({
+                "retries": retries + 1,
+                "next_run_at": (now + timedelta(minutes=1)).replace(tzinfo=None),
+                "status": "scheduled",
+            })
+        else:
+            fields.update({"status": "failed"})
+    elif nxt:
         fields.update({"next_run_at": nxt.replace(tzinfo=None), "status": "scheduled"})
     else:
         fields.update({"next_run_at": None, "enabled": False, "status": "done"})

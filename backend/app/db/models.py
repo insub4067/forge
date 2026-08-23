@@ -78,6 +78,9 @@ class AgentRun(Base):
     elapsed_ms: Mapped[int] = mapped_column(Integer, default=0)
     selected_skill_count: Mapped[int] = mapped_column(Integer, default=0)
     selected_skills: Mapped[str] = mapped_column(String, default="")
+    # RTK식 gain — 도구 결과 압축 전/후 추정 토큰(절감량 측정).
+    tool_raw_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    tool_visible_tokens: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -138,6 +141,9 @@ class ScheduledJob(Base):
     status: Mapped[str] = mapped_column(String, default="scheduled")
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_result: Mapped[str] = mapped_column(Text, default="")
+    # retry — 실패 시 재시도 정책. max_retries=0이면 재시도 없음.
+    retries: Mapped[int] = mapped_column(Integer, default=0)
+    max_retries: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

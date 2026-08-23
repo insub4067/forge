@@ -1,6 +1,6 @@
 # Scheduled / Condition Jobs 도입 제안
 
-> 상태: Proposal  
+> 상태: Proposal (J0·J1 일부 구현됨 — one-shot/daily/interval, timezone, restart 복원, 중복 방지, retry, DST 안전)  
 > 목표: FORGE를 사용자가 직접 메시지를 보낼 때만 움직이는 코딩 에이전트에서, 지정 시간·반복 주기·조건에 따라 스스로 작업을 시작하는 persistent development agent로 확장한다.
 
 ## 1. 배경

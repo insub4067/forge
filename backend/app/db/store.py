@@ -4,7 +4,7 @@ import re
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from .models import (AgentRun, Checkpoint, Message, PushDevice, Refinement, ScheduledJob,
                      Session, Task, VisionAnalysis)
@@ -412,6 +412,8 @@ async def save_agent_run(
     elapsed_ms: int = 0,
     selected_skill_count: int = 0,
     selected_skills: str = "",
+    tool_raw_tokens: int = 0,
+    tool_visible_tokens: int = 0,
 ) -> None:
     async with async_session() as s:
         s.add(
@@ -432,6 +434,8 @@ async def save_agent_run(
                 elapsed_ms=elapsed_ms,
                 selected_skill_count=selected_skill_count,
                 selected_skills=selected_skills,
+                tool_raw_tokens=tool_raw_tokens,
+                tool_visible_tokens=tool_visible_tokens,
             )
         )
         await s.commit()
@@ -738,6 +742,7 @@ def _job_dict(j) -> dict:
         "auto_approve": j.auto_approve, "enabled": j.enabled, "status": j.status,
         "last_run_at": j.last_run_at.isoformat() if j.last_run_at else None,
         "last_result": j.last_result,
+        "retries": j.retries, "max_retries": j.max_retries,
     }
 
 
@@ -752,6 +757,7 @@ async def create_job(data: dict) -> dict:
             recurrence=data.get("recurrence", ""),
             recurrence_value=data.get("recurrence_value", ""),
             auto_approve=bool(data.get("auto_approve", True)),
+            max_retries=int(data.get("max_retries", 0) or 0),
         )
         s.add(j)
         await s.commit()
@@ -800,6 +806,21 @@ async def due_jobs(now_utc) -> list[dict]:
             )
         )
         return [_job_dict(j) for j in result.scalars()]
+
+
+async def claim_job(job_id: int) -> bool:
+    """잡을 원자적으로 선점한다. 이미 running이면 False — 중복 실행 방지."""
+    async with async_session() as s:
+        result = await s.execute(
+            update(ScheduledJob)
+            .where(
+                ScheduledJob.id == job_id,
+                ScheduledJob.status != "running",
+            )
+            .values(status="running")
+        )
+        await s.commit()
+        return result.rowcount > 0
 
 
 # ── Refinement(개선 후보) — 근거 축적·승인·rollback. 승인해도 자동 적용은 하지 않는다. ──

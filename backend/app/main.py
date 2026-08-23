@@ -31,6 +31,10 @@ _COLUMN_PATCHES = [
     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS running BOOLEAN DEFAULT FALSE",
     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS final_status VARCHAR DEFAULT ''",
     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS mode VARCHAR DEFAULT ''",
+    "ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS retries INTEGER DEFAULT 0",
+    "ALTER TABLE scheduled_jobs ADD COLUMN IF NOT EXISTS max_retries INTEGER DEFAULT 0",
+    "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS tool_raw_tokens INTEGER DEFAULT 0",
+    "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS tool_visible_tokens INTEGER DEFAULT 0",
     # 컨텍스트 예산을 모델 실제 한도(128k)로 통일 — 옛 256k 세션은 표시가 실제의 절반이었다.
     "UPDATE sessions SET logical_budget = 131072 WHERE logical_budget = 262144",
 ]
