@@ -288,7 +288,7 @@ const fileInput = ref(null)
 const kanbanOpen = ref({
   todo: false,
   working: false,
-  verifying: false,
+  testing: false,
   done: false,
 })
 
@@ -297,7 +297,7 @@ const kanbanOpen = ref({
 function normStatus(s) {
   if (s === 'planning') return 'todo'
   if (s === 'in_progress' || s === 'in-progress' || s === 'debug') return 'working'
-  if (s === 'review') return 'verifying'
+  if (s === 'review' || s === 'verifying') return 'testing'
   return s // todo/working/verifying/done는 그대로
 }
 
@@ -965,7 +965,7 @@ function openFiles() {
 const kanbanCols = [
   { key: 'todo', label: 'TODO' },
   { key: 'working', label: 'WORKING' },
-  { key: 'verifying', label: 'VERIFYING' },
+  { key: 'testing', label: 'TESTING' },
   { key: 'done', label: 'DONE' },
 ]
 
@@ -1618,13 +1618,29 @@ async function copyMessage(m) {
   }
 }
 
+// 한 줄 요약 — 도구별로 의미 있는 필드만(경로·명령·패턴). 날 JSON 대신 읽기 좋게.
 function summarizeArgs(args) {
+  if (!args || typeof args !== 'object') return ''
+  if (typeof args.command === 'string') return args.command.split('\n')[0].slice(0, 80)
+  if (args.path) return String(args.path)
+  if (args.pattern) return String(args.pattern)
   try {
     const s = JSON.stringify(args)
     return s.length > 80 ? s.slice(0, 80) + '…' : s
   } catch {
     return ''
   }
+}
+
+// 승인 다이얼로그용 — 실제 내용을 진짜 줄바꿈으로(코드블록). 무엇을 쓰/실행하는지 검토 가능하게.
+function approvalBody(args) {
+  if (!args || typeof args !== 'object') return ''
+  if (typeof args.command === 'string') return args.command
+  if (typeof args.content === 'string') return args.content.slice(0, 2000)
+  if (typeof args.new_string === 'string') {
+    return '- ' + String(args.old_string || '').slice(0, 600) + '\n+ ' + args.new_string.slice(0, 600)
+  }
+  return ''
 }
 
 function diffLines(diff) {
@@ -1686,7 +1702,7 @@ function handleEvent(evt, assistant) {
       break
     case 'task_update': {
       const newTasks = d.tasks || []
-      const labels = { todo: '할 일', working: '진행', verifying: '검증', done: '완료', planning: '할 일', in_progress: '진행', 'in-progress': '진행', review: '검증', debug: '진행' }
+      const labels = { todo: '할 일', working: '진행', testing: '테스트', done: '완료', planning: '할 일', in_progress: '진행', 'in-progress': '진행', review: '테스트', verifying: '테스트', debug: '진행' }
       if (!assistant.taskNotes) assistant.taskNotes = []
       for (const t of newTasks) {
         const prev = lastTaskStatus[t.title]
@@ -2418,7 +2434,8 @@ document.addEventListener('visibilitychange', () => {
 
             <div v-if="m.approval" class="approval">
               <div class="approval-head">도구 실행 승인이 필요합니다</div>
-              <div class="approval-tool">{{ m.approval.tool }} — {{ summarizeArgs(m.approval.args) }}</div>
+              <div class="approval-tool">{{ m.approval.tool }}<span v-if="summarizeArgs(m.approval.args)"> — {{ summarizeArgs(m.approval.args) }}</span></div>
+              <pre v-if="approvalBody(m.approval.args)" class="approval-body">{{ approvalBody(m.approval.args) }}</pre>
               <div class="approval-btns">
                 <button class="ok" @click="decide(m.approval, 'approve')">승인</button>
                 <button class="no" @click="decide(m.approval, 'reject')">거부</button>
@@ -2566,7 +2583,8 @@ document.addEventListener('visibilitychange', () => {
     <div v-if="activeApproval" class="modal-overlay">
       <div class="modal" @click.stop>
         <div class="modal-head">도구 실행 승인이 필요합니다</div>
-        <div class="modal-question">{{ activeApproval.tool }} — {{ summarizeArgs(activeApproval.args) }}</div>
+        <div class="modal-question">{{ activeApproval.tool }}<span v-if="summarizeArgs(activeApproval.args)"> — {{ summarizeArgs(activeApproval.args) }}</span></div>
+        <pre v-if="approvalBody(activeApproval.args)" class="approval-body">{{ approvalBody(activeApproval.args) }}</pre>
         <div class="modal-actions">
           <button class="no" @click="decide(activeApproval, 'reject')">거부</button>
           <button class="ok" @click="decide(activeApproval, 'approve')">승인</button>

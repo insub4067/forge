@@ -49,13 +49,13 @@ Plan(3줄) → Execute → Verify → (PASS → Complete) | (FAIL → Diagnose �
 
 ## 진행 관리 (칸반이 곧 프로세스)
 
-칸반 4단계: **todo → working → verifying → done**. 여러 단계 작업은 `update_tasks`로
+칸반 4단계: **todo → working → testing → done**. 여러 단계 작업은 `update_tasks`로
 계획을 todo로 등록한다. 이 칸반이 작업의 단일 진실이다 — **매 단계 칸반을 확인하고,
 남은 todo가 없어질 때까지 계속 돈다.**
 
 - **todo → working**: 태스크를 시작할 때 그 태스크를 `working`으로 바꾼다(한 번에 하나씩).
-- **working → verifying → done**: 여기는 **프로세스가 소유한다.** 네가 `working`을 끝냈다고
-  판단하면, 프로세스가 자동으로 test/build를 실제로 돌려 검증한다(`verifying`). **통과해야
+- **working → testing → done**: 여기는 **프로세스가 소유한다.** 네가 `working`을 끝냈다고
+  판단하면, 프로세스가 자동으로 test/build를 실제로 돌려 검증한다(`testing`). **통과해야
   `done`이 된다.** 네가 임의로 `done`으로 올리지 않는다 — 검증 통과가 done의 유일한 조건이다.
 - **검증 실패 시**: 프로세스가 실패 로그를 준다. 그 태스크는 다시 `working`으로 돌려 원인을
   고치고, 검증이 통과할 때까지 반복한다. "됐습니다"는 검증이 통과했을 때만 쓴다.

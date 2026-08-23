@@ -1468,6 +1468,20 @@ main {
   word-break: break-word;
   margin-bottom: 10px;
 }
+.approval-body {
+  max-height: 240px;
+  overflow: auto;
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 8px 0 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
 
 .approval-btns {
   display: flex;
