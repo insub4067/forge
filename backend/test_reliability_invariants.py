@@ -148,6 +148,20 @@ async def main():
     assert c["count"] == 0
     print(f"이어붙임 상한 {A.NUDGE_MAX}회 + 그래도 변경 0 → completed_unverified: OK")
 
+    # ── vision 라우팅 invariant: 이번 턴에 이미지가 있을 때만 vision ──
+    # (세션 초반 스크린샷 하나가 이후 텍스트 작업까지 계속 vision으로 끌고 가던 실제 버그.)
+    img_msg = {"role": "user", "content": [{"type": "text", "text": "이거 고쳐"},
+                                           {"type": "image_url", "image_url": {"url": "x"}}]}
+    txt_msg = {"role": "user", "content": "GitPanel 분리해"}
+    assert A._turn_has_image([img_msg]) is True
+    assert A._turn_has_image([txt_msg]) is False
+    # 예전 턴에 이미지가 있어도 이번(마지막) 턴이 텍스트면 vision 아님
+    assert A._turn_has_image([img_msg, {"role": "assistant", "content": "함"}, txt_msg]) is False
+    # 이번 턴이 이미지면 vision
+    assert A._turn_has_image([txt_msg, {"role": "assistant", "content": "함"}, img_msg]) is True
+    assert A._turn_has_image([]) is False
+    print("vision 라우팅 invariant: 이번 턴 이미지만 vision(옛 이미지 무관): OK")
+
     # ── planner context invariant: 도구 이력을 빼 orphan tool 400을 원천 차단 ──
     # (read 루프로 tool 메시지가 쌓인 세션에서 [-N:] 슬라이스가 tool로 시작해 DeepSeek 400 →
     #  planner가 done 없이 죽어 run 전체가 중단되던 실제 버그.)

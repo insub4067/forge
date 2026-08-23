@@ -28,7 +28,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://forge:forge@localhost:5432/forge"
     redis_url: str = "redis://localhost:6379"
     workspace: str = str(BASE_DIR.parent.parent)
-    logical_budget: int = 262144
+    # 컨텍스트 예산 — DeepSeek 실제 한도(~128k)에 맞춘다. 이전 값(256k)은 모델 한도의 2배라
+    # compaction(예산×0.75)이 영영 안 돌고, 128k에서 모델단이 먼저 앞부분을 잘라 "리셋"처럼
+    # 보였다. 128k로 맞추면 96k에서 요약 압축이 먼저 돈다.
+    logical_budget: int = 131072
     sandbox_image: str = "forge-sandbox:latest"
     # bash 실행 모드. "docker"(기본, 격리·안전) | "host"(호스트 직접 실행 — 자기검증·
     # 풀파워 가능하지만 에이전트가 맥 전체에 접근. 신뢰하는 개인 환경에서만 옵트인).

@@ -81,6 +81,15 @@ def _has_image(msg: dict) -> bool:
     return False
 
 
+def _turn_has_image(history: list[dict]) -> bool:
+    """이번 턴(가장 최근 user 메시지)에 이미지가 있는지. 세션 전체가 아니라 마지막 요청만 본다.
+    한 번 이미지를 보낸 세션의 이후 텍스트 작업까지 vision으로 실행하던 문제를 막는다."""
+    for m in reversed(history):
+        if m.get("role") == "user":
+            return _has_image(m)
+    return False
+
+
 def _to_data_uri_item(item: Any) -> Any:
     if isinstance(item, dict) and item.get("type") == "image_url":
         url = item.get("image_url", {}).get("url", "")
@@ -1342,7 +1351,9 @@ class AgentRuntime:
 
         # 이미지가 포함된 요청이면 Developer를 vision 모델로 실행한다(별도 Vision 호출 없이 —
         # Developer가 이미지를 직접 받아 분석·구현). role은 developer로 기록, 모델만 vision.
-        has_image = any(_has_image(m) for m in history if m.get("role") == "user")
+        # 이번 턴(가장 최근 user 메시지)만 본다 — 세션 전체를 보면 예전 스크린샷 하나가
+        # 이후 무관한 텍스트 작업까지 계속 vision으로 끌고 간다(실측 버그).
+        has_image = _turn_has_image(history)
 
         step_base = 0
 
