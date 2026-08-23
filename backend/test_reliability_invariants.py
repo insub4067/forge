@@ -163,6 +163,20 @@ async def main():
     assert len(A._plan_to_tasks("\n".join(f"{i}. 단계{i}" for i in range(20)))) == 8  # 상위 8개 상한
     print("칸반 강제: planner 계획 번호목록 → 태스크(완료조건 제외·상한8): OK")
 
+    # ── compaction 분할 invariant: user 1개 + 이후 전부 tool 호출인 run도 경계를 찾는다 ──
+    # (tool_calls 없는 assistant만 경계로 허용해 developer run에서 compaction이 영영 안 돌던 버그.)
+    dev_msgs = [{"role": "user", "content": "작업"}]
+    for _ in range(20):
+        dev_msgs.append({"role": "assistant", "content": "", "tool_calls": [{"id": "x"}]})
+        dev_msgs.append({"role": "tool", "tool_call_id": "x", "content": "결과"})
+    sp = A.AgentRuntime._safe_split(dev_msgs, 8)
+    assert sp > 0, f"tool 연속 run에서도 분할점을 찾아야 compaction이 돈다, got {sp}"
+    assert dev_msgs[sp]["role"] in ("user", "assistant"), dev_msgs[sp]["role"]  # orphan tool로 시작 안 함
+    # 투영본이 orphan tool로 시작하지 않는다
+    projected_first = dev_msgs[sp]
+    assert projected_first["role"] != "tool"
+    print("compaction 분할 invariant: tool 연속 run도 경계 발견(orphan tool 아님): OK")
+
     # ── vision 라우팅 invariant: 이번 턴에 이미지가 있을 때만 vision ──
     # (세션 초반 스크린샷 하나가 이후 텍스트 작업까지 계속 vision으로 끌고 가던 실제 버그.)
     img_msg = {"role": "user", "content": [{"type": "text", "text": "이거 고쳐"},

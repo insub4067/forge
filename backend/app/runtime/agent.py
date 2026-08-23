@@ -423,15 +423,17 @@ class AgentRuntime:
 
     @staticmethod
     def _safe_split(all_messages: list[dict], keep_recent: int) -> int:
-        """최근 keep_recent개를 보존하되, 투영본이 orphan tool 메시지나
-        결과 없는 tool_calls로 시작하지 않도록 안전한 경계를 찾는다.
-        경계는 user 메시지 또는 tool_calls 없는 assistant 앞이어야 한다.
+        """최근 keep_recent개를 보존하되, 투영본이 orphan tool 메시지로 시작하지 않도록
+        안전한 경계를 찾는다. 경계는 user 또는 assistant여야 한다(tool은 금지 — 그 tool_calls
+        assistant가 요약에 흡수되면 orphan이 되므로). assistant(tool_calls)는 경계로 허용한다:
+        투영본이 그 assistant부터 시작하면 뒤따르는 tool 응답과 쌍으로 유지돼 orphan이 아니다.
+        (tool_calls 없는 assistant만 허용하면 user 1개 + 이후 전부 tool 호출인 developer run에서
+        경계를 못 찾아 compaction이 영영 안 도는 버그가 있었다.)
         압축할 수 없으면 0을 반환."""
         split = len(all_messages) - keep_recent
         while split > 1:
-            m = all_messages[split]
-            role = m.get("role")
-            if role == "user" or (role == "assistant" and not m.get("tool_calls")):
+            role = all_messages[split].get("role")
+            if role in ("user", "assistant"):
                 return split
             split -= 1
         return 0
