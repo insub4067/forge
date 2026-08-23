@@ -40,13 +40,40 @@ def _setup_bugfix(d: Path):
         encoding="utf-8",
     )
 
-def _check_bugfix(d: Path) -> bool:
-    # 에이전트가 작업 중 남긴 stale 바이트코드가 채점을 오염시키지 않게 제거 후 실행.
+def _run_test(d: Path, testfile: str) -> bool:
+    """fixture 안 테스트를 결정적으로 실행. stale 바이트코드가 채점을 오염시키지 않게 제거 후 실행."""
     for pyc in d.rglob("__pycache__"):
         for f in pyc.glob("*"):
             f.unlink()
-    r = subprocess.run([sys.executable, "-B", "test_calc.py"], cwd=str(d), capture_output=True, timeout=30)
+    r = subprocess.run([sys.executable, "-B", testfile], cwd=str(d), capture_output=True, timeout=30)
     return r.returncode == 0
+
+def _check_bugfix(d: Path) -> bool:
+    return _run_test(d, "test_calc.py")
+
+def _setup_multifile(d: Path):
+    (d / "store.py").write_text(
+        "_items = []\n\n"
+        "def add(x):\n    _items.append(x)\n\n"
+        "def items():\n    return list(_items)\n",
+        encoding="utf-8",
+    )
+    (d / "service.py").write_text(
+        "import store\n\n"
+        "def delete(x):\n    pass  # TODO: store에서 x를 제거하도록 구현\n",
+        encoding="utf-8",
+    )
+    (d / "test_app.py").write_text(
+        "import store, service\n"
+        "store.add('a'); store.add('b')\n"
+        "service.delete('a')\n"
+        "assert store.items() == ['b'], store.items()\n"
+        "print('ok')\n",
+        encoding="utf-8",
+    )
+
+def _check_multifile(d: Path) -> bool:
+    return _run_test(d, "test_app.py")
 
 
 BENCH_TASKS = [
@@ -63,6 +90,15 @@ BENCH_TASKS = [
         "prompt": "test_calc.py가 통과하도록 calc.py의 subtract 함수를 고쳐줘. 지금 뺄셈이 아니라 덧셈을 한다.",
         "setup": _setup_bugfix,
         "check": _check_bugfix,
+    },
+    {
+        "code": "C",
+        "kind": "여러 파일 변경(COMPLEX 유도)",
+        "prompt": "test_app.py가 통과하도록 만들어줘. store에 항목 삭제 기능을 추가하고, "
+                  "service.delete가 그 삭제 기능을 호출하도록 연결해야 한다. 여러 파일(store.py, service.py)을 "
+                  "수정해야 하는 작업이다.",
+        "setup": _setup_multifile,
+        "check": _check_multifile,
     },
 ]
 
@@ -166,9 +202,11 @@ async def _run_one(task: dict, idx: int, keep: bool) -> dict:
     return result
 
 
-async def _run_all(repeat: int, keep: bool) -> dict:
+async def _run_all(repeat: int, keep: bool, only: set | None) -> dict:
     results = []
     for task in BENCH_TASKS:
+        if only and task["code"] not in only:
+            continue
         for i in range(repeat):
             print(f"실행: task {task['code']} ({task['kind']}) #{i + 1}/{repeat} …")
             results.append(await _run_one(task, i, keep))
@@ -188,6 +226,15 @@ def _self_test():
         assert _check_bugfix(d) is False, "버그 상태 실패해야"
         (d / "calc.py").write_text("def subtract(a, b):\n    return a - b\n", encoding="utf-8")
         assert _check_bugfix(d) is True, "수정 후 성공해야"
+        # 다중 파일 task
+        _setup_multifile(d)
+        assert _check_multifile(d) is False, "미구현 상태 실패해야"
+        (d / "store.py").write_text(
+            "_items = []\ndef add(x):\n    _items.append(x)\n"
+            "def items():\n    return list(_items)\n"
+            "def remove(x):\n    _items.remove(x)\n", encoding="utf-8")
+        (d / "service.py").write_text("import store\ndef delete(x):\n    store.remove(x)\n", encoding="utf-8")
+        assert _check_multifile(d) is True, "연결 후 성공해야"
     # 집계 산식
     synth = [
         {"code": "A", "success": True, "cost": 0.010, "elapsed_s": 5.0},
@@ -208,9 +255,11 @@ def main():
     ap.add_argument("--repeat", type=int, default=1, help="task당 반복 횟수")
     ap.add_argument("--self-test", action="store_true", help="채점·집계만 검증(무비용)")
     ap.add_argument("--keep", action="store_true", help="bench 세션을 DB에 보존(기본은 정리해 telemetry 보호)")
+    ap.add_argument("--task", default="", help="특정 task만 실행(쉼표 구분, 예: C)")
     args = ap.parse_args()
     if args.run:
-        agg = asyncio.run(_run_all(args.repeat, args.keep))
+        only = {c.strip().upper() for c in args.task.split(",") if c.strip()} or None
+        agg = asyncio.run(_run_all(args.repeat, args.keep, only))
         _print_report(agg)
     else:
         _self_test()
