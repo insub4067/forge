@@ -287,10 +287,19 @@ const attachedText = ref(null) // { name, content, truncated }
 const fileInput = ref(null)
 const kanbanOpen = ref({
   todo: false,
-  planning: false,
-  in_progress: false,
+  working: false,
+  verifying: false,
   done: false,
 })
+
+// 레거시 status를 신뢰성 4단계로 정규화: todo → working → verifying → done.
+// (프로세스가 검증 단계를 소유한다: 실행=working, test/build 실행=verifying, 통과=done)
+function normStatus(s) {
+  if (s === 'planning') return 'todo'
+  if (s === 'in_progress' || s === 'in-progress' || s === 'debug') return 'working'
+  if (s === 'review') return 'verifying'
+  return s // todo/working/verifying/done는 그대로
+}
 
 let touchStartX = 0
 let touchStartY = 0
@@ -955,8 +964,8 @@ function openFiles() {
 
 const kanbanCols = [
   { key: 'todo', label: 'TODO' },
-  { key: 'planning', label: 'PLANNING' },
-  { key: 'in_progress', label: 'IN PROGRESS' },
+  { key: 'working', label: 'WORKING' },
+  { key: 'verifying', label: 'VERIFYING' },
   { key: 'done', label: 'DONE' },
 ]
 
@@ -1677,7 +1686,7 @@ function handleEvent(evt, assistant) {
       break
     case 'task_update': {
       const newTasks = d.tasks || []
-      const labels = { todo: '할 일', planning: '계획', 'in-progress': '진행', in_progress: '진행', review: '검토', debug: '디버그', done: '완료' }
+      const labels = { todo: '할 일', working: '진행', verifying: '검증', done: '완료', planning: '할 일', in_progress: '진행', 'in-progress': '진행', review: '검증', debug: '진행' }
       if (!assistant.taskNotes) assistant.taskNotes = []
       for (const t of newTasks) {
         const prev = lastTaskStatus[t.title]
@@ -2588,11 +2597,11 @@ document.addEventListener('visibilitychange', () => {
         <div v-for="col in kanbanCols" :key="col.key" class="kanban-section">
           <div class="kanban-col-head" @click="toggleKanban(col.key)">
             <span>{{ col.label }}</span>
-            <span class="kanban-count">{{ tasks.filter((x) => x.status === col.key).length }}</span>
+            <span class="kanban-count">{{ tasks.filter((x) => normStatus(x.status) === col.key).length }}</span>
           </div>
           <div v-show="kanbanOpen[col.key]" class="kanban-cards">
             <div
-              v-for="t in tasks.filter((x) => x.status === col.key)"
+              v-for="t in tasks.filter((x) => normStatus(x.status) === col.key)"
               :key="t.id"
               class="kanban-card"
             >
@@ -2601,7 +2610,7 @@ document.addEventListener('visibilitychange', () => {
                 <div class="kanban-bar-fill" :style="{ width: (t.progress || 0) + '%' }"></div>
               </div>
             </div>
-            <div v-if="tasks.filter((x) => x.status === col.key).length === 0" class="kanban-empty">없음</div>
+            <div v-if="tasks.filter((x) => normStatus(x.status) === col.key).length === 0" class="kanban-empty">없음</div>
           </div>
         </div>
       </div>

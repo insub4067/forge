@@ -1049,6 +1049,24 @@ class AgentRuntime:
         except Exception as err:
             error_log.record("finalize_tasks", str(err), session_id)
 
+    async def _mark_verifying(self, session_id: str, send: EventSink) -> None:
+        """검증 단계 진입 시 남은 task를 verifying으로 — 프로세스가 칸반 stage를 소유한다
+        (todo→working은 모델이, verifying→done은 프로세스가). 칸반이 진행 상태를 정직히 반영."""
+        if not session_id:
+            return
+        try:
+            tasks = await store.list_tasks(session_id)
+            changed = False
+            for t in tasks:
+                if t.get("status") not in ("done", "verifying"):
+                    t["status"] = "verifying"
+                    changed = True
+            if changed:
+                await store.replace_tasks(session_id, tasks)
+                await send("task_update", {"tasks": tasks})
+        except Exception as err:
+            error_log.record("mark_verifying", str(err), session_id)
+
     async def _autocommit(self, ws: str, goal: str, send: EventSink) -> None:
         """성공 완료 시 git 워크스페이스면 자동 commit(+push) — 커밋 누락 방지.
         best-effort: 실패해도 run을 막지 않는다. AUTO_COMMIT=0으로 끈다."""
@@ -1338,6 +1356,7 @@ class AgentRuntime:
         # 완료 = 검증(test/build) 통과. 모델이 "됐습니다" 해도 프로세스가 실제로 돌려
         # 통과해야 완료로 인정한다. 실패하면 1회 수리 재시도, 그래도 실패면
         # verification_failed로 정직하게 보고하고 커밋하지 않는다(검증 안 된 코드는 안 나간다).
+        await self._mark_verifying(session_id, send)  # 칸반: 검증 단계 진입(프로세스 소유)
         verified, report = await self._verify(ws, send)
         if not verified:
             await send("verify_failed", {"report": report[:800]})
