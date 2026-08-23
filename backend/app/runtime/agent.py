@@ -381,6 +381,20 @@ def _clamp_task_status(status: str) -> str:
     return _TASK_STATUS_CLAMP.get(str(status), "working")
 
 
+# gate 상태 invariant: 모델은 pending/working/blocked/abandoned/unavailable(선언)만 쓴다.
+# passed/failed는 검증을 실제로 실행한 프로세스만 설정한다(self-grading 방지).
+_GATE_STATUS_CLAMP = {
+    "pending": "pending", "working": "working",
+    "blocked": "blocked", "abandoned": "abandoned",
+    "unavailable": "unavailable",  # 모델이 "검증 방법 없음"을 선언 — 프로세스가 재확인 후 확정
+}
+
+
+def _clamp_gate_status(status: str) -> str:
+    """모델이 설정할 수 있는 gate 상태로 제한한다(passed/failed는 프로세스 전용)."""
+    return _GATE_STATUS_CLAMP.get(str(status), "working")
+
+
 def _estimate_complexity(goal: str, all_messages: list[dict]) -> str:
     """simple | complex — 세션의 에이전트 모드가 auto일 때 single/multi를 가른다."""
     text = goal or ""
@@ -1155,6 +1169,23 @@ class AgentRuntime:
                     )
                     continue
 
+                if name == "update_gates":
+                    # Acceptance Gate Ledger — 구현 전에 요구사항을 검증 가능한 gate로 분해.
+                    # invariant: 모델은 passed/failed를 설정할 수 없다(프로세스가 실제 실행 후 부여).
+                    gates = args.get("gates", [])
+                    for _g in gates:
+                        _g["status"] = _clamp_gate_status(_g.get("status", "pending"))
+                    if session_id:
+                        gates = await store.replace_gates(session_id, gates)
+                    await send("gates_update", {"gates": gates})
+                    result = (f"{len(gates)}개 요구사항 게이트를 등록했습니다. "
+                              "passed/failed는 프로세스가 검증 실행 후 부여합니다.")
+                    await send("tool_result", {"name": name, "result": result})
+                    all_messages.append(
+                        {"role": "tool", "tool_call_id": tc["id"], "content": result}
+                    )
+                    continue
+
                 if name in APPROVAL_REQUIRED:
                     decision = await self._request_approval(name, args, send, session_id)
                     if decision != "approve":
@@ -1463,6 +1494,143 @@ class AgentRuntime:
             labels.append("runtime smoke")
         return ("passed", "검증 통과: " + ", ".join(labels)) if any_passed \
             else ("unavailable", "검증 실행 불가(모든 check가 unavailable)")
+
+    async def _verify_gates(self, ws: str, session_id: str, send: EventSink) -> tuple[str, str]:
+        """Acceptance Gate 검증 — 프로세스가 각 gate의 verification_method를 실제 실행.
+
+        passed는 오직 (exit 0 AND expected_result가 출력에 존재)일 때만 부여한다.
+        모델이 passed라고 주장해도 재실행해 덮어쓴다(self-grading·evidence 위조 방지).
+        상태 집계:
+          failed      — 하나라도 실행 결과가 실패
+          passed      — 전부 passed
+          partial     — 일부 passed + 일부 미검증(unavailable/blocked/abandoned), 실패 0
+          unavailable — 전부 미검증, 실패 0
+          none        — gate 없음(기존 3상태 완료 흐름 그대로)
+        """
+        if not session_id:
+            return "none", ""
+        gates = await store.list_gates(session_id)
+        if not gates:
+            return "none", ""
+        import shutil
+
+        async def _sh(command: str, cwd: str, timeout: int = 120) -> tuple[int, str]:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "/bin/sh", "-c", command, cwd=cwd,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+                return proc.returncode, out.decode(errors="replace")
+            except Exception as err:
+                return -1, f"실행 오류: {err}"
+
+        labels: list[str] = []
+        resolved: list[str] = []
+        for g in gates:
+            status = g.get("status", "pending")
+            # blocked/abandoned는 모델이 사유와 함께 남긴 정직한 미완료 — 프로세스가 강제 실행하지 않는다.
+            if status in ("blocked", "abandoned"):
+                labels.append(f"{g['title']}({status})")
+                resolved.append(status)
+                continue
+            method = (g.get("verification_method") or "").strip()
+            expected = (g.get("expected_result") or "").strip()
+            if not method:
+                # 실행 가능한 검증이 없으면 passed로 만들지 않고 unavailable로 확정(숨기지 않음).
+                await store.save_gate_result(
+                    session_id, g["id"], "unavailable", "{}",
+                    g.get("failure_reason") or "검증 방법 없음 — 실행 가능한 verification_method가 없다")
+                labels.append(f"{g['title']}(unavailable)")
+                resolved.append("unavailable")
+                await send("gates_update", {"gates": await store.list_gates(session_id)})
+                continue
+            rc, out = await _sh(method, ws)
+            evidence = json.dumps({
+                "command": method, "exit_code": rc,
+                "output_tail": out[-1500:], "expected": expected,
+            }, ensure_ascii=False)
+            if rc == 0 and expected and expected in out:
+                verdict, reason = "passed", ""
+            elif rc == 0 and not expected:
+                # exit 0만으로는 기능 충족을 증명하지 못한다 — PASS 오판 금지.
+                verdict, reason = "unavailable", "expected_result 없음 — 통과 증거로 불충분"
+            else:
+                verdict = "failed"
+                reason = f"exit {rc}" + (f", 기대 결과 미발견: {expected[:80]}" if expected else "")
+            await store.save_gate_result(session_id, g["id"], verdict, evidence, reason)
+            labels.append(f"{g['title']}({verdict})")
+            resolved.append(verdict)
+            await send("gates_update", {"gates": await store.list_gates(session_id)})
+
+        report = "요구사항 게이트 검증: " + ", ".join(labels)
+        if "failed" in resolved:
+            return "failed", report
+        if all(s == "passed" for s in resolved):
+            return "passed", report
+        if any(s == "passed" for s in resolved):
+            return "partial", report
+        return "unavailable", report
+
+    async def _verify_integration(self, ws: str, session_id: str, send: EventSink) -> tuple[str, str]:
+        """Integration 검증 — leaf 작업들이 합쳐진 최종 상태에 대한 회귀 검증.
+
+        단일 실행 구조에서는 "합쳐진 최종 상태" = 워크스페이스 전체다. 그래서 여기서
+        generic 검증(build/test/smoke)을 한 번 더 돌려 회귀를 확인하고, 게이트 실패가
+        남아 있으면 통합 실패로 처리한다. leaf verification(각 gate)과 명확히 구분된다.
+        gate가 없으면 기존 흐름(integration 생략)을 그대로 탄다.
+        """
+        if not session_id:
+            return "none", ""
+        gates = await store.list_gates(session_id)
+        if not gates:
+            return "none", ""
+        vstate, vreport = await self._verify(ws, send)
+        if vstate == "failed":
+            return "failed", "통합 검증 실패 — 최종 회귀(test/build) 실패:\n" + vreport[:600]
+        failed = [g for g in gates if g.get("status") == "failed"]
+        if failed:
+            return "failed", "통합 검증 실패 — acceptance gate 미통과: " + \
+                ", ".join(g["title"] for g in failed)
+        passed = sum(1 for g in gates if g.get("status") == "passed")
+        unverified = len(gates) - passed
+        report = f"통합 검증 통과 — 최종 회귀(test/build) 통과, gate {passed}/{len(gates)} passed"
+        if unverified:
+            report += f", 미검증 {unverified}개"
+        return "passed", report
+
+    async def _gates_report(self, session_id: str) -> str:
+        """미완료 gate를 최종 결과에 남긴다 — 조용한 생략(honest failure 위반) 금지."""
+        if not session_id:
+            return ""
+        gates = await store.list_gates(session_id)
+        if not gates:
+            return ""
+        marks = {"passed": "✓", "failed": "✗", "working": "○", "pending": "○",
+                 "unavailable": "!", "blocked": "!", "abandoned": "–"}
+        lines = [f"요구사항 {len(gates)}"]
+        for g in gates:
+            s = g.get("status", "pending")
+            line = f"{marks.get(s, '?')} {g['title']}"
+            if s == "unavailable":
+                line += f" — {g.get('failure_reason') or '검증 방법 없음'}"
+            elif s == "blocked":
+                line += f" — 차단: {g.get('failure_reason') or '이유 없음'}"
+            elif s == "abandoned":
+                line += f" — 포기: {g.get('failure_reason') or '이유 없음'}"
+            elif s == "failed":
+                line += f" — 실패: {g.get('failure_reason') or ''}"
+            elif s in ("working", "pending"):
+                line += " — 검증 중"
+            lines.append(line)
+        for g in gates:
+            if g.get("status") in ("failed", "blocked") and (g.get("failure_reason") or g.get("evidence")):
+                lines.append(f"  Gate: {g['title']}")
+                lines.append(f"  Status: {g.get('status')}")
+                if g.get("failure_reason"):
+                    lines.append(f"  Reason: {g.get('failure_reason')}")
+                if g.get("evidence"):
+                    lines.append(f"  Evidence: {str(g.get('evidence'))[:300]}")
+        return "\n".join(lines)
 
     def _record_context_breakdown(self, session_id, role, system_msg, projected, skills, room_memory):
         """전송 직전 context를 영역별로 추정해 저장한다(debug view/최적화 근거).
@@ -1834,9 +2002,11 @@ class AgentRuntime:
             return all_messages
 
         # ── Strict 검증 게이트 — 신뢰성은 모델이 아니라 프로세스가 보장한다 ──
-        # 완료 = 검증(test/build) 통과. 모델이 "됐습니다" 해도 프로세스가 실제로 돌려
-        # 통과해야 완료로 인정한다. 실패하면 1회 수리 재시도, 그래도 실패면
-        # verification_failed로 정직하게 보고하고 커밋하지 않는다(검증 안 된 코드는 안 나간다).
+        # 완료 = 검증(test/build) 통과 + 요구사항 게이트 통과. 모델이 "됐습니다" 해도
+        # 프로세스가 실제로 돌려 통과해야 완료로 인정한다. 실패하면 1회 수리 재시도,
+        # 그래도 실패면 verification_failed로 정직하게 보고하고 커밋하지 않는다.
+        # 흐름: implementation → generic verification → acceptance gate verification
+        #       → integration verification → completed
         await self._mark_testing(session_id, send)  # 칸반: 검증(test) 단계 진입(프로세스 소유)
         vstate, report = await self._verify(ws, send)
         # failed일 때만 1회 수리 재시도(bounded — 무제한 repair loop 금지, 비용 상한).
@@ -1847,15 +2017,55 @@ class AgentRuntime:
             status = await _run_developer("")
             if status == "done":
                 vstate, report = await self._verify(ws, send)
-        # 3상태 완료 정책: passed=검증됨 / unavailable=검증불가(정직 표기) / failed=커밋 금지.
         if vstate == "failed":
             await finish("verification_failed",
                          "검증(test/build) 실패로 완료하지 못했습니다. 커밋하지 않았습니다:\n" + report[:600])
-        elif vstate == "passed":
-            await finish("completed", "작업 완료 — 검증 통과.")
-        else:  # unavailable — 검증 못 함을 '검증 성공'으로 기록하지 않는다(별도 상태).
-            await send("verify_unavailable", {"report": report[:400]})
-            await finish("completed_unverified", "작업 완료(검증 대상 없음 — 미검증). " + report[:200])
+            return all_messages
+
+        # ── Acceptance Gate 검증 — build/test 통과 ≠ 요구사항 충족 ──
+        gstate, greport = await self._verify_gates(ws, session_id, send)
+        if gstate == "failed":
+            await send("verify_failed", {"report": greport[:800]})
+            all_messages.append({"role": "user", "content":
+                "[요구사항 게이트 검증 실패 — 프로세스가 각 gate의 명령을 실제로 실행한 결과다. "
+                "해당 요구사항을 고쳐 통과시켜라]\n" + greport})
+            status = await _run_developer("")
+            if status == "done":
+                await self._mark_testing(session_id, send)
+                vstate, report = await self._verify(ws, send)
+                gstate, greport = await self._verify_gates(ws, session_id, send)
+        if vstate == "failed":
+            await finish("verification_failed",
+                         "검증(test/build) 실패로 완료하지 못했습니다. 커밋하지 않았습니다:\n" + report[:600])
+            return all_messages
+        if gstate == "failed":
+            await finish("verification_failed",
+                         "요구사항 게이트 검증 실패로 완료하지 못했습니다. 커밋하지 않았습니다:\n" + greport[:600])
+            return all_messages
+
+        # ── Integration 검증 — 합쳐진 최종 상태의 회귀·게이트 일관성 ──
+        istate, ireport = await self._verify_integration(ws, session_id, send)
+        if istate == "failed":
+            await finish("verification_failed",
+                         "통합 검증 실패로 완료하지 못했습니다. 커밋하지 않았습니다:\n" + ireport[:600])
+            return all_messages
+
+        gates_report = await self._gates_report(session_id)
+        # 완료 정책:
+        #   gate 없음 → 기존 3상태 매핑(passed→completed, unavailable→completed_unverified)
+        #   gate 전부 passed + generic passed → completed
+        #   그 외(partial/unavailable/blocked/abandoned) → completed_unverified(정직 표기)
+        if gstate == "none":
+            if vstate == "passed":
+                await finish("completed", "작업 완료 — 검증 통과.")
+            else:  # unavailable — 검증 못 함을 '검증 성공'으로 기록하지 않는다(별도 상태).
+                await send("verify_unavailable", {"report": report[:400]})
+                await finish("completed_unverified", "작업 완료(검증 대상 없음 — 미검증). " + report[:200])
+        elif gstate == "passed" and vstate == "passed":
+            await finish("completed", "작업 완료 — 검증 통과.\n\n" + gates_report)
+        else:
+            await finish("completed_unverified",
+                         "작업 완료 — 단, 일부 요구사항 게이트가 미검증/차단 상태입니다.\n\n" + gates_report)
         return all_messages
 
     @staticmethod

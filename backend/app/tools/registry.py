@@ -158,6 +158,45 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "update_gates",
+            "description": (
+                "사용자 요구사항을 검증 가능한 acceptance gate로 분해해 등록한다. 구현 전에 호출한다. "
+                "각 gate는 observable behavior로 변환해야 한다. verification_method는 cwd=workspace에서 "
+                "sh -c로 실행 가능한 명령(예: pytest 대상, grep 확인, python -c 체크). expected_result는 "
+                "출력에서 찾을 문자열(통과 조건). 실행 가능한 검증을 만들 수 없으면 status를 unavailable로 "
+                "명시하고 failure_reason을 남긴다. passed/failed는 절대 직접 설정하지 않는다(프로세스가 "
+                "실제 실행 후 부여한다)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "gates": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string", "description": "요구사항 (예: 로그인)"},
+                                "description": {"type": "string", "description": "요구사항 상세"},
+                                "verification_method": {"type": "string", "description": "실행 가능한 검증 명령(sh -c, cwd=workspace)"},
+                                "expected_result": {"type": "string", "description": "출력에서 찾을 문자열(통과 조건)"},
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["pending", "working", "blocked", "abandoned", "unavailable"],
+                                    "description": "pending/working/blocked/abandoned/unavailable만 설정한다. passed/failed는 프로세스 전용.",
+                                },
+                                "failure_reason": {"type": "string", "description": "blocked/abandoned/unavailable일 때 사유"},
+                            },
+                            "required": ["title"],
+                        },
+                    }
+                },
+                "required": ["gates"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "save_skill",
             "description": (
                 "이번 작업에서 발견한, 앞으로 반복될 만한 문제 해결 절차를 재사용 가능한 skill로 저장한다. "

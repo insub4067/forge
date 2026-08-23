@@ -340,6 +340,12 @@ async def get_tasks(session_id: str):
     return await store.list_tasks(session_id)
 
 
+@router.get("/sessions/{session_id}/gates")
+async def get_gates(session_id: str):
+    """세션의 acceptance gate 목록 — 요구사항별 검증 상태(passed는 프로세스 소유)."""
+    return await store.list_gates(session_id)
+
+
 @router.get("/sessions")
 async def list_sessions():
     return await store.list_rooms()

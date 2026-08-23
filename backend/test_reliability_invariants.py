@@ -80,6 +80,9 @@ def make_rt(verify_states, dev_status="done", changed=True, change_from=1):
     A.store.set_session_final_status = lambda *a, **k: _noop()
     A.store.list_tasks = lambda *a, **k: _empty()
     A.store.replace_tasks = lambda *a, **k: _noop()
+    A.store.list_gates = lambda *a, **k: _empty()
+    A.store.replace_gates = lambda *a, **k: _noop()
+    A.store.save_gate_result = lambda *a, **k: _noop()
     return rt, committed
 
 

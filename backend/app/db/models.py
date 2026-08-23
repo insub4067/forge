@@ -101,6 +101,32 @@ class Task(Base):
     )
 
 
+class AcceptanceGate(Base):
+    """Acceptance Gate Ledger — 사용자 요구사항을 구현 전에 분해한 검증 가능한 gate.
+
+    passed/failed/unavailable은 프로세스(검증 실행)만 설정한다. 모델은 pending/working/
+    blocked/abandoned/unavailable(선언)까지만 쓴다 — self-grading 방지가 이 표의 핵심.
+    evidence는 프로세스가 실제 실행한 command/exit_code/output을 JSON으로 기록한다.
+    """
+    __tablename__ = "acceptance_gates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String, ForeignKey("sessions.id"))
+    title: Mapped[str] = mapped_column(String, default="")          # 요구사항 (예: "로그인")
+    description: Mapped[str] = mapped_column(Text, default="")      # 요구사항 상세
+    # 실행 가능한 검증 — cwd=workspace에서 sh -c로 실행. observable behavior로 변환할 것.
+    verification_method: Mapped[str] = mapped_column(Text, default="")
+    expected_result: Mapped[str] = mapped_column(String, default="")  # stdout에서 찾을 문자열(통과 조건)
+    # pending | working | passed | failed | unavailable | blocked | abandoned
+    status: Mapped[str] = mapped_column(String, default="pending")
+    evidence: Mapped[str] = mapped_column(Text, default="{}")       # JSON — process-owned
+    failure_reason: Mapped[str] = mapped_column(Text, default="")   # blocked/abandoned/unavailable 사유
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class PushDevice(Base):
     __tablename__ = "push_devices"
 

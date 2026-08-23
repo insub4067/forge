@@ -5,6 +5,7 @@ import { ref, watch } from 'vue'
 
 const props = defineProps({
   tasks: { type: Array, default: () => [] },
+  gates: { type: Array, default: () => [] },
   roomTitle: { type: String, default: 'FORGE' },
 })
 const emit = defineEmits(['close'])
@@ -15,6 +16,28 @@ const kanbanCols = [
   { key: 'testing', label: 'TESTING' },
   { key: 'done', label: 'DONE' },
 ]
+
+// gate 상태 → 표시 기호·레이블. passed/failed는 프로세스가 실제 검증 후 부여한다.
+const gateMarks = {
+  passed: { mark: '✓', label: '통과' },
+  failed: { mark: '✗', label: '실패' },
+  working: { mark: '○', label: '진행' },
+  pending: { mark: '○', label: '대기' },
+  unavailable: { mark: '!', label: '미검증' },
+  blocked: { mark: '!', label: '차단' },
+  abandoned: { mark: '–', label: '포기' },
+}
+
+function gateMark(s) {
+  return gateMarks[s] || { mark: '?', label: s || '?' }
+}
+
+function gateNote(g) {
+  if (g.status === 'failed') return '실패: ' + (g.failure_reason || '')
+  if (g.status === 'blocked') return '차단: ' + (g.failure_reason || '')
+  if (g.status === 'unavailable') return (g.failure_reason || '검증 방법 없음')
+  return ''
+}
 
 const kanbanOpen = ref({ todo: false, working: false, testing: false, done: false })
 
@@ -62,6 +85,18 @@ function toggleKanban(key) {
             </div>
           </div>
           <div v-if="tasks.filter((x) => normStatus(x.status) === col.key).length === 0" class="kanban-empty">없음</div>
+        </div>
+      </div>
+
+      <div v-if="gates.length" class="gate-section">
+        <div class="gate-head">요구사항 게이트 · {{ gates.length }}</div>
+        <div v-for="g in gates" :key="g.id" class="gate-row" :class="g.status">
+          <span class="gate-mark">{{ gateMark(g.status).mark }}</span>
+          <div class="gate-body">
+            <div class="gate-title">{{ g.title }}</div>
+            <div v-if="gateNote(g)" class="gate-note">{{ gateNote(g) }}</div>
+          </div>
+          <span class="gate-label">{{ gateMark(g.status).label }}</span>
         </div>
       </div>
     </div>

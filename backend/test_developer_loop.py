@@ -35,6 +35,9 @@ def make_runtime(role_status="done", route_kind="code"):
     A.store.set_session_final_status = lambda *a, **k: _noop()
     A.store.list_tasks = lambda *a, **k: _empty()
     A.store.replace_tasks = lambda *a, **k: _noop()
+    A.store.list_gates = lambda *a, **k: _empty()
+    A.store.replace_gates = lambda *a, **k: _noop()
+    A.store.save_gate_result = lambda *a, **k: _noop()
     return rt, calls
 
 

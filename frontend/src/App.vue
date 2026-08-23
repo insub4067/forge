@@ -111,6 +111,7 @@ const showCreateRoom = ref(false)
 const newRoomName = ref('')
 const newRoomPath = ref('')
 const tasks = ref([])
+const gates = ref([])  // Acceptance Gate — 요구사항별 검증 상태(passed는 프로세스 소유)
 // 칸반 카드 상태 변경을 채팅에 알리기 위한 직전 상태 스냅샷(title→status).
 const showKanban = ref(false)
 const showWorkspacePicker = ref(false)
@@ -500,6 +501,7 @@ async function selectRoom(id, isNew = false) {
   showRooms.value = false
   await loadMessages(isNew)
   await loadTasks()
+  await loadGates()
   await loadRefinements()
   checkRunning()
 }
@@ -590,6 +592,18 @@ async function loadTasks() {
   } catch {}
 }
 
+async function loadGates() {
+  const id = currentRoomId.value
+  if (!id) {
+    gates.value = []
+    return
+  }
+  try {
+    const res = await fetch(`/api/sessions/${id}/gates`)
+    if (res.ok) gates.value = await res.json()
+  } catch {}
+}
+
 async function createRoom() {
   const name = newRoomName.value.trim() || 'New Session'
   // 워크스페이스는 필수 — 미선택 시 홈으로 잘못 잡혀 git·skills가 깨진다.
@@ -628,6 +642,7 @@ async function deleteRoom(id) {
         localStorage.removeItem('forge_room')
         messages.value = []
         tasks.value = []
+        gates.value = []
       }
     }
   } catch {}
@@ -975,6 +990,9 @@ function handleEvent(evt, assistant) {
       tasks.value = newTasks
       break
     }
+    case 'gates_update':
+      gates.value = d.gates || []
+      break
     case 'user_injected':
       activePhase(assistant).tools.push({
         name: '사용자 메시지', args: {}, status: 'done', result: d.content || '', diff: '',
@@ -1008,6 +1026,7 @@ function handleEvent(evt, assistant) {
         p.collapsed = true
       })
       if (d.content) assistant.doneMessage = d.content
+      loadGates()  // 최종 게이트 상태 재조회(누락 이벤트 보정)
       break
   }
   maybeScrollBottom()
@@ -1102,6 +1121,7 @@ async function send() {
   }
   busy.value = true
   input.value = ''
+  gates.value = []  // 새 run 시작 — 이전 run의 게이트 상태 제거(이번 run이 다시 등록)
   debug.value = '전송 중…'
   // 스트림이 done 없이 끊기면(폰 잠금·터널 재연결) 받은 만큼만 남아 본문이 잘린다.
   let sawDone = false
@@ -1312,6 +1332,7 @@ onMounted(async () => {
   }
   await loadMessages()
   await loadTasks()
+  await loadGates()
   checkRunning()
 })
 
@@ -1703,6 +1724,7 @@ document.addEventListener('visibilitychange', () => {
     <KanbanPanel
       v-if="showKanban"
       :tasks="tasks"
+      :gates="gates"
       :room-title="currentRoom()?.title || 'FORGE'"
       @close="showKanban = false"
     />

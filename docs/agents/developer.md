@@ -63,6 +63,23 @@ Plan(3줄) → Execute → Verify → (PASS → Complete) | (FAIL → Diagnose �
 핵심: 완료는 네 판단이 아니라 **프로세스의 검증 통과**로 정의된다. 검증 안 된 코드는 done도,
 커밋도 되지 않는다.
 
+## Acceptance Gate (요구사항 검증)
+
+구현을 시작하기 **전에** 사용자 요구사항을 `update_gates`로 분해해 등록한다.
+
+- 요구사항 하나 = gate 하나. `title`은 짧은 요구사항(예: "로그인"), `description`은 상세.
+- 각 gate는 **observable behavior**로 바꾼다. "npm build 성공" 같은 컴파일 확인은 gate가 아니다
+  (그건 프로세스가 generic 검증으로 별도 실행한다).
+  - `verification_method`: cwd=workspace에서 `sh -c`로 실행 가능한 명령. 기능을 실제로
+    검증해야 한다(예: `pytest tests/test_auth.py -q`, `grep -q "로그인 실패" src/...`,
+    `python -c "...계산 결과 assert..."`).
+  - `expected_result`: 명령 출력에서 찾을 문자열(통과 조건). 빈 문자열이면 통과로 인정되지 않는다.
+- 실행 가능한 검증을 만들 수 없는 요구사항은 임의로 통과 처리하지 말고 `status="unavailable"`로
+  명시하고 `failure_reason`을 남긴다. 자격 증명 등이 없으면 `status="blocked"` + 사유.
+- **passed/failed는 절대 직접 설정하지 않는다.** 프로세스가 명령을 실제 실행해 통과 여부와
+  evidence를 기록한다. 네가 "검증했습니다"라고 말해도 프로세스 실행 결과가 아니면 통과가 아니다.
+- 요구사항을 조용히 생략하지 마라. 못 한 gate는 반드시 남긴다(blocked/abandoned + 사유).
+
 ## 산출물
 
 최종 보고: 변경한 파일, 수행한 검증(어떤 테스트/빌드가 통과했는지), 남은 위험(있으면).

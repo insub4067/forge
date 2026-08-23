@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, select, update
 
-from .models import (AgentRun, Checkpoint, Message, PushDevice, Refinement, ScheduledJob,
-                     Session, Task)
+from .models import (AcceptanceGate, AgentRun, Checkpoint, Message, PushDevice,
+                     Refinement, ScheduledJob, Session, Task)
 from .session import async_session
 
 
@@ -411,6 +411,144 @@ async def list_tasks(session_id: str) -> list[dict]:
             {"id": t.id, "title": t.title, "status": t.status, "progress": t.progress}
             for t in result.scalars()
         ]
+
+
+# ── Acceptance Gate Ledger ────────────────────────────────────────────────────
+# 프로세스 상태(passed/failed)는 sticky — 모델이 다시 보내도 덮어쓰지 않는다.
+_PROCESS_GATE_STATUS = ("passed", "failed")
+
+
+def _gate_dict(g: AcceptanceGate) -> dict:
+    return {
+        "id": g.id,
+        "title": g.title,
+        "description": g.description,
+        "verification_method": g.verification_method,
+        "expected_result": g.expected_result,
+        "status": g.status,
+        "evidence": g.evidence,
+        "failure_reason": g.failure_reason,
+    }
+
+
+def merge_gates(existing: list[dict], incoming: list[dict]) -> list[dict]:
+    """gate 신원을 유지한 병합(순수 함수). 태스크 병합(merge_tasks)과 같은 원리.
+
+    신원은 제목 키(task_key)다. 모델이 매번 전체 목록을 다시 보내므로 id·최초 제목을
+    유지하고 description/verification_method/expected_result만 갱신한다.
+    status는 clamp가 이미 적용된 모델 상태지만, 기존이 프로세스 상태(passed/failed)면
+    모델의 재선언으로 되돌리지 않는다(프로세스 소유권 보호).
+    """
+    out: list[dict] = []
+    used: set = set()
+    seen: set = set()
+    for g in incoming:
+        title = str(g.get("title", "")).strip()
+        if not title:
+            continue
+        key = task_key(title)
+        if key in seen:
+            continue
+        seen.add(key)
+        m = _match_task(existing, key, used)
+        if m:
+            used.add(m.get("id"))
+            old_status = m.get("status", "")
+            if old_status in _PROCESS_GATE_STATUS:
+                status = old_status          # 프로세스 소유 상태는 모델이 되돌릴 수 없다
+            else:
+                status = str(g.get("status", old_status)) or old_status
+            out.append({
+                "id": m.get("id"),
+                "title": m.get("title", title),          # 최초 제목 유지
+                "description": str(g.get("description") or m.get("description") or ""),
+                "verification_method": str(g.get("verification_method") or m.get("verification_method") or ""),
+                "expected_result": str(g.get("expected_result") or m.get("expected_result") or ""),
+                "status": status,
+                "evidence": m.get("evidence", "{}"),
+                "failure_reason": str(g.get("failure_reason") or m.get("failure_reason") or ""),
+            })
+        else:
+            out.append({
+                "id": None,
+                "title": title,
+                "description": str(g.get("description") or ""),
+                "verification_method": str(g.get("verification_method") or ""),
+                "expected_result": str(g.get("expected_result") or ""),
+                "status": str(g.get("status", "pending")),
+                "evidence": "{}",
+                "failure_reason": str(g.get("failure_reason") or ""),
+            })
+    return out
+
+
+async def replace_gates(session_id: str, gates: list[dict]) -> list[dict]:
+    """모델이 준 목록으로 gate를 갱신하고, 신원이 유지된 최종 목록을 반환한다."""
+    async with async_session() as s:
+        rows = (await s.execute(
+            select(AcceptanceGate).where(AcceptanceGate.session_id == session_id).order_by(AcceptanceGate.id)
+        )).scalars().all()
+        by_id = {r.id: r for r in rows}
+        existing = [_gate_dict(r) for r in rows]
+        merged = merge_gates(existing, gates)
+        keep: set = set()
+        for m in merged:
+            row = by_id.get(m["id"]) if m["id"] is not None else None
+            if row is None:
+                row = AcceptanceGate(session_id=session_id, title=m["title"],
+                                     description=m["description"],
+                                     verification_method=m["verification_method"],
+                                     expected_result=m["expected_result"],
+                                     status=m["status"], failure_reason=m["failure_reason"])
+                s.add(row)
+            else:
+                row.title = m["title"]
+                row.description = m["description"]
+                row.verification_method = m["verification_method"]
+                row.expected_result = m["expected_result"]
+                row.status = m["status"]
+                row.failure_reason = m["failure_reason"]
+                keep.add(row.id)
+        for r in rows:
+            if r.id not in keep:
+                await s.delete(r)
+        await s.commit()
+        result = (await s.execute(
+            select(AcceptanceGate).where(AcceptanceGate.session_id == session_id).order_by(AcceptanceGate.id)
+        )).scalars().all()
+        return [_gate_dict(r) for r in result]
+
+
+async def list_gates(session_id: str) -> list[dict]:
+    async with async_session() as s:
+        result = await s.execute(
+            select(AcceptanceGate).where(AcceptanceGate.session_id == session_id).order_by(AcceptanceGate.id)
+        )
+        return [_gate_dict(r) for r in result.scalars()]
+
+
+async def save_gate_result(session_id: str, gate_id: int, status: str,
+                           evidence: str, failure_reason: str = "") -> None:
+    """gate의 검증 결과를 기록한다 — 프로세스 전용(모델은 호출하지 않는다)."""
+    async with async_session() as s:
+        row = (await s.execute(
+            select(AcceptanceGate).where(AcceptanceGate.id == gate_id,
+                                        AcceptanceGate.session_id == session_id)
+        )).scalar_one_or_none()
+        if row is None:
+            return
+        row.status = status
+        row.evidence = evidence
+        row.failure_reason = failure_reason
+        await s.commit()
+
+
+async def delete_gates(session_id: str) -> None:
+    """테스트 정리용 — 세션의 gate를 모두 지운다."""
+    from sqlalchemy import delete as sa_delete
+    async with async_session() as s:
+        await s.execute(sa_delete(AcceptanceGate).where(AcceptanceGate.session_id == session_id))
+        await s.commit()
 
 
 async def save_agent_run(
