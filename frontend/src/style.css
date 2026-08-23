@@ -1718,34 +1718,53 @@ footer .image-preview-row {
 
 .modal-question {
   font-size: 16px;
-  line-height: 1.5;
+  line-height: 1.65;
   margin-bottom: 16px;
   white-space: pre-wrap;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  max-height: 40vh;
+  overflow-y: auto;
 }
 
 .modal-options {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
 }
 
 .modal-options button {
-  padding: 12px;
+  padding: 13px 14px;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--panel-2);
   color: var(--text);
   font-size: 15px;
-  line-height: 1.45;
+  line-height: 1.55;
   text-align: left;
   white-space: pre-wrap;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  transition: background 0.15s, border-color 0.15s;
 }
 
-/* 마지막 선택지(항상 FORGE 판단)는 시각적으로 구분해 한눈에 보이게 한다. */
+.modal-options button:not(:last-child):hover {
+  background: var(--accent-soft);
+  border-color: var(--border);
+}
+
+/* 마지막 선택지(항상 Forge 판단에 맡기기)는 시각적으로 구분해 한눈에 보이게 한다. */
 .modal-options button:last-child {
+  margin-top: 4px;
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel-2));
+}
+
+.modal-options button:last-child:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel-2));
 }
 
 .modal-input {

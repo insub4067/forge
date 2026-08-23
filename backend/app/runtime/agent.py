@@ -236,6 +236,31 @@ def _last_assistant_text(messages: list[dict]) -> str:
     return ""
 
 
+def _format_question(text: str, line_len: int = 56) -> str:
+    """질문 텍스트를 문장 단위로 줄바꿈해 팝업 가독성을 높인다.
+
+    모델이 보낸 질문은 보통 한 줄로 길게 온다. 문장 경계(。.!?) 뒤와,
+    한 줄이 지나치게 길어지면 그 지점에서 줄바꿈을 넣어 읽기 쉽게 만든다.
+    이미 줄바꿈(모델이 구조화)이 있으면 그대로 둔다."""
+    if not text:
+        return text
+    if "\n" in text:
+        return text
+    import re
+    sentences = re.split(r"(?<=[。.!?])\s+", text.strip())
+    out: list[str] = []
+    buf = ""
+    for s in sentences:
+        if buf and len(buf) + len(s) > line_len:
+            out.append(buf)
+            buf = s
+        else:
+            buf = (buf + " " + s).strip() if buf else s
+    if buf:
+        out.append(buf)
+    return "\n".join(out)
+
+
 # auto 모드의 multi 전환 기준 — 요청 특성이 복잡 작업으로 보이면 Planner가 선행한다.
 _COMPLEX_KEYWORDS = (
     "설계", "리팩토링", "리팩터링", "아키텍처", "마이그레이션", "전체",
@@ -640,13 +665,13 @@ class AgentRuntime:
     ) -> str:
         question_id = uuid.uuid4().hex
         options = list(args.get("options", []) or [])
-        # 선택형 질문이면 항상 마지막에 "FORGE가 판단" 선택지를 붙인다 —
+        # 선택형 질문이면 항상 마지막에 "Forge 판단에 맡기기"를 붙인다 —
         # 사용자가 선택을 모를 때 FORGE(모델)가 스스로 판단해 진행하게 한다.
         if options:
-            options = [*options, "FORGE 판단으로 선택"]
+            options = [*options, "Forge 판단에 맡기기"]
         detail = {
             "id": question_id,
-            "question": args.get("question", ""),
+            "question": _format_question(args.get("question", "")),
             "options": options,
         }
         await send("question_request", detail)
