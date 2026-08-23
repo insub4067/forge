@@ -881,6 +881,14 @@ async def room_metrics(session_id: str):
     runs = await store.session_agent_runs(session_id)
     cost, priced, total = metrics_calc.sum_cost(runs)
     agg["estimated_cost"] = cost
+    # run별 비용(USD) — 가격표에 없는 모델은 None. 상세 페이지에서 run 단위로 표시.
+    for r in runs:
+        r["cost_usd"] = metrics_calc.run_cost(
+            r.get("model", ""),
+            r.get("cache_hit_tokens", 0),
+            r.get("cache_miss_tokens", 0),
+            r.get("completion_tokens", 0),
+        )
     agg["runs"] = runs
     agg["bottlenecks"] = metrics_calc.bottlenecks(agg)
     return agg

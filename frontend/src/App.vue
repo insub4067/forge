@@ -2698,6 +2698,15 @@ document.addEventListener('visibilitychange', () => {
           <div v-for="(b, bi) in (sessionMetrics.bottlenecks || [])" :key="bi" class="metric-warn">⚠ {{ b }}</div>
         </div>
 
+        <div v-if="sessionMetrics && sessionMetrics.runs && sessionMetrics.runs.length" class="admin-section">
+          <div class="admin-stat-title">이번 세션 비용 (run별)</div>
+          <div class="admin-sub">합계 ${{ sessionMetrics.estimated_cost != null ? sessionMetrics.estimated_cost.toFixed(4) : '—' }}</div>
+          <div v-for="(r, ri) in sessionMetrics.runs" :key="ri" class="admin-row">
+            <span>{{ ROLE_LABELS[r.role] || r.role }} <span class="run-count">×{{ r.model_calls || 0 }}호출</span></span>
+            <span class="mono">{{ r.cost_usd != null ? '$' + r.cost_usd.toFixed(6) : '가격표 없음' }}</span>
+          </div>
+        </div>
+
         <div class="admin-section">
           <div class="admin-stat-title">에이전트별 사용량</div>
           <div v-for="a in sessionRoleBreakdown()" :key="a.role" class="admin-row">
