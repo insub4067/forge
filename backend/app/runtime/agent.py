@@ -783,6 +783,15 @@ class AgentRuntime:
                     all_messages.append(user_msg)
                     await send("user_injected", {"content": text})
 
+            # durable: 스텝마다 진행 history를 저장한다 — 중단(재시작·크래시·스트림 끊김)돼도
+            # 완료된 스텝이 유실되지 않고, 재개 시 이 history에서 이어서 계속할 수 있다.
+            # (이전엔 run 종료 시 한 번만 저장해 중단되면 그 run 전체가 사라졌다.)
+            if session_id:
+                try:
+                    await store.save_history(session_id, all_messages)
+                except Exception as err:
+                    error_log.record("incremental_save", str(err), session_id)
+
             reasoning: list[str] = []
             content: list[str] = []
             reasoning_buf: list[str] = []

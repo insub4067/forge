@@ -93,8 +93,8 @@ def test_developer_escalation():
     esc = r.select_model("developer", escalate=True)
     assert esc["model"] == r.developer_pro_model and "pro" in esc["model"], esc
     assert esc["thinking"] is True and esc["reasoning_effort"] == "high", esc
-    # 역할은 developer/vision/chat 3개만
-    assert set(r._policy.keys()) == {"developer", "chat", "vision"}, r._policy.keys()
+    # 역할 정책: developer/chat/vision + 멀티 모드용 planner/reviewer
+    assert set(r._policy.keys()) == {"developer", "chat", "vision", "planner", "reviewer"}, r._policy.keys()
     print("OK developer flash+think / Sr(pro) escalation (8-9)")
 
 
