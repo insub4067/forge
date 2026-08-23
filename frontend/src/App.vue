@@ -753,8 +753,12 @@ function smoothScrollToBottom() {
 }
 
 // 하단 근처에 있고, 사용자가 스크롤 조작 중이 아닐 때만 따라 내려간다(읽는 위치를 뺏지 않음).
+// 하단 고정 상태에선 부드러운 추격(rAF)이 스트림마다 출렁여 멀미를 유발한다 → 즉시 스냅.
 function maybeScrollBottom() {
-  if (isAtBottom.value && !scrollLocked) smoothScrollToBottom()
+  if (isAtBottom.value && !scrollLocked) {
+    const el = chatEl.value
+    if (el) el.scrollTop = el.scrollHeight
+  }
 }
 
 // 버튼용 — 부드럽게 스크롤
