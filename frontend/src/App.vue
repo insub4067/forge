@@ -5,7 +5,6 @@ import DOMPurify from 'dompurify'
 import 'highlight.js/styles/github-dark.css'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import PdfViewer from './components/PdfViewer.vue'
 import FileViewer from './components/FileViewer.vue'
 import { balance as adminBalance, loadBalance } from './store'
 import '@xterm/xterm/css/xterm.css'
@@ -3067,20 +3066,12 @@ document.addEventListener('visibilitychange', () => {
           {{ e.name }}
         </button>
       </div>
-      <div v-else-if="viewerKind === 'image'" class="media-view">
-        <img :src="mediaUrl" :alt="viewingFile" @click="openViewer(mediaUrl)" />
-      </div>
-      <div v-else-if="viewerKind === 'video'" class="media-view">
-        <video :src="mediaUrl" controls playsinline />
-      </div>
-      <div v-else-if="viewerKind === 'audio'" class="media-view">
-        <audio :src="mediaUrl" controls />
-      </div>
-      <PdfViewer v-else-if="viewerKind === 'pdf'" :url="mediaUrl" />
-      <div v-else class="code-view">
-        <div class="code-gutter"><span v-for="n in fileLineCount" :key="n">{{ n }}</span></div>
-        <pre class="code-body"><code v-html="highlightedContent"></code></pre>
-      </div>
+      <FileViewer
+        v-else-if="viewingFile"
+        :path="viewingFile"
+        :session-id="currentRoomId || ''"
+        @image-click="openViewer($event)"
+      />
     </div>
 
     <div v-if="showModelPicker" class="modal-overlay" style="z-index: 400" @click="showModelPicker = false">
