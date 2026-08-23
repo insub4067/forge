@@ -347,6 +347,13 @@ function ctxPct(room) {
   return Math.min(100, Math.round((used / budget) * 100))
 }
 
+function statusClass(status) {
+  if (status === 'completed') return 'ok'
+  if (status === 'verification_failed' || status === 'failed') return 'err'
+  if (status === 'completed_unverified') return 'warn'
+  return 'idle'
+}
+
 watch(
   () => props.showRooms,
   (v) => {
@@ -408,6 +415,7 @@ watch(
               @touchend="onRoomTouchEnd(r, $event)"
             >
               <span v-if="r.running" class="room-spinner" title="작업 중"></span>
+              <span v-else-if="r.final_status" class="room-status" :class="statusClass(r.final_status)" :title="r.final_status"></span>
               <span v-else class="room-status" :class="r.id === currentRoomId ? 'active' : 'idle'"></span>
               <div class="room-info">
                 <div class="room-title">{{ r.title }}<span v-if="r.scheduled" class="room-badge">예약</span></div>

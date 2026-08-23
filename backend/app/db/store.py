@@ -195,6 +195,7 @@ async def list_rooms() -> list[dict]:
                 "used_tokens": sess.used_tokens,
                 "logical_budget": sess.logical_budget,
                 "running": sess.running,
+                "final_status": sess.final_status,
                 "scheduled": sess.id in job_sids,
             }
             for sess, count in result.all()

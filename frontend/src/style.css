@@ -2847,6 +2847,18 @@ button {
   border-color: var(--accent);
   box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
 }
+.room-status.ok {
+  background: #34d399;
+  border-color: #34d399;
+}
+.room-status.err {
+  background: #f87171;
+  border-color: #f87171;
+}
+.room-status.warn {
+  background: #f59e0b;
+  border-color: #f59e0b;
+}
 .room-spinner {
   width: 13px;
   height: 13px;
