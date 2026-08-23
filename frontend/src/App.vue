@@ -4,11 +4,9 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/github-dark.css'
-import * as pdfjsLib from 'pdfjs-dist'
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import PdfViewer from './components/PdfViewer.vue'
 import { balance as adminBalance, loadBalance } from './store'
 import '@xterm/xterm/css/xterm.css'
 
@@ -904,66 +902,14 @@ function _mediaKind(path) {
   for (const [kind, exts] of Object.entries(_MEDIA)) if (exts.includes(ext)) return kind
   return 'text'
 }
-const pdfContainer = ref(null)
-const pdfScale = ref(1)
-let _pinchDist = 0
-let _pinchScale = 1
-function _touchDist(t) {
-  return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
-}
-function pdfTouchStart(e) {
-  if (e.touches.length === 2) {
-    _pinchDist = _touchDist(e.touches)
-    _pinchScale = pdfScale.value
-  }
-}
-function pdfTouchMove(e) {
-  if (e.touches.length === 2 && _pinchDist) {
-    e.preventDefault() // 핀치 중 페이지 스크롤 방지
-    const s = _pinchScale * (_touchDist(e.touches) / _pinchDist)
-    pdfScale.value = Math.max(1, Math.min(4, s))
-  }
-}
-function pdfResetZoom() {
-  pdfScale.value = 1
-}
-async function renderPdf(url) {
-  pdfScale.value = 1
-  await nextTick()
-  const el = pdfContainer.value
-  if (!el) return
-  el.innerHTML = ''
-  try {
-    const pdf = await pdfjsLib.getDocument({ url }).promise
-    const dpr = Math.min(window.devicePixelRatio || 1, 2)
-    const cssWidth = Math.min(el.clientWidth || 360, 900)
-    for (let n = 1; n <= pdf.numPages; n++) {
-      const page = await pdf.getPage(n)
-      const base = page.getViewport({ scale: 1 })
-      const scale = (cssWidth / base.width) * dpr
-      const vp = page.getViewport({ scale })
-      const canvas = document.createElement('canvas')
-      canvas.width = vp.width
-      canvas.height = vp.height
-      canvas.style.width = cssWidth + 'px'
-      canvas.style.height = (vp.height / dpr) + 'px'
-      canvas.className = 'pdf-page'
-      el.appendChild(canvas)
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise
-    }
-  } catch (e) {
-    el.textContent = 'PDF를 불러오지 못했습니다: ' + (e.message || e)
-  }
-}
 async function openFile(path) {
   const kind = _mediaKind(path)
   viewerKind.value = kind
   viewingFile.value = path
   if (kind !== 'text') {
-    // 미디어는 원본 URL로 직접 재생/표시(텍스트로 읽지 않음)
+    // 미디어는 원본 URL로 직접 재생/표시(텍스트로 읽지 않음, PDF는 PdfViewer가 렌더)
     mediaUrl.value = `/api/fs/raw?path=${encodeURIComponent(path)}&session_id=${currentRoomId.value}`
     fileContent.value = ''
-    if (kind === 'pdf') renderPdf(mediaUrl.value)
     return
   }
   try {
@@ -3182,10 +3128,7 @@ document.addEventListener('visibilitychange', () => {
       <div v-else-if="viewerKind === 'audio'" class="media-view">
         <audio :src="mediaUrl" controls />
       </div>
-      <div v-else-if="viewerKind === 'pdf'" class="pdf-view"
-           @touchstart.passive="pdfTouchStart" @touchmove="pdfTouchMove" @dblclick="pdfResetZoom">
-        <div ref="pdfContainer" class="pdf-pages" :style="{ transform: `scale(${pdfScale})` }"></div>
-      </div>
+      <PdfViewer v-else-if="viewerKind === 'pdf'" :url="mediaUrl" />
       <div v-else class="code-view">
         <div class="code-gutter"><span v-for="n in fileLineCount" :key="n">{{ n }}</span></div>
         <pre class="code-body"><code v-html="highlightedContent"></code></pre>
