@@ -2544,15 +2544,13 @@ document.addEventListener('visibilitychange', () => {
           </div>
           <div v-show="adminPolicyOpen">
             <div class="admin-row"><span>Provider</span><span>{{ adminStats.provider }}</span></div>
-            <div v-for="(p, role) in adminStats.policy?.roles" :key="role" class="admin-policy">
-              <div class="admin-row">
-                <span class="role-name">{{ role }}</span>
-                <button class="admin-edit" @click="changeRoleModel(role)">변경</button>
-              </div>
-              <div class="admin-policy-detail">
+            <div v-for="(p, role) in adminStats.policy?.roles" :key="role" class="policy-line">
+              <span class="role-name">{{ role }}</span>
+              <span class="policy-model">
                 <span class="mono">{{ p.model }}</span>
-                <span class="tag">{{ p.thinking ? 'thinking' : 'no-thinking' }} · {{ p.reasoning_effort }}</span>
-              </div>
+                <span class="tag" :class="{ think: p.thinking }">{{ p.thinking ? 'think' : 'no-think' }}·{{ p.reasoning_effort }}</span>
+              </span>
+              <button class="admin-edit" @click="changeRoleModel(role)">변경</button>
             </div>
           </div>
         </div>
