@@ -31,11 +31,17 @@ def make_runtime(role_status="done", route_kind="code"):
     A.store.ensure_session = lambda *a, **k: _noop()
     A.store.save_history = lambda *a, **k: _noop()
     A.store.set_session_final_status = lambda *a, **k: _noop()
+    A.store.list_tasks = lambda *a, **k: _empty()
+    A.store.replace_tasks = lambda *a, **k: _noop()
     return rt, calls
 
 
 async def _noop():
     return None
+
+
+async def _empty():
+    return []
 
 
 async def run_case(rt, cancel_after_events=None):

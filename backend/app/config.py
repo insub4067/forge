@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     skills_off: bool = False
     # Developer를 항상 pro로(실험용). 기본 False — 평소 flash+think-medium, 실패 시에만 pro 승격.
     developer_pro: bool = False
+    # 작업 성공 완료 시 하네스가 자동으로 git commit(+push)한다 — 커밋 누락 방지. 기본 True.
+    # git 워크스페이스이고 변경이 있을 때만. 끄려면 AUTO_COMMIT=0.
+    auto_commit: bool = True
     # Web Push (VAPID). public_key는 브라우저 구독용(비밀 아님). private key는 PEM 파일 경로.
     vapid_public_key: str = "BEdgt7HlWXy3-F1M2MKCkcBrOuW0uWoUvg58WzYFA7z1GBVu9IRGy15NlRP-A1cWINwTO4x4n0HMOmgiukK3HCQ"
     vapid_private_key_path: str = str(BASE_DIR / "vapid_private.pem")

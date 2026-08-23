@@ -25,7 +25,7 @@ from ..sandbox.executor import DockerSandbox
 MAX_STEPS = 30
 # Developer는 설계+구현+자체검증+수정을 한 루프에서 하므로 step budget을 넉넉히.
 # (옛 구조의 planner+coder+reviewer+debugger 여러 호출을 한 컨텍스트로 합친 것)
-DEVELOPER_MAX_STEPS = 45
+DEVELOPER_MAX_STEPS = 60
 # Planner/Reviewer는 계획·검증 전담이라 step budget이 작아도 충분(비용·지연 억제).
 PLANNER_MAX_STEPS = 10
 REVIEWER_MAX_STEPS = 12
@@ -1020,6 +1020,61 @@ class AgentRuntime:
 
         return "max_steps", total_prompt, total_completion, route
 
+    async def _finalize_tasks(self, session_id: str, send: EventSink) -> None:
+        """성공 완료 시 남은 task를 done으로 마감한다 — 모델이 update_tasks로 상태를
+        안 올려 칸반이 todo에 멈추는 문제를 하네스가 backstop한다."""
+        if not session_id:
+            return
+        try:
+            tasks = await store.list_tasks(session_id)
+            if not tasks:
+                return
+            changed = False
+            for t in tasks:
+                if t.get("status") != "done":
+                    t["status"] = "done"
+                    changed = True
+            if changed:
+                await store.replace_tasks(session_id, tasks)
+                await send("task_update", {"tasks": tasks})
+        except Exception as err:
+            error_log.record("finalize_tasks", str(err), session_id)
+
+    async def _autocommit(self, ws: str, goal: str, send: EventSink) -> None:
+        """성공 완료 시 git 워크스페이스면 자동 commit(+push) — 커밋 누락 방지.
+        best-effort: 실패해도 run을 막지 않는다. AUTO_COMMIT=0으로 끈다."""
+        if not settings.auto_commit or not ws:
+            return
+
+        async def _g(*args, timeout=90):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "-C", ws, *args,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+                return proc.returncode, out.decode(errors="replace")
+            except Exception:
+                return 1, ""
+
+        try:
+            rc, out = await _g("rev-parse", "--is-inside-work-tree", timeout=10)
+            if rc != 0 or "true" not in out:
+                return  # git 저장소가 아님
+            rc, out = await _g("status", "--porcelain", timeout=15)
+            if rc != 0 or not out.strip():
+                return  # 변경 없음
+            msg = f"chore: FORGE 자동 커밋 — {(goal or '작업').strip()[:60]}"
+            await _g("add", "-A", timeout=30)
+            rc, _ = await _g("commit", "-m", msg, timeout=30)
+            committed = rc == 0
+            pushed = False
+            if committed:
+                rc, _ = await _g("push", timeout=90)
+                pushed = rc == 0
+            await send("autocommit", {"committed": committed, "pushed": pushed, "message": msg})
+        except Exception as err:
+            error_log.record("autocommit", str(err), "")
+
     async def run(
         self,
         history: list[dict],
@@ -1101,6 +1156,11 @@ class AgentRuntime:
             )
 
         async def finish(status: str, content: str = "") -> None:
+            # 성공 완료 시 하네스가 장부를 마감한다 — 모델이 잊어도 신뢰성 보장:
+            # 남은 task done 처리(칸반), 변경 자동 commit+push(커밋 누락 방지).
+            if status == "completed":
+                await self._finalize_tasks(session_id, send)
+                await self._autocommit(ws, goal, send)
             # done 이벤트를 보내면서 세션 final_status를 영속화(성공 정의·집계 기준).
             if session_id:
                 await store.set_session_final_status(session_id, status)
