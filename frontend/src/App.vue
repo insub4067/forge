@@ -1326,7 +1326,7 @@ document.addEventListener('visibilitychange', () => {
       <button class="room-btn" @click="openRoomSettings()">
         <span class="room-title-main">
           <span class="status-dot" :class="(busy || sessionRunning) ? 'working' : 'idle'"></span>
-          {{ currentRoom()?.title || 'FORGE' }}
+          <span class="room-title-text">{{ currentRoom()?.title || 'FORGE' }}</span>
           <span v-if="currentRoom()?.mode === 'chat'" class="room-mode-badge chat">채팅</span>
         </span>
         <span class="room-sub">

@@ -144,13 +144,22 @@ header .room-btn {
 }
 
 .room-title-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
   font-size: 16px;
   font-weight: 600;
-  max-width: 100%;
+}
+/* 제목만 말줄임 — 배지가 잘리지 않도록 배지·상태점은 안 줄인다 */
+.room-title-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
+.room-title-main .status-dot,
+.room-title-main .room-mode-badge { flex-shrink: 0; }
 
 .room-sub {
   font-size: 11px;
