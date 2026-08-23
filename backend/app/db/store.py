@@ -64,6 +64,15 @@ async def update_room_title(session_id: str, title: str) -> None:
             await s.commit()
 
 
+async def session_state(session_id: str) -> dict:
+    """세션의 실행 상태(running/final_status). task facade·MCP 결과 조회용."""
+    async with async_session() as s:
+        sess = await s.get(Session, session_id)
+        if sess is None:
+            return {"exists": False, "running": False, "final_status": ""}
+        return {"exists": True, "running": bool(sess.running), "final_status": sess.final_status or ""}
+
+
 async def get_room(session_id: str) -> dict | None:
     async with async_session() as s:
         sess = await s.get(Session, session_id)
