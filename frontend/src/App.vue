@@ -331,6 +331,21 @@ async function checkRunning() {
   startRunningPoll()
 }
 
+// 포그라운드 복귀 시 stale 상태 수렴. 모바일 백그라운드에서 SSE reader.read()가 끊기지 않고
+// 무한 대기하면 busy가 true로 고착돼 '실행 중'이 남고 폴링도 건너뛴다. 복귀하면 서버 진실을
+// 강제로 확인해, busy 중이어도 서버가 idle이면 busy를 풀고 최종 결과를 DB에서 반영한다.
+async function reconcileOnResume() {
+  const id = currentRoomId.value
+  if (id && busy.value) {
+    const st = await fetchStatus(id).catch(() => null)
+    if (st && !st.running) {
+      busy.value = false // 죽은 스트림의 stale '실행 중' 해제
+      await loadMessages(true) // 스트림으로 못 받은 최종 결과 반영
+    }
+  }
+  checkRunning()
+}
+
 function startRunningPoll() {
   if (runningPoll) return
   runningPoll = setInterval(async () => {
@@ -1949,7 +1964,7 @@ onMounted(async () => {
 })
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') checkRunning()
+  if (document.visibilityState === 'visible') reconcileOnResume()
 })
 </script>
 
@@ -1965,7 +1980,7 @@ document.addEventListener('visibilitychange', () => {
           {{ currentRoom()?.title || 'FORGE' }}
         </span>
         <span class="room-sub">
-          <span v-if="busy" class="status-live">실행 중</span><template v-if="busy"> · </template>{{ shortPath(currentRoom()?.workspace_path) || 'Mobile Coding Agent' }}
+          <span v-if="busy || sessionRunning" class="status-live">실행 중</span><template v-if="busy || sessionRunning"> · </template>{{ shortPath(currentRoom()?.workspace_path) || 'Mobile Coding Agent' }}
         </span>
       </button>
       <div class="header-right">
