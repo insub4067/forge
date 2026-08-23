@@ -54,7 +54,7 @@ Agent step마다 history를 영속화한다. 서버 시작 시 unfinished/runnin
 - resume 중 재충돌 시 무한 재개를 막는 guard 존재
 - Python coroutine 자체를 복원하는 것이 아니라 저장된 Agent state/history에서 실행을 재구성한다.
 
-현재 남은 과제는 resume 과정에서 approval 권한이 확대되지 않도록 capability 경계를 더 엄밀히 만드는 것이다.
+resume 과정에서 approval 권한이 확대되지 않도록 capability 경계를 강화했다: 재시작 전 auto_approve 값을 그대로 복원(True 강제 없음), 세션별 승인 필터, BLOCKED_COMMANDS 차단. 회귀 테스트(`test_reliability_gates.py`·`test_reliability_invariants.py`)로 고정되어 있다.
 
 ## Verification Authority
 
@@ -108,10 +108,8 @@ HTTP와 WebSocket `/api/*`는 `FORGE_AUTH_TOKEN` 기반 application auth를 사�
 
 ## 다음 구조적 과제
 
-1. verification 3상태 및 completion/commit invariant
-2. resume-safe approval/capability
-3. benchmark 확대
-4. RSI candidate worktree + benchmark + human promotion
-5. Scheduler durable semantics
-6. Tool Script/RPC
-7. ExecutionBackend(Local/Docker/SSH)
+1. benchmark 확대
+2. RSI candidate worktree + benchmark + human promotion
+3. Scheduler durable semantics
+4. Tool Script/RPC
+5. ExecutionBackend(Local/Docker/SSH)

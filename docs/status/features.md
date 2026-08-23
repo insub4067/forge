@@ -26,7 +26,7 @@
 | event polling + seq dedup | ✅ |
 | 서버 재시작 후 Durable Auto Resume | ✅ |
 | resume crash-loop guard | ✅ |
-| resume-safe approval/capability | 🟡 |
+| resume-safe approval/capability | ✅ |
 
 ## Context / Skills / 비용
 
@@ -78,9 +78,8 @@
 
 ## 다음 우선순위
 
-1. resume-safe approval/capability
-2. benchmark 확대
-3. bounded RSI candidate pipeline
-4. Scheduler durable semantics
-5. Tool Script/RPC
-6. ExecutionBackend
+1. benchmark 확대
+2. bounded RSI candidate pipeline
+3. Scheduler durable semantics
+4. Tool Script/RPC
+5. ExecutionBackend

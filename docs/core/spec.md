@@ -97,7 +97,7 @@ Developer는 Flash+thinking을 기본으로 하고 막힐 때만 Pro로 승격�
 - resume 중 재충돌에 대한 loop guard
 - SSE 단절 시 status/event polling 복구
 
-남은 핵심: resume 시 권한이 재시작 전보다 확대되지 않도록 approval/capability 경계를 강화한다.
+resume 시 권한이 재시작 전보다 확대되지 않도록 approval/capability 경계를 강화했다: 재시작 전 auto_approve 값을 그대로 복원(True 강제 없음), 세션별 승인 필터, BLOCKED_COMMANDS 차단.
 
 ## 8. Evaluation / RSI
 
@@ -136,12 +136,10 @@ Condition/Deferred Job, timezone/idempotency/restart semantics는 계속 고도�
 
 ## 11. 다음 우선순위
 
-1. verification 3상태와 commit/push invariant 강화
-2. resume-safe approval/capability
-3. benchmark 확대 및 실제 비교 데이터 축적
-4. bounded RSI candidate worktree/promotion pipeline
-5. Scheduler durable semantics
-6. Tool Script/RPC
-7. ExecutionBackend
+1. benchmark 확대 및 실제 비교 데이터 축적
+2. bounded RSI candidate worktree/promotion pipeline
+3. Scheduler durable semantics
+4. Tool Script/RPC
+5. ExecutionBackend
 
 Vector DB, 무분별한 Multi-Agent, 거대한 plugin framework는 실측 병목이 생기기 전 기본 해법으로 사용하지 않는다.

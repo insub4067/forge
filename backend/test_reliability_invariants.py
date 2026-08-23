@@ -240,7 +240,10 @@ async def main():
 
     # resume 권한 확대 방지 강화 — auto_approve=True였던 세션도 그대로 True 복원(무인 위임 유지)
     calls["aa"] = None
-    routes.store.get_session_auto_approve = lambda sid: True  # 재시작 전 무인 위임이었다
+
+    async def fake_get_aa_true(sid):  # get_session_auto_approve는 async — 동기 lambda면 await에서 터진다
+        return True
+    routes.store.get_session_auto_approve = fake_get_aa_true  # 재시작 전 무인 위임이었다
     await routes.resume_run("s1", "/tmp")
     assert calls["aa"] is True, f"무인 위임 세션은 재개 시 True 복원돼야 함, got {calls['aa']}"
     print("resume 권한 invariant(무인 위임): OK — auto_approve=True 세션도 그대로 True 복원")
