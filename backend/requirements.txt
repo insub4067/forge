@@ -7,3 +7,5 @@ psycopg[binary]
 redis
 pydantic-settings
 python-dotenv
+pytest
+pytest-asyncio

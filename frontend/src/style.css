@@ -3607,7 +3607,12 @@ button {
   left: 0;
   right: 0;
   z-index: 20;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  /* 존재감을 낮춘다 — 반투명 배경 + 블러로 뒤가 살짝 비치고, 그림자는 옅게. 텍스트는 선명. */
+  background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom-color: transparent;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
 
 /* 대기큐 배지 — 작업 중 큐에 넣은 사용자 메시지(일반 말풍선과 구분) */
