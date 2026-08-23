@@ -134,9 +134,30 @@ async def main():
         st, rep = await rt._verify(d, _ns)
         assert st == "unavailable", (st, rep)
 
+        # 핵심 회귀: pytest 실행/설정 오류(exit 4/5) + 다른 check(build) 통과해도
+        # 전체를 PASS로 오판하면 안 된다 — '검증 성공'으로 기록 금지(unavailable 유지).
+        fd = os.path.join(d, "frontend")
+        os.makedirs(os.path.join(fd, "node_modules"))
+        with open(os.path.join(fd, "package.json"), "w") as f:
+            f.write(json.dumps({"name": "t", "version": "1.0.0", "scripts": {"build": "exit 0"}}))
+
+        _set(FAKE_PYTEST_EXIT="4")  # 설정/사용법 오류 + build 통과 → 전체 unavailable(거짓 passed 금지)
+        st, rep = await rt._verify(d, _ns)
+        assert st == "unavailable", (st, rep)
+        assert "exit 4" in rep, rep
+
+        _set(FAKE_PYTEST_EXIT="5")  # 테스트 수집 0 + build 통과 → unavailable
+        st, rep = await rt._verify(d, _ns)
+        assert st == "unavailable", (st, rep)
+        assert "exit 5" in rep, rep
+
+        _set(FAKE_PYTEST_EXIT="0")  # 전부 통과(pytest + build) → passed (오판 금지가 지나치지 않음)
+        st, rep = await rt._verify(d, _ns)
+        assert st == "passed", (st, rep)
+
         for k in ("FAKE_PYTEST_INSTALLED", "FAKE_PYTEST_EXIT"):
             os.environ.pop(k, None)
-    print("verify pytest 3-state: OK — exit 0=passed / 1=failed / 2·미설치=unavailable")
+    print("verify pytest 3-state: OK — exit 0=passed / 1=failed / 2·미설치=unavailable, 설정오류+통과=PASS 오판 금지")
 
     # ── 승인 경계: auto_approve 세션만 자동 승인, 그 외는 approval_request ──
     from app.tools import registry as R
