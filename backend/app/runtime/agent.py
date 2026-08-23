@@ -1107,6 +1107,12 @@ class AgentRuntime:
             await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
             return all_messages
 
+        # 실험용: reviewer/debugger 자기수정 루프를 생략(coder 1패스로 종료).
+        # "weak+loop vs strong 1패스" cost-per-success 비교용. 기본 off.
+        if settings.no_review:
+            await finish("completed", "reviewer/debugger 생략(no_review) — coder 1패스 완료.")
+            return all_messages
+
         # 3. Reviewer ↔ Debugger 자기수정 루프 (상태 기반 반복)
         #    Reviewer가 task를 done/debug로, Debugger가 review로 되돌린다.
         #    모든 task가 done이 될 때까지, 최대 MAX_REVIEW_CYCLES회 반복.

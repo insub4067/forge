@@ -77,6 +77,10 @@ def _variant_label() -> str:
         parts.append("planner=PRO(default)")
     if settings.skills_off:
         parts.append("skills=OFF")
+    if settings.no_review:
+        parts.append("review=OFF")
+    if settings.coder_pro:
+        parts.append("coder=PRO")
     return " ".join(parts)
 
 
