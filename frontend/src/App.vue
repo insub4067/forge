@@ -9,6 +9,9 @@ import FileViewer from './components/FileViewer.vue'
 import GitPanel from './components/GitPanel.vue'
 import AdminPanel from './components/AdminPanel.vue'
 import PushPanel from './components/PushPanel.vue'
+import KanbanPanel from './components/KanbanPanel.vue'
+import MenuPanel from './components/MenuPanel.vue'
+import SessionDetailPanel from './components/SessionDetailPanel.vue'
 import { balance as adminBalance, loadBalance } from './store'
 import '@xterm/xterm/css/xterm.css'
 
@@ -177,7 +180,6 @@ const showMenu = ref(false)
 const showAdmin = ref(false)
 const showPush = ref(false)
 const showSessionDetail = ref(false)
-const showRunHistory = ref(false)
 // 잔액 영역 탭 → "충전 화면으로 이동하시겠습니까?" 팝업
 const showTopUpConfirm = ref(false)
 function openTopUpConfirm() {
@@ -188,8 +190,6 @@ function goTopUp() {
   window.open(url, '_blank', 'noopener')
   showTopUpConfirm.value = false
 }
-const sessionRuns = ref([])
-const sessionMetrics = ref(null)
 const attachedImages = ref([]) // 여러 장 첨부
 const viewerImages = ref([]) // 전체화면 뷰어 이미지 목록
 const viewerIndex = ref(0)
@@ -235,22 +235,7 @@ function viewerTouchEnd(e) {
 }
 const attachedText = ref(null) // { name, content, truncated }
 const fileInput = ref(null)
-const kanbanOpen = ref({
-  todo: false,
-  working: false,
-  testing: false,
-  done: false,
-})
-
-// 레거시 status를 신뢰성 4단계로 정규화: todo → working → testing → done.
-// (프로세스가 검증 단계를 소유한다: 실행=working, test/build 실행=testing, 통과=done)
-function normStatus(s) {
-  if (s === 'planning') return 'todo'
-  if (s === 'in_progress' || s === 'in-progress' || s === 'debug') return 'working'
-  if (s === 'review' || s === 'verifying') return 'testing'
-  return s // todo/working/testing/done는 그대로
-}
-
+// 레거시 status를 신뢰성 4단계로 정규화는 KanbanPanel 내부에서 처리.
 let touchStartX = 0
 let touchStartY = 0
 let runningPoll = null
@@ -431,10 +416,6 @@ function onJobTouchEnd(j, e) {
   }
 }
 
-function toggleKanban(key) {
-  kanbanOpen.value[key] = !kanbanOpen.value[key]
-}
-
 function formatTokens(n) {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
   if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
@@ -451,61 +432,6 @@ function menuRoom() {
 
 function openAdmin() {
   showAdmin.value = true
-}
-
-async function openSessionDetail() {
-  const id = currentRoomId.value
-  if (!id) return
-  showSessionDetail.value = true
-  sessionRuns.value = []
-  sessionMetrics.value = null
-  // 세션 사용량 아래에 DeepSeek 잔액을 함께 보여준다(캐시로 인한 부하는 없음).
-  loadBalance()
-  // 방 목록을 새로고침해 컨텍스트 윈도우(used_tokens)를 최신값으로 반영(옛값 0% 방지).
-  await loadRooms()
-  try {
-    const res = await fetch(`/api/rooms/${id}/runs`)
-    if (res.ok) sessionRuns.value = await res.json()
-    const mres = await fetch(`/api/rooms/${id}/metrics`)
-    if (mres.ok) sessionMetrics.value = await mres.json()
-  } catch {}
-}
-
-function sessionTokenTotals() {
-  let prompt = 0, completion = 0
-  for (const r of sessionRuns.value) {
-    prompt += r.prompt_tokens || 0
-    completion += r.completion_tokens || 0
-  }
-  return { prompt, completion, total: prompt + completion }
-}
-
-function sessionRoleBreakdown() {
-  const agg = {}
-  for (const r of sessionRuns.value) {
-    const k = r.role || '기타'
-    if (!agg[k]) agg[k] = { role: k, count: 0, prompt: 0, completion: 0 }
-    agg[k].count++
-    agg[k].prompt += r.prompt_tokens || 0
-    agg[k].completion += r.completion_tokens || 0
-  }
-  return Object.values(agg)
-    .map((a) => ({ ...a, total: a.prompt + a.completion }))
-    .sort((a, b) => b.total - a.total)
-}
-
-function sessionModelBreakdown() {
-  const agg = {}
-  for (const r of sessionRuns.value) {
-    const k = r.model || 'unknown'
-    if (!agg[k]) agg[k] = { model: k, count: 0, prompt: 0, completion: 0 }
-    agg[k].count++
-    agg[k].prompt += r.prompt_tokens || 0
-    agg[k].completion += r.completion_tokens || 0
-  }
-  return Object.values(agg)
-    .map((a) => ({ ...a, total: a.prompt + a.completion }))
-    .sort((a, b) => b.total - a.total)
 }
 
 async function navigateFiles(path) {
@@ -591,13 +517,6 @@ function openFiles() {
   const room = currentRoom()
   navigateFiles(room?.workspace_path || '')
 }
-
-const kanbanCols = [
-  { key: 'todo', label: 'TODO' },
-  { key: 'working', label: 'WORKING' },
-  { key: 'testing', label: 'TESTING' },
-  { key: 'done', label: 'DONE' },
-]
 
 const chatEl = ref(null)
 
@@ -1762,61 +1681,23 @@ document.addEventListener('visibilitychange', () => {
       </div>
     </header>
 
-    <div v-if="showMenu" class="menu-overlay" @click="showMenu = false">
-      <div class="menu-panel" @click.stop>
-        <div class="menu-item" @click="openSessionDetail(); showMenu = false">
-          <svg class="ctx menu-ctx-ring" viewBox="0 0 36 36">
-            <circle class="ctx-bg" cx="18" cy="18" r="15" pathLength="100" />
-            <circle class="ctx-fg" cx="18" cy="18" r="15" pathLength="100" :stroke-dasharray="`${ctxPct(currentRoom())} 100`" :class="ctxClass(ctxPct(currentRoom()))" />
-          </svg>
-          <span>세션 사용량</span>
-          <span class="menu-ctx">Context {{ ctxPct(currentRoom()) }}%</span>
-        </div>
-        <div v-if="adminBalance && adminBalance.ok" class="menu-item menu-balance" @click="openTopUpConfirm(); showMenu = false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h5M9.5 14.5h5"/></svg>
-          <span>충전 잔액</span>
-          <span class="menu-ctx">${{ adminBalance.usd }}</span>
-        </div>
-        <div class="menu-item" @click="openFiles(); showMenu = false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-          <span>파일 브라우저</span>
-        </div>
-        <div class="menu-item" @click="showGit = true; showMenu = false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="6" y1="9" x2="6" y2="15"/><path d="M18 6c0 4-6 3-6 9"/></svg>
-          <span>Git</span>
-        </div>
-        <div class="menu-item" @click="showKanban = true; loadTasks(); showMenu = false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 10l2 2 4-4"/><line x1="8" y1="16" x2="16" y2="16"/></svg>
-          <span>칸반</span>
-        </div>
-        <div class="menu-item" @click="openSkills(); showMenu = false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
-          <span>Skills</span>
-        </div>
-        <div class="menu-item" @click="showPush = true; showMenu = false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-          <span>알림 · 기기</span>
-        </div>
-        <div class="menu-item" @click="openAdmin(); showMenu = false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          <span>관리자</span>
-        </div>
-        <div class="theme-row">
-          <span class="theme-label">테마</span>
-          <button
-            v-for="t in THEMES"
-            :key="t.id"
-            class="theme-swatch"
-            :class="{ active: theme === t.id }"
-            :style="{ background: t.bg }"
-            :title="t.label"
-            @click.stop="setTheme(t.id)"
-          >
-            <span class="theme-dot" :style="{ background: t.c }"></span>
-          </button>
-        </div>
-      </div>
-    </div>
+    <MenuPanel
+      v-if="showMenu"
+      :ctx-pct="ctxPct(currentRoom())"
+      :ctx-class="ctxClass(ctxPct(currentRoom()))"
+      :theme="theme"
+      :themes="THEMES"
+      @close="showMenu = false"
+      @session-detail="showSessionDetail = true; showMenu = false"
+      @top-up="openTopUpConfirm(); showMenu = false"
+      @files="openFiles(); showMenu = false"
+      @git="showGit = true; showMenu = false"
+      @kanban="showKanban = true; loadTasks(); showMenu = false"
+      @skills="openSkills(); showMenu = false"
+      @push="showPush = true; showMenu = false"
+      @admin="openAdmin(); showMenu = false"
+      @set-theme="setTheme($event)"
+    />
 
     <div v-if="showRooms || isWide" class="rooms-overlay" :class="{ pinned: isWide && pinnedSidebar, peek: isWide && !pinnedSidebar }" @click="!isWide && (showRooms = false)">
       <div class="rooms-panel" @click.stop>
@@ -2325,33 +2206,12 @@ document.addEventListener('visibilitychange', () => {
       </div>
     </div>
 
-    <div v-if="showKanban" class="kanban-overlay">
-      <div class="kanban-head">
-        <span class="kanban-title">{{ currentRoom()?.title || 'FORGE' }}</span>
-        <button @click="showKanban = false">닫기</button>
-      </div>
-      <div class="kanban-board">
-        <div v-for="col in kanbanCols" :key="col.key" class="kanban-section">
-          <div class="kanban-col-head" @click="toggleKanban(col.key)">
-            <span>{{ col.label }}</span>
-            <span class="kanban-count">{{ tasks.filter((x) => normStatus(x.status) === col.key).length }}</span>
-          </div>
-          <div v-show="kanbanOpen[col.key]" class="kanban-cards">
-            <div
-              v-for="t in tasks.filter((x) => normStatus(x.status) === col.key)"
-              :key="t.id"
-              class="kanban-card"
-            >
-              <div class="kanban-card-title">{{ t.title }}</div>
-              <div class="kanban-bar">
-                <div class="kanban-bar-fill" :style="{ width: (t.progress || 0) + '%' }"></div>
-              </div>
-            </div>
-            <div v-if="tasks.filter((x) => normStatus(x.status) === col.key).length === 0" class="kanban-empty">없음</div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <KanbanPanel
+      v-if="showKanban"
+      :tasks="tasks"
+      :room-title="currentRoom()?.title || 'FORGE'"
+      @close="showKanban = false"
+    />
 
     <GitPanel
       v-if="showGit"
@@ -2389,112 +2249,14 @@ document.addEventListener('visibilitychange', () => {
       @close="showAdmin = false"
     />
 
-    <div v-if="showSessionDetail" class="kanban-overlay">
-      <div class="kanban-head">
-        <span class="kanban-title">{{ currentRoom()?.title || '세션' }} · 사용량</span>
-        <button @click="showSessionDetail = false">닫기</button>
-      </div>
-      <div class="admin-body">
-        <div class="admin-section">
-          <div class="admin-stat-title">컨텍스트 윈도우 (최근 호출)</div>
-          <div class="admin-big">{{ ctxPct(currentRoom()) }}%</div>
-          <div class="ctx-bar">
-            <div class="ctx-bar-fill" :class="ctxClass(ctxPct(currentRoom()))" :style="{ width: ctxPct(currentRoom()) + '%' }"></div>
-          </div>
-          <div class="admin-sub">
-            {{ formatTokens(currentRoom()?.used_tokens) }} / {{ formatTokens(currentRoom()?.logical_budget) }} tokens
-          </div>
-        </div>
-
-        <div class="admin-section">
-          <div class="admin-stat-title">누적 토큰 (세션 전체)</div>
-          <div class="admin-big">{{ formatTokens(sessionTokenTotals().total) }}</div>
-          <div class="admin-sub">
-            prompt {{ formatTokens(sessionTokenTotals().prompt) }} · completion {{ formatTokens(sessionTokenTotals().completion) }}
-          </div>
-        </div>
-
-        <div class="admin-section">
-          <div class="admin-stat-title">DeepSeek 잔액</div>
-          <button class="balance-box" @click="openTopUpConfirm" aria-label="충전 화면으로 이동">
-            <template v-if="adminBalance && adminBalance.ok">
-              <div class="admin-big">${{ adminBalance.usd }}</div>
-              <div class="admin-sub">
-                {{ adminBalance.currency }} {{ adminBalance.total }} · 탭하면 충전 화면으로 이동
-              </div>
-            </template>
-            <div v-else-if="adminBalance && adminBalance.error" class="admin-sub">잔액 조회 실패: {{ adminBalance.error }}</div>
-            <div v-else class="admin-sub">잔액 불러오는 중…</div>
-          </button>
-        </div>
-
-        <div v-if="sessionMetrics" class="admin-section">
-          <div class="admin-stat-title">효율 계측</div>
-          <div class="metric-grid">
-            <div class="metric-cell"><span class="metric-num">{{ Math.round((sessionMetrics.cache_hit_ratio || 0) * 100) }}%</span><span class="metric-lbl">cache 적중</span></div>
-            <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_model_calls || 0 }}</span><span class="metric-lbl">model 호출</span></div>
-            <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_tool_calls || 0 }}</span><span class="metric-lbl">tool 호출</span></div>
-            <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.pro_calls || 0 }}</span><span class="metric-lbl">Pro 호출</span></div>
-            <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_compactions || 0 }}</span><span class="metric-lbl">압축</span></div>
-            <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_retries || 0 }}</span><span class="metric-lbl">재시도</span></div>
-          </div>
-          <div v-if="sessionMetrics.selected_skills" class="admin-sub">skill: {{ sessionMetrics.selected_skills }}</div>
-          <div v-for="(b, bi) in (sessionMetrics.bottlenecks || [])" :key="bi" class="metric-warn">⚠ {{ b }}</div>
-        </div>
-
-        <div v-if="sessionMetrics && sessionMetrics.estimated_cost != null" class="admin-section">
-          <div class="admin-stat-title">이번 세션 비용</div>
-          <div class="admin-big">${{ sessionMetrics.estimated_cost.toFixed(4) }}</div>
-          <div class="admin-sub">상태 {{ sessionMetrics.final_status || '—' }}</div>
-        </div>
-
-        <div class="admin-section">
-          <div class="admin-stat-title">에이전트별 사용량</div>
-          <div v-for="a in sessionRoleBreakdown()" :key="a.role" class="admin-row">
-            <span>{{ a.role }} <span class="run-count">×{{ a.count }}</span></span>
-            <span class="mono">{{ formatTokens(a.total) }}</span>
-          </div>
-          <div v-if="!sessionRuns.length" class="admin-sub">기록 없음</div>
-        </div>
-
-        <div class="admin-section">
-          <div class="admin-stat-title">모델별 사용량</div>
-          <div v-for="m in sessionModelBreakdown()" :key="m.model" class="admin-row">
-            <span>{{ m.model }} <span class="run-count">×{{ m.count }}</span></span>
-            <span class="mono">{{ formatTokens(m.total) }}</span>
-          </div>
-          <div v-if="!sessionRuns.length" class="admin-sub">기록 없음</div>
-        </div>
-
-        <button v-if="sessionRuns.length" class="detail-link" @click="showRunHistory = true">
-          실행 이력 {{ sessionRuns.length }}건 전체 보기 →
-        </button>
-      </div>
-    </div>
-
-    <div v-if="showRunHistory" class="kanban-overlay">
-      <div class="kanban-head">
-        <span class="kanban-title">{{ currentRoom()?.title || '세션' }} · 실행 이력</span>
-        <button @click="showRunHistory = false">닫기</button>
-      </div>
-      <div class="admin-body">
-        <div v-if="!sessionRuns.length" class="admin-sub">기록 없음</div>
-        <div v-for="(r, i) in sessionRuns" :key="i" class="run-item">
-          <div class="run-head">
-            <span class="run-role">{{ ROLE_LABELS[r.role] || r.role }}</span>
-            <span class="run-model">{{ r.model }}</span>
-          </div>
-          <div class="run-meta">
-            prompt {{ formatTokens(r.prompt_tokens) }} · completion {{ formatTokens(r.completion_tokens) }}<span v-if="r.thinking_enabled"> · thinking {{ r.reasoning_effort }}</span>
-          </div>
-          <div class="run-meta">
-            cache {{ formatTokens(r.cache_hit_tokens) }}↔{{ formatTokens(r.cache_miss_tokens) }} · model {{ r.model_calls }} · tool {{ r.tool_calls }} · 재시도 {{ r.retries }} · 압축 {{ r.compactions }}<span v-if="r.elapsed_ms"> · {{ (r.elapsed_ms / 1000).toFixed(1) }}s</span>
-          </div>
-          <div v-if="r.selected_skills" class="run-meta">skill: {{ r.selected_skills }}</div>
-          <div class="run-meta run-time">{{ r.created_at }}</div>
-        </div>
-      </div>
-    </div>
+    <SessionDetailPanel
+      v-if="showSessionDetail"
+      :room-id="currentRoomId"
+      :room-title="currentRoom()?.title || '세션'"
+      :room="currentRoom()"
+      @close="showSessionDetail = false"
+      @top-up="openTopUpConfirm()"
+    />
 
     <div v-if="showFiles" class="fs-overlay">
       <div class="fs-head">
