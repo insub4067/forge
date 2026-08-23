@@ -62,7 +62,8 @@ class ModelRouter:
             )
 
         # planner는 flash가 기본. 복잡한 작업(triage 판정)일 때만 pro로 승격.
-        if agent_type == "planner" and complexity == "high":
+        # planner_flash 실험 플래그가 켜지면 승격을 건너뛰고 flash 유지(비용 실험).
+        if agent_type == "planner" and complexity == "high" and not settings.planner_flash:
             base.update(
                 {
                     "model": self.planner_pro_model,

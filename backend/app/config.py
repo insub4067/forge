@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     # 앱 레벨 토큰 게이트(defense-in-depth). 설정 시 모든 /api 요청에 토큰 요구.
     # 미설정이면 무동작 — Cloudflare Access + 127.0.0.1 바인딩에만 의존(auth.py 참고).
     auth_token: str = ""
+    # planner를 COMPLEX 작업에서도 pro로 승격하지 않고 flash 유지(비용 실험용). 기본 False.
+    planner_flash: bool = False
     # Web Push (VAPID). public_key는 브라우저 구독용(비밀 아님). private key는 PEM 파일 경로.
     vapid_public_key: str = "BEdgt7HlWXy3-F1M2MKCkcBrOuW0uWoUvg58WzYFA7z1GBVu9IRGy15NlRP-A1cWINwTO4x4n0HMOmgiukK3HCQ"
     vapid_private_key_path: str = str(BASE_DIR / "vapid_private.pem")
