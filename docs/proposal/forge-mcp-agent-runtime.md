@@ -4,6 +4,8 @@
 **대상 프로젝트:** FORGE  
 **목표:** FORGE를 독립적인 Agentic Coding Runtime에서 **외부 AI 에이전트가 호출할 수 있는 MCP 기반 Agent Runtime Server**로 확장한다.
 
+> **선결(prerequisite):** MCP 서버는 얇은 Transport 레이어다. 그 아래 ①보안 경계(Policy Gateway·approval) ②Runtime Boundary 추상화 ③Durable Worker/Resume가 먼저다. 특히 durability는 §9가 못박듯 필수 — 자세한 설계는 [`durable-worker-resume.md`](durable-worker-resume.md).
+
 ---
 
 ## 1. 제안 요약
