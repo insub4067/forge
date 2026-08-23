@@ -1882,6 +1882,16 @@ function onInput(e) {
   el.style.height = Math.min(el.scrollHeight, 120) + 'px'
 }
 
+// 입력이 비워지면(send/pendingSend 등 모든 경로) textarea 높이를 한 줄로 리셋 —
+// 전송 후 커진 채로 남는 버그 방지. nextTick 후에 해야 v-model 반영이 끝난 높이로 계산한다.
+const composerInput = ref(null)
+watch(input, (v) => {
+  if (v) return
+  nextTick(() => {
+    if (composerInput.value) composerInput.value.style.height = 'auto'
+  })
+})
+
 async function onFileChange(e) {
   const files = Array.from(e.target.files || [])
   for (const file of files) {
@@ -2419,6 +2429,7 @@ document.addEventListener('visibilitychange', () => {
     </div>
 
         <textarea
+          ref="composerInput"
           v-model="input"
           rows="1"
           class="composer-input"
