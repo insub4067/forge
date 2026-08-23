@@ -279,6 +279,10 @@ async def create_room(req: Request):
     body = await req.json()
     name = str(body.get("name", "")).strip() or "Forge"
     workspace_path = str(body.get("workspace_path", "")).strip()
+    # 루트('/') 워크스페이스는 전체 디스크 탐색(find / 등) 같은 병리적 동작을 유발한다 —
+    # 빈 값으로 대체해 기본 워크스페이스(settings.workspace)로 폴백시킨다.
+    if workspace_path == "/":
+        workspace_path = ""
     room_id = await store.create_room(name, workspace_path)
     return await store.get_room(room_id)
 
