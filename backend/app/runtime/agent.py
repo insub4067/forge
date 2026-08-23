@@ -1118,6 +1118,11 @@ class AgentRuntime:
 
                 # 이 role에 허용되지 않은 도구는 실행하지 않는다 — 무검증 편집·커밋 차단.
                 if name not in allowed_tools:
+                    # 자동 분류가 chat으로 판단했는데 모델이 코드 변경(mutation)을 시도한 신호.
+                    # 상위(run)가 채팅 run 종료 후 '작업 모드 전환'을 제안하게 표시한다
+                    # (repeated_tool_call로 헛돌다 끝나던 것을 self-heal로 바꾼다).
+                    if role == "chat" and name in APPROVAL_REQUIRED:
+                        route["wanted_mutation"] = True
                     result = (f"[거부] '{name}'은(는) 이 작업에서 쓸 수 없는 도구입니다. "
                               "코드 변경이 필요하면 대화가 아니라 작업 요청으로 다시 보내세요.")
                     await send("tool_result", {"name": name, "result": result})
@@ -1681,10 +1686,29 @@ class AgentRuntime:
                 step_base, room_memory, tools=CHAT_TOOLS, skills=skills,
             )
             await record("chat", p, c, route)
-            await finish("completed" if status == "done"
-                         else _STATUS_CODES.get(status, "failed"),
-                         "" if status == "done" else self._finish_message(status))
-            return all_messages
+            # 자동 분류가 chat으로 오분류했는데 모델이 코드 변경을 시도했다면(wanted_mutation),
+            # 막다른 거부-반복으로 끝내지 말고 작업 모드 전환을 제안한다. 수락하면 이 요청을
+            # 그대로 작업 경로로 이어 처리하고, 이 방을 work로 바꿔 다음부터 자동 전환한다.
+            transitioned = False
+            if route.get("wanted_mutation"):
+                ws_ok = (_room and _room.get("workspace_path")
+                         and _room["workspace_path"] not in ("/", os.path.expanduser("~")))
+                if ws_ok:
+                    ans = await self._ask_user({
+                        "question": "이 요청은 코드 변경이 필요해 보입니다. 작업 모드로 전환할까요? (검증·커밋이 켜집니다)",
+                        "options": ["작업 모드로 전환", "채팅 유지"],
+                    }, send, session_id)
+                    if ans and "전환" in ans:
+                        await store.update_room_mode(session_id, "work")
+                        await send("mode_changed", {"mode": "work"})
+                        route_kind = "code"
+                        transitioned = True
+            if not transitioned:
+                await finish("completed" if status == "done"
+                             else _STATUS_CODES.get(status, "failed"),
+                             "" if status == "done" else self._finish_message(status))
+                return all_messages
+            # transitioned → 아래 작업(code) 경로로 계속 진행
 
         # 1. 에이전트 모드 결정 — 사용자 명시(multi/single)가 최우선, auto는 복잡도 기반 자동.
         mode = self.get_agent_mode(session_id)

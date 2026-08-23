@@ -462,14 +462,17 @@ function openRoomSettings() {
   const r = currentRoom()
   if (!r) { showRooms.value = true; return }
   roomSettingsTitle.value = r.title || ''
-  roomSettingsMode.value = r.mode === 'chat' ? 'chat' : 'work'
+  // 실제 mode를 그대로 노출: ''(빈값)=자동 분류. 예전엔 ''를 'work'로 뭉개 "작업 모드인 줄"
+  // 착각하게 만들었다(실제론 auto라 코딩 턴이 chat으로 분류돼 편집이 막혔다).
+  roomSettingsMode.value = r.mode === 'chat' ? 'chat' : r.mode === 'work' ? 'work' : 'auto'
   showRoomSettings.value = true
 }
 async function saveRoomSettings() {
   const id = currentRoomId.value
   if (!id) return
   // work는 워크스페이스가 있어야 해서, 없으면 백엔드가 거부하고 안내한다.
-  const body = { mode: roomSettingsMode.value }
+  // 'auto'는 백엔드 표현상 빈 문자열('')로 보낸다(triage 자동 분류).
+  const body = { mode: roomSettingsMode.value === 'auto' ? '' : roomSettingsMode.value }
   const t = roomSettingsTitle.value.trim()
   if (t) body.title = t
   try {
@@ -1764,10 +1767,11 @@ document.addEventListener('visibilitychange', () => {
         <div class="sheet-head">방 설정</div>
         <input v-model="roomSettingsTitle" class="modal-field" placeholder="방 이름" />
         <div class="mode-seg big" role="group" aria-label="방 모드">
-          <button :class="{ on: roomSettingsMode !== 'chat' }" @click="roomSettingsMode = 'work'">작업</button>
+          <button :class="{ on: roomSettingsMode === 'auto' }" @click="roomSettingsMode = 'auto'">자동</button>
+          <button :class="{ on: roomSettingsMode === 'work' }" @click="roomSettingsMode = 'work'">작업</button>
           <button :class="{ on: roomSettingsMode === 'chat' }" @click="roomSettingsMode = 'chat'">채팅</button>
         </div>
-        <p class="sheet-note">작업: 코드를 고치고 검증·커밋 · 채팅: 읽기전용 대화</p>
+        <p class="sheet-note">자동: 요청마다 작업/채팅 자동 판단 · 작업: 항상 코드 수정·검증·커밋 · 채팅: 읽기전용 대화</p>
         <button class="sheet-save" @click="saveRoomSettings">저장</button>
       </div>
     </div>
