@@ -2901,9 +2901,14 @@ button {
   background: var(--panel-2);
   color: var(--muted);
 }
-.skill-scope.global {
+.skill-scope.global,
+.skill-scope.curated {
   background: var(--accent-soft);
   color: var(--accent);
+}
+.skill-scope.learned {
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel-2));
+  color: var(--text);
 }
 .skill-del {
   background: none;

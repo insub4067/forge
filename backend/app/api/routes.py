@@ -708,10 +708,10 @@ async def list_skills(session_id: str):
 
 
 @router.delete("/rooms/{session_id}/skills/{name}")
-async def delete_skill(session_id: str, name: str, scope: str = "workspace"):
+async def delete_skill(session_id: str, name: str, scope: str = "project"):
     ws = await _room_workspace(session_id)
     safe = re.sub(r"[^a-zA-Z0-9_-]+", "-", name).strip("-").lower()
-    scope = "global" if scope == "global" else "workspace"
+    scope = "global" if scope == "global" else "project"
     try:
         p = skills_lib.resolve_path(scope, ws, name, safe)
     except PermissionError:

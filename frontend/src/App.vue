@@ -2481,8 +2481,8 @@ document.addEventListener('visibilitychange', () => {
           <div class="skill-head" @click="skillOpen[s.name] = !skillOpen[s.name]">
             <svg class="skill-chevron" :class="{ open: skillOpen[s.name] }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
             <span class="skill-name">{{ s.name }}</span>
-            <span class="skill-scope" :class="s.scope">{{ s.scope === 'global' ? '전역' : '프로젝트' }}</span>
-            <button class="skill-del" @click.stop="deleteSkill(s.name, s.scope)">삭제</button>
+            <span class="skill-scope" :class="s.origin || s.scope">{{ { curated: '큐레이트', learned: '학습', project: '프로젝트' }[s.origin] || (s.scope === 'global' ? '전역' : '프로젝트') }}</span>
+            <button v-if="s.origin !== 'curated'" class="skill-del" @click.stop="deleteSkill(s.name, s.scope)">삭제</button>
           </div>
           <pre v-show="skillOpen[s.name]" class="skill-content">{{ s.content }}</pre>
         </div>

@@ -93,7 +93,8 @@ BASE_PROMPT = """당신은 FORGE 에이전틱 코딩 에이전트의 일부입�
 - 워크스페이스: 로컬 마운트 디렉터리
 - 도구: read_file, list_dir, grep, write_file, edit_file, bash, ask_user, update_tasks, save_skill
 - write_file/edit_file/bash/save_skill는 사용자 승인이 필요하다.
-- 축적된 Skill이 있으면 관련 작업에서 우선 활용한다. 여러 단계로 성공했고 앞으로 반복될 절차라면 save_skill로 저장해 다음에 재사용한다."""
+- 축적된 Skill이 있으면 관련 작업에서 우선 활용한다. 여러 단계로 성공했고 앞으로 반복될 절차라면 save_skill로 저장해 다음에 재사용한다.
+- save_skill의 scope는 기본 project다. 프로젝트 특화 절차(그 저장소의 규약·빌드·구조)는 project로, 특정 파일명·경로·도메인에 묶이지 않고 여러 코드베이스에서 재사용 가능한 명백히 범용적인 절차만 global로 저장한다. 판단이 애매하면 project. 단순 메모나 일회성 해결은 Skill로 저장하지 않는다."""
 
 
 def _prune_tool_result(text: str, head: int = 2500, tail: int = 1200) -> str:
@@ -147,25 +148,27 @@ def _select_skills(workspace: str, query: str) -> str:
     모든 skill을 읽어 요청 키워드와의 겹침으로 점수를 매기고 상위 N개만,
     문자 예산 안에서 삽입한다. 제목 일치는 가중치 3, 본문 일치는 1.
     한글 교착어를 흡수하려고 부분 문자열 포함으로 매칭한다.
-    global(~/.forge/skills) + workspace 2-tier를 병합해 대상으로 삼는다(같은 이름은
-    workspace 우선). 관련 skill이 없으면 빈 문자열(아무것도 삽입하지 않음)."""
+    curated+learned(global) + project 3계층을 병합해 대상으로 삼는다(같은 이름은
+    project 우선). 점수가 같으면 project skill을 먼저 넣는다(명시적 local 우선).
+    관련 skill이 없으면 빈 문자열(아무것도 삽입하지 않음)."""
     terms = set(_skill_terms(query))
     if not terms:
         return ""
-    scored: list[tuple[int, str, str]] = []
+    scored: list[tuple[int, int, str, str]] = []  # (score, project우선, name, body)
     for sk in skills_lib.iter_skills(workspace):
         stem, body = sk["name"], sk["content"]
         stem_l = stem.lower()
         body_l = body.lower()
         score = sum(3 for t in terms if t in stem_l) + sum(1 for t in terms if t in body_l)
         if score > 0:
-            scored.append((score, stem, body))
+            proj_first = 0 if sk.get("scope") == "project" else 1
+            scored.append((score, proj_first, stem, body))
     if not scored:
         return ""
-    scored.sort(key=lambda x: (-x[0], x[1]))
+    scored.sort(key=lambda x: (-x[0], x[1], x[2]))  # 점수↓ → project 먼저 → 이름
     blocks: list[str] = []
     used = 0
-    for _score, stem, body in scored[:MAX_ACTIVE_SKILLS]:
+    for _score, _pf, stem, body in scored[:MAX_ACTIVE_SKILLS]:
         block = f"### skill: {stem}\n{body}"
         if used + len(block) > SKILL_CHAR_BUDGET:
             break
