@@ -18,6 +18,12 @@ async def _noop():
     return None
 
 
+async def _collector(events):
+    async def send(evt_type, data):
+        events.append((evt_type, data))
+    return send
+
+
 async def _empty():
     return []
 
@@ -231,6 +237,28 @@ async def main():
     await routes.resume_run("s1", "/tmp")
     assert calls["aa"] is False, f"재개는 저장된 auto_approve(False)를 복원해야 함(True 강제 금지), got {calls['aa']}"
     print("resume 권한 invariant: 재시작 전 auto_approve=False → 재개도 False(권한 확대 없음): OK")
+
+    # resume 권한 확대 방지 강화 — auto_approve=True였던 세션도 그대로 True 복원(무인 위임 유지)
+    calls["aa"] = None
+    routes.store.get_session_auto_approve = lambda sid: True  # 재시작 전 무인 위임이었다
+    await routes.resume_run("s1", "/tmp")
+    assert calls["aa"] is True, f"무인 위임 세션은 재개 시 True 복원돼야 함, got {calls['aa']}"
+    print("resume 권한 invariant(무인 위임): OK — auto_approve=True 세션도 그대로 True 복원")
+
+    # resume 후 새 위험 mutation은 여전히 승인 게이트를 통과해야 한다 —
+    # auto_approve가 아니면 approval_request로 pause, auto_approve면 자동 승인.
+    # (resume이 승인 게이트 자체를 우회하지 않음을 보장)
+    from app.runtime import agent as _A
+    rt2 = _A.AgentRuntime()
+    rt2.set_auto_approve("s-resume", False)
+    ev = []
+    task = asyncio.create_task(
+        rt2._request_approval("bash", {"command": "echo hi"}, await _collector(ev), "s-resume"))
+    await asyncio.sleep(0.05)
+    assert any(t == "approval_request" for t, _ in ev), "resume 후에도 수동 세션은 승인 요청해야 함"
+    rt2.resolve_pending_approvals("s-resume")
+    assert await task == "approve"
+    print("resume 후 승인 게이트: OK — 수동 세션은 여전히 approval_request로 pause")
 
     (routes.store.load_history, routes.store.get_session_auto_approve,
      routes.store.set_session_final_status, routes.store.mark_running,

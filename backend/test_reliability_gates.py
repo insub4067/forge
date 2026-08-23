@@ -138,6 +138,78 @@ async def main():
             os.environ.pop(k, None)
     print("verify pytest 3-state: OK — exit 0=passed / 1=failed / 2·미설치=unavailable")
 
+    # ── 승인 경계: auto_approve 세션만 자동 승인, 그 외는 approval_request ──
+    from app.tools import registry as R
+
+    async def _collector(events):
+        async def send(evt_type, data):
+            events.append((evt_type, data))
+        return send
+
+    # auto_approve 세션 → 자동 승인 + approval_auto 이벤트
+    rt.set_auto_approve("s-aa", True)
+    ev = []
+    decision = await rt._request_approval("write_file", {"path": "/tmp/a"}, await _collector(ev), "s-aa")
+    assert decision == "approve", decision
+    assert any(t == "approval_auto" for t, _ in ev), ev
+    assert not rt.pending_approvals, "자동 승인은 pending에 남지 않아야 함"
+    print("승인 경계(auto_approve): OK — 자동 승인 + approval_auto, pending 없음")
+
+    # auto_approve 아닌 세션 → approval_request 전송 + pending 등록(승인 대기)
+    rt.set_auto_approve("s-manual", False)
+    ev = []
+    # _request_approval은 pending future를 await로 기다리므로 별도 task로 실행하고,
+    # pending이 등록된 뒤 resolve_pending_approvals로 승인한다.
+    task = asyncio.create_task(
+        rt._request_approval("write_file", {"path": "/tmp/b"}, await _collector(ev), "s-manual"))
+    await asyncio.sleep(0.05)  # pending 등록 대기
+    assert any(t == "approval_request" for t, _ in ev), ev
+    assert rt.pending_approvals, "수동 세션은 pending에 남아 승인을 기다려야 함"
+    rt.resolve_pending_approvals("s-manual")
+    decision = await task
+    assert decision == "approve", decision
+    print("승인 경계(수동): OK — approval_request 전송 + pending 등록 후 승인")
+
+    # resolve_pending_approvals(session_id)는 해당 세션 pending만 승인(타 세션 무관)
+    rt.set_auto_approve("s-other", False)
+    fut_other = asyncio.get_running_loop().create_future()
+    rt.pending_approvals["other-1"] = fut_other
+    rt._pending_meta["other-1"] = {"session_id": "s-other", "kind": "approval"}
+    fut_mine = asyncio.get_running_loop().create_future()
+    rt.pending_approvals["mine-1"] = fut_mine
+    rt._pending_meta["mine-1"] = {"session_id": "s-manual", "kind": "approval"}
+    n = rt.resolve_pending_approvals("s-manual")
+    assert n == 1, n
+    assert fut_mine.done() and fut_mine.result() == "approve", "해당 세션 pending은 승인돼야 함"
+    assert not fut_other.done(), "타 세션 pending은 승인되면 안 됨"
+    rt.pending_approvals.pop("other-1", None)
+    rt._pending_meta.pop("other-1", None)
+    rt.pending_approvals.pop("mine-1", None)
+    rt._pending_meta.pop("mine-1", None)
+    print("resolve_pending_approvals(세션 필터): OK — 해당 세션만 승인, 타 세션 무관")
+
+    # set_auto_approve(False) → 세션을 auto_approve 집합에서 제거(권한 축소)
+    rt.set_auto_approve("s-aa", False)
+    assert "s-aa" not in rt._auto_approve_sessions, "auto_approve 해제 시 집합에서 제거돼야 함"
+    print("set_auto_approve(False): OK — auto_approve 집합에서 제거(권한 축소)")
+
+    # BLOCKED_COMMANDS가 bash 실행 시 PermissionError로 차단
+    for blocked in R.BLOCKED_COMMANDS:
+        cmd = blocked.strip() + " something"
+        try:
+            await R.execute_tool("bash", {"command": cmd}, "/tmp")
+            raise AssertionError(f"차단돼야 함: {cmd}")
+        except PermissionError:
+            pass
+    print("BLOCKED_COMMANDS: OK — rm -rf/sudo/chmod 777/kill/uvicorn 전부 PermissionError 차단")
+
+    # APPROVAL_REQUIRED 도구는 auto_approve 세션에서도 승인 게이트를 통과해야 실행됨
+    # (자동 승인은 게이트 우회가 아니라 승인 결정만 자동화)
+    assert "write_file" in R.APPROVAL_REQUIRED
+    assert "bash" in R.APPROVAL_REQUIRED
+    assert "build_frontend" in R.APPROVAL_REQUIRED
+    print("APPROVAL_REQUIRED: OK — write_file/bash/build_frontend 포함")
+
     print("\n모든 케이스 통과 ✓")
 
 
