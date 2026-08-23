@@ -22,15 +22,18 @@ async def _empty():
     return []
 
 
-def make_rt(verify_states, dev_status="done"):
+def make_rt(verify_states, dev_status="done", changed=True):
     """run()을 돌리되 _run_role/_verify/_autocommit/_triage를 목킹한다.
-    verify_states: _verify가 호출될 때마다 순서대로 반환할 state 목록."""
+    verify_states: _verify가 호출될 때마다 순서대로 반환할 state 목록.
+    changed: 에이전트가 파일을 실제로 바꿨는지(False면 '변경 0건' 경로)."""
     rt = A.AgentRuntime()
-    committed = {"count": 0}
+    committed = {"count": 0, "paths": None}
     vi = {"i": 0}
 
     async def fake_run_role(role, all_messages, *a, **k):
         all_messages.append({"role": "assistant", "content": "작업"})
+        if changed:  # state는 6번째 위치 인자 — write_file이 남기는 흔적을 흉내낸다
+            a[3]["files_changed"].append("app.py")
         return dev_status, 0, 0, {"model": "m", "model_calls": 1}
     rt._run_role = fake_run_role
 
@@ -43,8 +46,9 @@ def make_rt(verify_states, dev_status="done"):
         return verify_states[min(i, len(verify_states) - 1)], "report"
     rt._verify = fake_verify
 
-    async def fake_autocommit(ws, goal, send):
+    async def fake_autocommit(ws, goal, send, paths=None):
         committed["count"] += 1
+        committed["paths"] = paths
     rt._autocommit = fake_autocommit
 
     async def fake_finalize(sid, send):
@@ -99,6 +103,20 @@ async def main():
     await run_once(rt)
     # verify 호출 수가 2를 넘지 않아야(최초 1 + 수리 후 1)
     print("bounded repair: OK (수리 재시도 1회 상한)")
+
+    # ── 변경 0건 invariant: 아무것도 안 바꿨으면 '검증 통과'로 보고하지 않는다 ──
+    # (모델이 "제거하겠습니다"만 하고 끝낸 run이 성공으로 둔갑하던 실제 사고.)
+    rt, c = make_rt(["passed"], changed=False)
+    st = await run_once(rt)
+    assert st == "completed_unverified", st
+    assert c["count"] == 0, "변경 0건이면 커밋하지 않는다"
+    print("변경 0건 → completed_unverified + NO commit: OK")
+
+    # 커밋 대상은 에이전트가 바꾼 경로뿐(git add -A로 남의 변경을 쓸어담지 않는다)
+    rt, c = make_rt(["passed"])
+    assert await run_once(rt) == "completed"
+    assert c["paths"] == ["app.py"], c["paths"]
+    print("커밋 경로는 에이전트가 바꾼 파일뿐: OK")
 
     # ── 칸반 invariant: 모델은 done/testing을 설정 못 한다 ──
     assert A._clamp_task_status("done") == "working", "모델 done → working로 강등"

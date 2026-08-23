@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import mimetypes
+import os
 import re
 import subprocess
 import time
@@ -1086,10 +1087,33 @@ class AgentRuntime:
         except Exception as err:
             error_log.record("mark_verifying", str(err), session_id)
 
-    async def _autocommit(self, ws: str, goal: str, send: EventSink) -> None:
+    async def _autocommit(self, ws: str, goal: str, send: EventSink,
+                          paths: list[str] | None = None) -> None:
         """성공 완료 시 git 워크스페이스면 자동 commit(+push) — 커밋 누락 방지.
-        best-effort: 실패해도 run을 막지 않는다. AUTO_COMMIT=0으로 끈다."""
+
+        **에이전트가 실제로 바꾼 경로만** stage·commit한다. `git add -A`는 사람이 편집 중이던
+        미커밋 변경까지 에이전트 커밋으로 밀어 올려 push해 버린다(실제 사고 2건).
+        best-effort: 실패해도 run을 막지 않는다. AUTO_COMMIT=0으로 끈다.
+        ponytail: write_file/edit_file로 바꾼 파일만 센다. bash로 고친 파일은 커밋되지 않는다
+        (그 편은 놓치는 쪽이 남의 변경을 커밋하는 쪽보다 안전하다).
+        """
         if not settings.auto_commit or not ws:
+            return
+        rel: list[str] = []
+        for raw in paths or []:
+            q = str(raw or "").strip()
+            if not q:
+                continue
+            if os.path.isabs(q):
+                try:
+                    q = os.path.relpath(q, ws)
+                except ValueError:
+                    continue
+            if q.startswith(".."):  # 워크스페이스 밖은 커밋 대상 아님
+                continue
+            if q not in rel:
+                rel.append(q)
+        if not rel:
             return
 
         async def _g(*args, timeout=90):
@@ -1106,12 +1130,13 @@ class AgentRuntime:
             rc, out = await _g("rev-parse", "--is-inside-work-tree", timeout=10)
             if rc != 0 or "true" not in out:
                 return  # git 저장소가 아님
-            rc, out = await _g("status", "--porcelain", timeout=15)
+            rc, out = await _g("status", "--porcelain", "--", *rel, timeout=15)
             if rc != 0 or not out.strip():
-                return  # 변경 없음
+                return  # 에이전트가 바꾼 파일에 실제 변경 없음
             msg = f"chore: FORGE 자동 커밋 — {(goal or '작업').strip()[:60]}"
-            await _g("add", "-A", timeout=30)
-            rc, _ = await _g("commit", "-m", msg, timeout=30)
+            await _g("add", "--", *rel, timeout=30)
+            # 경로를 명시해 커밋 — 사람이 stage해 둔 다른 변경이 섞이지 않는다.
+            rc, _ = await _g("commit", "-m", msg, "--", *rel, timeout=30)
             committed = rc == 0
             pushed = False
             if committed:
@@ -1328,9 +1353,11 @@ class AgentRuntime:
             # 남은 task done 처리(칸반), 변경 자동 commit+push(커밋 누락 방지).
             # completed(검증됨)와 completed_unverified(검증 대상 없음) 둘 다 커밋 대상.
             # verification_failed는 여기 안 걸려 절대 커밋되지 않는다(invariant).
-            if status in ("completed", "completed_unverified"):
+            # 변경 0건이면 마감할 장부가 없다 — 태스크를 done으로 올리지도, 커밋하지도 않는다
+            # (읽기 전용 요청이거나, 모델이 하겠다고만 하고 안 한 경우).
+            if status in ("completed", "completed_unverified") and state["files_changed"]:
                 await self._finalize_tasks(session_id, send)
-                await self._autocommit(ws, goal, send)
+                await self._autocommit(ws, goal, send, state["files_changed"])
             # done 이벤트를 보내면서 세션 final_status를 영속화(성공 정의·집계 기준).
             if session_id:
                 await store.set_session_final_status(session_id, status)
@@ -1434,6 +1461,13 @@ class AgentRuntime:
 
         if status != "done":
             await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
+            return all_messages
+
+        # 변경 0건 — build/test가 통과해도 그건 이번 run이 검증된 게 아니라 아무것도 안 한 것이다.
+        # "작업 완료 — 검증 통과"로 보고하면 모델이 하겠다고만 하고 끝낸 run이 성공으로 둔갑한다.
+        if not state["files_changed"]:
+            await finish("completed_unverified",
+                         "코드 변경 없이 종료했습니다(검증 대상 없음). 수정이 필요한 요청이었다면 다시 지시해 주세요.")
             return all_messages
 
         # ── Strict 검증 게이트 — 신뢰성은 모델이 아니라 프로세스가 보장한다 ──
