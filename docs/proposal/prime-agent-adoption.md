@@ -660,5 +660,8 @@ UI 카드 → [승인] [무시] → [되돌리기]
 `GET /api/rooms/{id}/refinements` · `POST /api/refinements/{id}/decide` ·
 테스트 `backend/test_refinement.py`.
 
-다음(미구현): 승인된 후보를 실제 skill 파일로 적용하는 applier + 적용 전후 벤치 비교,
+적용(applier) 구현됨(2026-08-23): 승인 시 후보를 Project/Learned skill 파일(.md)에 실제 적용하고,
+되돌리기는 before_text로 원상복구한다(Base Prompt 불변). `routes._apply_refinement_file`.
+
+다음(미구현): 적용 전후 벤치 자동 비교,
 supplement 타입(`type="supplement"`) 후보 생성.

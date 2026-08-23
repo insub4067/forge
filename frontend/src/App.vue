@@ -1512,7 +1512,7 @@ document.addEventListener('visibilitychange', () => {
                 <button class="no" @click="decideRefinement(r, 'ignore')">무시</button>
               </div>
               <div class="refine-btns" v-else>
-                <span class="refine-status">{{ r.status === 'approved' ? '승인됨(적용은 수동)' : '무시함' }}</span>
+                <span class="refine-status">{{ r.status === 'approved' ? '승인됨 · skill 적용' : '무시함' }}</span>
                 <button class="no" @click="decideRefinement(r, 'rollback')">되돌리기</button>
               </div>
             </div>

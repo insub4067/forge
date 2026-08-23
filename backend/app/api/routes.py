@@ -860,13 +860,56 @@ async def room_refinements(session_id: str):
     return {"refinements": await store.list_refinements(session_id)}
 
 
+def _apply_refinement_file(row: dict, revert: bool) -> str:
+    """승인된 refinement를 실제 skill 파일에 적용(또는 rollback 시 복원)한다.
+    대상은 Project/Learned skill(.md)뿐 — Base Prompt는 건드리지 않는다(prompt drift 방지).
+    before_text를 보존하므로 rollback이 항상 원상복구한다."""
+    room = None
+    scope = row.get("scope") or "project"
+    target = row.get("target") or ""
+    if not target or row.get("type") != "skill":
+        return "skip"
+    ws = (row.get("_ws") or "")
+    safe = re.sub(r"[^a-zA-Z0-9_-]+", "-", target).strip("-").lower()
+    try:
+        path = skills_lib.resolve_path(scope, ws, target, safe)
+    except PermissionError:
+        return "denied"
+    if revert:
+        before = row.get("before_text") or ""
+        if before.strip():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(before, encoding="utf-8")
+        elif path.is_file():
+            path.unlink()  # 원래 없던 skill이면 삭제
+        return "reverted"
+    after = row.get("after_text") or row.get("proposed_change") or ""
+    if not after.strip():
+        return "empty"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(after, encoding="utf-8")
+    return "applied"
+
+
 @router.post("/refinements/{refinement_id}/decide")
 async def decide_refinement(refinement_id: int, body: dict):
-    """승인/무시/되돌리기. 승인은 기록일 뿐 파일을 자동으로 바꾸지 않는다."""
-    row = await store.decide_refinement(refinement_id, str(body.get("decision", "")))
+    """승인/무시/되돌리기.
+    승인 = skill 파일에 실제 적용(Project/Learned만), 되돌리기 = before_text로 원상복구.
+    무시 = 기록만. Base Prompt는 절대 건드리지 않는다."""
+    decision = str(body.get("decision", ""))
+    row = await store.decide_refinement(refinement_id, decision)
     if not row:
         return {"ok": False}
-    return {"ok": True, "refinement": row}
+    applied = None
+    if decision in ("approve", "rollback"):
+        ws = await _room_workspace(row.get("session_id", ""))
+        row["_ws"] = ws
+        try:
+            applied = _apply_refinement_file(row, revert=(decision == "rollback"))
+        except Exception as err:
+            applied = f"error: {err}"
+        row.pop("_ws", None)
+    return {"ok": True, "refinement": row, "applied": applied}
 
 
 @router.get("/rooms/{session_id}/runs")
