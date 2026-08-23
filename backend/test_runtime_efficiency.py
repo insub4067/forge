@@ -106,6 +106,18 @@ def test_project_shrinks_after_compaction():
     print("OK projection shrinks after compaction (10-11)")
 
 
+def test_browser_check_local_only():
+    # browser_check는 로컬 오리진만 허용해야 한다(에이전트가 임의 외부 사이트/메타데이터를 못 연다).
+    from app.tools.registry import _is_local_url
+    assert _is_local_url("http://127.0.0.1:8790")
+    assert _is_local_url("http://localhost:3000")
+    assert _is_local_url("http://app.localhost:5173")
+    assert not _is_local_url("http://evil.com")
+    assert not _is_local_url("https://169.254.169.254/latest/meta-data")  # 클라우드 메타데이터
+    assert not _is_local_url("file:///etc/passwd")
+    print("OK browser_check 로컬 오리진 경계 (SSRF)")
+
+
 def test_developer_escalation():
     r = ModelRouter()
     # 8. Developer 기본 → Flash + thinking(설계+구현+자체검증)
@@ -126,5 +138,6 @@ if __name__ == "__main__":
     test_skill_selection()
     test_stable_prefix()
     test_project_shrinks_after_compaction()
+    test_browser_check_local_only()
     test_developer_escalation()
     print("\n전체 통과")

@@ -206,12 +206,35 @@ TOOL_SCHEMAS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_check",
+            "description": (
+                "로컬에서 뜬 웹앱을 headless 브라우저로 열어 실제로 렌더되는지 검증한다. "
+                "빌드 통과가 '실제로 동작함'을 뜻하지 않으므로, 프론트를 고친 뒤 이 도구로 "
+                "콘솔 에러·uncaught 예외·핵심 셀렉터 렌더를 직접 확인해 self-repair하라. "
+                "로컬 오리진(localhost/127.0.0.1)만 허용한다. 읽기 전용."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "확인할 로컬 URL(기본 http://127.0.0.1:8790)"},
+                    "selectors": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "렌더 확인할 CSS 셀렉터 목록(선택). 예: ['header', '.composer-input']",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 # chat 에이전트는 읽기·질문만 — 코드 수정/실행 도구는 제외한다.
 CHAT_TOOLS = [
     t for t in TOOL_SCHEMAS
-    if t["function"]["name"] in {"read_file", "list_dir", "grep", "find_symbol", "ask_user"}
+    if t["function"]["name"] in {"read_file", "list_dir", "grep", "find_symbol", "ask_user", "browser_check"}
 ]
 
 # build_frontend는 host에서 npm run build를 직접 실행(Docker 우회) — 승인 필요.
@@ -357,6 +380,59 @@ def _find_symbol_range(text: str, symbol: str, max_lines: int = 200) -> str:
     return numbered + more
 
 
+def _is_local_url(url: str) -> bool:
+    """로컬 오리진만 허용 — 에이전트가 임의 외부 사이트를 열지 못하게 막는다(SSRF 경계)."""
+    from urllib.parse import urlparse
+    try:
+        u = urlparse(url)
+    except Exception:
+        return False
+    if u.scheme not in ("http", "https"):
+        return False
+    host = (u.hostname or "").lower()
+    return host in ("localhost", "127.0.0.1", "::1") or host.endswith(".localhost")
+
+
+async def _browser_check(url: str, selectors: list[str]) -> str:
+    """로컬 웹앱을 headless로 열어 콘솔 에러·uncaught 예외·셀렉터 렌더를 보고한다.
+    빌드 통과를 '실제 동작'으로 승격하는 self-repair용. 외부 URL은 거부한다."""
+    if not _is_local_url(url):
+        return f"[browser_check] 거부 — 로컬 오리진(localhost/127.0.0.1)만 허용됩니다: {url}"
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        return "[browser_check] playwright 미설치 — 확인 불가"
+    page_errors: list[str] = []
+    console_errors: list[str] = []
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            page.on("pageerror", lambda e: page_errors.append(str(e)))
+            page.on("console", lambda m: console_errors.append(m.text) if m.type == "error" else None)
+            try:
+                await page.goto(url, wait_until="networkidle", timeout=20000)
+                found = {sel: await page.locator(sel).count() for sel in selectors}
+            finally:
+                await browser.close()
+    except Exception as err:
+        return f"[browser_check] 로드 실패: {err}"
+    lines = [f"[browser_check] {url}"]
+    lines.append(f"uncaught 예외: {len(page_errors)}")
+    lines += [f"  · {e}" for e in page_errors[:8]]
+    # console.error는 SW/PWA 잡음이 섞일 수 있어 참고용으로만 표시한다.
+    lines.append(f"console.error: {len(console_errors)} (참고 — SW/PWA 잡음 가능)")
+    lines += [f"  · {e}" for e in console_errors[:8]]
+    if selectors:
+        lines.append("셀렉터 렌더: " + ", ".join(f"{s}={c}" for s, c in found.items()))
+        missing = [s for s, c in found.items() if not c]
+        if missing:
+            lines.append("⚠ 미렌더 셀렉터: " + ", ".join(missing))
+    verdict = "정상(로드·uncaught 예외 0)" if not page_errors else "uncaught 예외 발생 — 수정 필요"
+    lines.append("판정: " + verdict)
+    return "\n".join(lines)
+
+
 async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]:
     if name == "find_symbol":
         p = _resolve(workspace, str(args["path"]))
@@ -367,6 +443,12 @@ async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]
         return tool_store.load(str(args.get("result_id", "")),
                                int(args.get("offset", 0) or 0),
                                int(args.get("limit", 4000) or 4000)), ""
+    if name == "browser_check":
+        url = str(args.get("url") or "http://127.0.0.1:8790")
+        sels = args.get("selectors") or []
+        if not isinstance(sels, list):
+            sels = [str(sels)]
+        return await _browser_check(url, [str(s) for s in sels]), ""
     if name == "read_file":
         p = _resolve(workspace, str(args["path"]))
         text = p.read_text(encoding="utf-8", errors="replace")
