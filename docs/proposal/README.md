@@ -27,6 +27,7 @@ Proposal 채택 여부도 기능 수나 token 절감보다 success/verification 
 - `live-screen-preview` WebRTC 고도화 — 현 JPEG 폴링으로 목적 달성. 트리거: 지연이 실사용 병목으로 확인될 때.
 - `durable-worker-resume` D2(worker 프로세스 분리)·`forge-mcp-agent-runtime` remote transport/인증 — 단일 Mac 호스트 + stdio 배포에선 speculative. 트리거: 원격/분산 배포 또는 외부 위임 실수요.
 - `forge-runtime-hardening-roadmap` P1~P6(ExecutionBackend·event replay·benchmark 라우터·병렬 Developer) — 단일 호스트에선 과설계. 트리거: 원격 실행 대상 또는 병렬 실행 수요.
+- `onprem-inference-optimization` — 철학은 FORGE 원칙과 정합하나, 존재하지 않는 배포 환경(온프레미스 GPU·폐쇄망·vLLM/SGLang 서빙·DGX/Mac Studio)을 전제로 한 인프라라 지금은 speculative. P0(OpenAI 호환 provider 추상화)는 2026-08-24 Ling 실험으로 구현 가능성 실증됨(git dff74c0, 이후 제거) — 필요 시 재추가는 저비용. 트리거: **실제 온프레미스 추론 하드웨어 확보 또는 폐쇄망 배포 요구**. 단, P2의 `verified_tasks_per_hour` 지표는 현 DeepSeek 환경에서도 유용해 조기 추출 가능(별도 판단).
 
 ## Harness Adoption
 
