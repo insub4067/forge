@@ -2173,6 +2173,9 @@ footer .image-preview-row {
   padding: 4px;
   display: flex;
 }
+.drawer-close.pin.on {
+  color: var(--accent);
+}
 .rooms-scroll {
   flex: 1;
   overflow-y: auto;
@@ -3143,9 +3146,10 @@ button {
 }
 
 
-/* 넓은 화면(맥): 세션 사이드바를 고정 좌측 컬럼으로 — 콘텐츠는 그만큼 오른쪽으로 */
+/* 넓은 화면(맥): 사이드바를 고정(pinned) 또는 hover 노출(peek)로. */
 @media (min-width: 900px) {
-  .app {
+  /* 고정: 좌측 컬럼 + 콘텐츠 오른쪽으로 밀기 */
+  .app.sidebar-pinned {
     padding-left: 300px;
   }
   .rooms-overlay.pinned {
@@ -3166,7 +3170,40 @@ button {
     box-shadow: none;
     animation: none;
   }
-  .rooms-overlay.pinned .drawer-close {
-    display: none;
+
+  /* hover 노출: 평소엔 숨고 좌측 가장자리에 마우스를 대면 슬라이드로 나온다 */
+  .rooms-overlay.peek {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 300px;
+    background: none;
+    padding: 0;
+    z-index: 120;
+    pointer-events: none; /* 콘텐츠 클릭을 막지 않게 — 레일/패널만 잡는다 */
+  }
+  .rooms-overlay.peek::before { /* 좌측 hover 감지 레일 */
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 14px;
+    pointer-events: auto;
+  }
+  .rooms-overlay.peek .rooms-panel {
+    width: 300px;
+    max-width: none;
+    height: 100%;
+    border-radius: 0 14px 14px 0;
+    border: none;
+    border-right: 1px solid var(--border);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
+    transform: translateX(-100%);
+    transition: transform 0.18s ease;
+    animation: none;
+    pointer-events: auto;
+  }
+  .rooms-overlay.peek:hover .rooms-panel {
+    transform: translateX(0);
   }
 }

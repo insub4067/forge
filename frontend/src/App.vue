@@ -119,8 +119,13 @@ const rooms = ref([])
 const currentRoomId = ref(localStorage.getItem('forge_room') || '')
 const loadingMessages = ref(false)
 const showRooms = ref(false)
-const isWide = ref(false) // 넓은 화면(맥)에선 사이드바를 고정 컬럼으로
+const isWide = ref(false) // 넓은 화면(맥) 여부
+const pinnedSidebar = ref(localStorage.getItem('forge_sidebar_pinned') !== '0') // 고정 여부(기본 고정)
 const sidebarTab = ref('sessions') // sessions | jobs | mac
+function togglePin() {
+  pinnedSidebar.value = !pinnedSidebar.value
+  localStorage.setItem('forge_sidebar_pinned', pinnedSidebar.value ? '1' : '0')
+}
 const showCreateRoom = ref(false)
 const newRoomName = ref('')
 const newRoomPath = ref('')
@@ -1835,9 +1840,9 @@ watch(showRooms, (v) => {
 applyTheme(theme.value)
 
 onMounted(async () => {
-  // 넓은 화면(맥)에선 사이드바를 고정 노출. 좁아지면 오버레이 드로어로 복귀.
+  // 넓은 화면(맥)에선 사이드바를 상시 렌더(고정 또는 hover 노출). 좁으면 오버레이 드로어.
   const mq = window.matchMedia('(min-width: 900px)')
-  const applyWide = () => { isWide.value = mq.matches; if (mq.matches) showRooms.value = true }
+  const applyWide = () => { isWide.value = mq.matches }
   applyWide()
   mq.addEventListener('change', applyWide)
   await loadRooms()
@@ -1858,9 +1863,9 @@ document.addEventListener('visibilitychange', () => {
 </script>
 
 <template>
-  <div class="app">
+  <div class="app" :class="{ 'sidebar-pinned': isWide && pinnedSidebar }">
     <header>
-      <button class="icon-btn" @click="showRooms = true" aria-label="세션 목록">
+      <button v-if="!(isWide && pinnedSidebar)" class="icon-btn" @click="showRooms = true" aria-label="세션 목록">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
       <button class="room-btn" @click="showRooms = true">
@@ -1933,7 +1938,7 @@ document.addEventListener('visibilitychange', () => {
       </div>
     </div>
 
-    <div v-if="showRooms" class="rooms-overlay" :class="{ pinned: isWide }" @click="!isWide && (showRooms = false)">
+    <div v-if="showRooms || isWide" class="rooms-overlay" :class="{ pinned: isWide && pinnedSidebar, peek: isWide && !pinnedSidebar }" @click="!isWide && (showRooms = false)">
       <div class="rooms-panel" @click.stop>
         <div class="drawer-head">
           <span class="drawer-title">{{ sidebarTab === 'sessions' ? '세션' : sidebarTab === 'jobs' ? '예약 작업' : '맥' }}</span>
@@ -1944,7 +1949,10 @@ document.addEventListener('visibilitychange', () => {
             <button v-if="sidebarTab === 'jobs'" class="drawer-add" @click="showJobForm = true" aria-label="새 예약">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
             </button>
-            <button class="drawer-close" @click="showRooms = false" aria-label="닫기">
+            <button v-if="isWide" class="drawer-close pin" :class="{ on: pinnedSidebar }" @click="togglePin" :aria-label="pinnedSidebar ? '사이드바 고정 해제' : '사이드바 고정'">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
+            </button>
+            <button v-else class="drawer-close" @click="showRooms = false" aria-label="닫기">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
             </button>
           </div>
