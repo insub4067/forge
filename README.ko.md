@@ -14,10 +14,10 @@ Triage (Flash, 경량 라우터)
   └─ AGENT → Developer (flash + thinking medium)
                ↻ Plan(3줄) → Execute → Verify(테스트/빌드) → 완료
                                             └ 실패 → Diagnose → Repair → Verify
-               ↓ 막히면 pro + thinking high 1회 승격(Sr)
+               ↓ 막히면 pro + thinking high로 승격(최대 2회 루프, Sr)
 ```
 
-역할은 Developer/Vision/Chat 3개다. 별도 Planner/Reviewer/Debugger를 두지 않는다 —
+역할: Triage(최저가 라우터)가 단순 대화는 Chat(최저가 flash)으로, 코드는 Developer로 보낸다. 이미지는 Vision. 별도 Planner/Reviewer/Debugger를 두지 않는다 —
 에이전트가 늘 때마다 컨텍스트를 처음부터 다시 읽는 input token 비용이 발생하기 때문이다.
 Developer 하나가 설계·구현·자체검증·수정을 한 컨텍스트에서 끝까지 책임진다.
 

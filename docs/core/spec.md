@@ -9,7 +9,7 @@
 FORGE는 특정 LLM에 종속된 챗봇이 아니라 LLM을 판단 엔진으로 사용하는 실행 Runtime이다.
 
 ```text
-요구사항 → Triage → Plan → Code/Tool → Review → Debug → Re-review → Done
+요구사항 → Triage(chat/code) → [Chat | Developer(Plan→Execute→Verify→Repair)] → Done
 ```
 
 최상위 효율 원칙:
@@ -23,9 +23,8 @@ FORGE는 특정 LLM에 종속된 챗봇이 아니라 LLM을 판단 엔진으로 
 구현됨:
 
 - DeepSeek V4 Flash/Pro/Vision 라우팅
-- Planner Flash 기본, COMPLEX만 Pro
-- Coder/Reviewer/Debugger 역할 분리
-- Reviewer ↔ Debugger 자기수정 루프
+- 올인원 Developer(설계+구현+자체검증+수정) — flash+think 기본, 막히면 pro 승격(최대 2회 루프)
+- 단순 대화는 최저가 flash Chat으로 분기
 - read/list/grep/write/edit/bash/ask_user/update_tasks/save_skill
 - 승인 게이트, 질문, cancel, runtime injection
 - Docker Sandbox, git checkpoint/diff
@@ -51,13 +50,10 @@ FORGE는 특정 LLM에 종속된 챗봇이 아니라 LLM을 판단 엔진으로 
 
 | Role | 기본 정책 |
 |---|---|
-| Triage | Flash, non-thinking |
-| Planner | Flash + medium thinking; COMPLEX만 Pro + high |
-| Coder | Flash, non-thinking |
-| Reviewer | Flash + medium thinking |
-| Debugger | Flash; 반복 실패 마지막 복구만 Pro |
-| Chat | Flash |
-| Vision | Flash Vision |
+| Triage | Flash, non-thinking (chat vs code 라우터) |
+| Chat | Flash, non-thinking (단순 대화 최저가) |
+| Developer | Flash + medium thinking; 막힘 시 Pro + high로 승격(최대 2회 루프) |
+| Vision | Flash Vision, non-thinking (이미지 전처리) |
 
 강한 모델을 기본으로 쓰지 않는다. 성공률 데이터가 뒷받침될 때만 escalation한다.
 
@@ -86,7 +82,7 @@ FORGE는 특정 LLM에 종속된 챗봇이 아니라 LLM을 판단 엔진으로 
 - reasoning_content 호환 오류 자동 회복
 - 429/5xx/timeout/connection backoff retry
 - 동일 tool 반복 차단
-- Reviewer/Debugger 최대 cycle 제한
+- Developer 막힘 시 Pro 승격 최대 2회(MAX_ESCALATIONS)
 - 동일 session 동시 run 금지
 - approval/question 600초 timeout
 - cancel 시 pending wait 해제

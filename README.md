@@ -14,10 +14,10 @@ Triage (Flash, lightweight router)
   └─ AGENT → Developer (flash + thinking medium)
                loop: Plan(3 lines) → Execute → Verify(tests/build) → done
                                           └ fail → Diagnose → Repair → Verify
-               ↓ if stuck: escalate once to pro + thinking high (Sr)
+               ↓ if stuck: escalate to pro + thinking high (Sr), up to 2 retries
 ```
 
-Three roles only: Developer / Vision / Chat. No separate Planner/Reviewer/Debugger — each
+Roles: Triage (cheap router) → Chat (cheapest flash) for small talk, or Developer for code. Plus Vision for images. No separate Planner/Reviewer/Debugger — each
 extra agent re-reads the whole context (input tokens). One Developer owns design, implementation,
 self-verification and repair end-to-end in a single context.
 

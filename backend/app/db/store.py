@@ -533,6 +533,8 @@ async def admin_stats(days: int = 7) -> dict:
             role_tokens[r.role] = role_tokens.get(r.role, 0) + r.prompt_tokens + r.completion_tokens
 
         total_runs = len(runs)
+        # 현재 아키텍처의 활성 역할만 노출한다(과거 planner/coder/reviewer/debugger 제외).
+        active_roles = {"triage", "developer", "chat", "vision"}
         roles = [
             {
                 "role": role,
@@ -541,6 +543,7 @@ async def admin_stats(days: int = 7) -> dict:
                 "tokens": role_tokens.get(role, 0),
             }
             for role, count in sorted(role_counts.items(), key=lambda x: -x[1])
+            if role in active_roles
         ]
 
         room_counts: dict[str, int] = {}

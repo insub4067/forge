@@ -26,11 +26,14 @@ DeepSeek 권고: 설계+구현+자체검증을 **flash + thinking medium** 한 �
 
 | | 구 구조 | 신 구조(올인원) |
 |---|---|---|
-| 역할 | Triage·Planner·Coder·Reviewer·Debugger·Chat·Vision | **Developer·Vision** |
-| 흐름 | Triage→(Planner)→Coder→Reviewer↔Debugger | User→Developer(대화·코드 모두) |
-| 완료 판정 | Reviewer가 task 상태 done | Developer 자체검증(테스트/빌드) |
-| 승격 | Debugger 반복 실패 시 pro | 막힘 시 pro+think-high, 최대 2회 루프 |
-| 대화 | 별도 Chat 역할 | Developer가 처리(도구 없이 바로 답) |
+| 실행 역할 | Planner·Coder·Reviewer·Debugger | **Developer 하나** |
+| 흐름 | Triage→(Planner)→Coder→Reviewer↔Debugger | Triage → Chat(최저가) \| Developer |
+| 완료 판정 | Reviewer가 task 상태 done | Developer 자체검증(테스트/빌드) → 세션 final_status |
+| 승격 | Debugger 반복 실패 시 pro | Developer 막힘 시 pro+think-high, 최대 2회 루프 |
+| 단순 대화 | 별도 Chat 역할 | Triage가 최저가 flash Chat으로 분기(코드만 Developer) |
+
+관리자 모델정책·집계에 노출되는 역할은 **triage / chat / developer / vision** 뿐이다
+(과거 planner/coder/reviewer/debugger는 제외).
 
 **Developer 루프**: `Plan(3줄) → Execute → Verify → PASS:완료 | FAIL:Diagnose→Repair→Verify`.
 기본 flash+think-medium(Jr), 막히면(max_steps/repeated) pro+think-high로 승격해 최대

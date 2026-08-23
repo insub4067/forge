@@ -65,26 +65,18 @@ failed
 
 ## tasks
 
-상태 기반 Reviewer/Debugger 루프의 authority.
-
-```text
-todo → planning → in_progress → review → done
-                                   ↓
-                                 debug
-                                   ↓
-                                 review
-```
+Developer가 진행 상황을 기록하는 데 쓰는 선택적 태스크 목록(`update_tasks`). 옛 Reviewer/Debugger
+상태머신의 authority였으나, 올인원 구조에서는 완료 판정 authority가 세션 `final_status`로 바뀌었다.
+Developer가 자체검증(테스트/빌드)에 통과하면 완료다. tasks는 진행 표시·칸반 용도로 유지한다.
 
 주요 필드:
 
 - `id`
 - `session_id`
 - `title`
-- `status`
+- `status` (todo/in_progress/done 등 — 진행 표시)
 - `progress`
 - `created_at`, `updated_at`
-
-Reviewer는 미완료 task를 `debug` 또는 `done`으로 판단하고 Debugger는 수정 후 `review`로 되돌린다.
 
 ## checkpoints
 
