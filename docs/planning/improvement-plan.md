@@ -66,6 +66,8 @@ candidate worktree
   `task_facade.execute(goal, workspace=worktree)`를 호출, 완료를 폴링한다.
 - `--candidate-cmd "<셸 명령>"` — 스크립트/프롬프트를 그대로 실행한다.
 - 자동 merge는 아직 하지 않는다. 최종 승인은 사람이 report를 보고 결정한다.
+- 실증 완료(2026-08-24): baseline→candidate worktree→bench→gate→report 전체 파이프라인 실행 확인.
+  실증에서 `.env`(gitignore) 미복사로 candidate가 API key를 못 읽어 항상 0.0 REJECT되던 버그를 잡아 수정.
 - 검증: `test_rsi_run.py` 10케이스 (orchestration 로직 + FORGE subprocess 구성).
   실제 FORGE 구동은 DeepSeek API 비용이 발생하므로 venv에서 실행한다.
 

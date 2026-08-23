@@ -42,9 +42,16 @@ def load_baseline(path: str) -> dict:
 
 
 def create_worktree(base: Path) -> Path:
-    """현재 HEAD 기준 candidate worktree를 임시 디렉터리에 만든다."""
+    """현재 HEAD 기준 candidate worktree를 임시 디렉터리에 만든다.
+
+    .env는 gitignore라 worktree에 딸려오지 않는다 — 복사하지 않으면 candidate bench가
+    DEEP_SEEK_API_KEY를 못 읽어 모든 task가 실패(success_rate=0.0)하고 무조건 REJECT된다.
+    임시 worktree(실행 후 정리)에만 복사한다."""
     tmp = Path(tempfile.mkdtemp(prefix="rsi-candidate-"))
     _run(["git", "worktree", "add", "--detach", str(tmp), "HEAD"], base)
+    env_f = base / ".env"
+    if env_f.exists():
+        shutil.copy(env_f, tmp / ".env")
     return tmp
 
 
