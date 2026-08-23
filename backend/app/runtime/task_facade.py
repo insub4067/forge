@@ -10,8 +10,12 @@ import uuid
 from ..db import store
 
 
-async def execute(goal: str, workspace: str = "", auto_approve: bool = False) -> str:
-    """새 task를 시작하고 즉시 task_id를 반환한다(비차단). agent run은 백그라운드에서 돈다."""
+async def execute(goal: str, workspace: str = "", auto_approve: bool = False, plan: str = "") -> str:
+    """새 task를 시작하고 즉시 task_id를 반환한다(비차단). agent run은 백그라운드에서 돈다.
+
+    plan이 주어지면(상위 MCP 호출부가 추론·계획을 담당) FORGE 내부 planner를 건너뛰고
+    코딩만 한다 — 가장 비싼 planner phase를 외부(무제한 chat 모델)로 넘겨 비용을 줄인다.
+    """
     from ..api.routes import runtime, _notify_done  # 지연 import(순환 방지)
     from .. import errors as error_log
 
@@ -19,7 +23,12 @@ async def execute(goal: str, workspace: str = "", auto_approve: bool = False) ->
     await store.ensure_session(sid, goal[:40] or "task", workspace or None)
     runtime.set_auto_approve(sid, auto_approve)
     runtime.try_begin(sid)  # 새 세션이라 항상 성공
-    history = [{"role": "user", "content": goal}]
+    if plan.strip():
+        runtime.set_planner_off(sid, True)
+        content = f"[상위 에이전트가 제공한 계획]\n{plan.strip()}\n\n[목표]\n{goal}"
+    else:
+        content = goal
+    history = [{"role": "user", "content": content}]
     await store.save_history(sid, history)
     await store.mark_running(sid, True)
 

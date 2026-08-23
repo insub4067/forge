@@ -23,12 +23,13 @@ SERVER_INFO = {"name": "forge", "version": "0.1.0"}
 TOOLS = [
     {
         "name": "forge_execute",
-        "description": "FORGE 코딩 에이전트에 목표 단위 작업을 위임한다(Triage→Planner→Coder→Reviewer→Debugger 전체 루프). 비차단 — task_id를 즉시 반환하고, forge_status로 진행을 조회한다.",
+        "description": "FORGE 코딩 에이전트에 작업을 위임한다. plan을 주면 FORGE는 내부 계획을 건너뛰고 코딩(Coder→Reviewer→Debugger)만 한다 — 추론·계획은 호출하는 당신(상위 모델)이 하고, FORGE는 값싼 실행만 담당. plan을 안 주면 FORGE가 계획까지 전부 처리한다. 비차단 — task_id를 즉시 반환하고 forge_status로 진행을 조회한다.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "goal": {"type": "string", "description": "달성할 목표(자연어). 예: '로그인 버그를 찾아 수정하고 테스트까지 완료'"},
                 "workspace": {"type": "string", "description": "작업할 로컬 워크스페이스 절대경로"},
+                "plan": {"type": "string", "description": "선택. 당신이 세운 단계별 실행 계획. 주면 FORGE 내부 planner를 건너뛰고 이 계획대로 코딩만 한다(비용↓). 복잡한 작업일수록 구체적 계획을 넘기는 것을 권장."},
                 "auto_approve": {"type": "boolean", "description": "쓰기/실행 도구를 자동 승인할지(무인 위임 시 true). 기본 false", "default": False},
             },
             "required": ["goal", "workspace"],
@@ -59,7 +60,8 @@ async def _call_tool(name: str, args: dict) -> dict:
         workspace = str(args.get("workspace", "")).strip()
         if not goal or not workspace:
             return _text("goal과 workspace는 필수입니다.", is_error=True)
-        task_id = await task_facade.execute(goal, workspace, bool(args.get("auto_approve", False)))
+        task_id = await task_facade.execute(goal, workspace, bool(args.get("auto_approve", False)),
+                                            plan=str(args.get("plan", "")))
         return _text(json.dumps({"task_id": task_id, "status": "running"}, ensure_ascii=False))
     if name == "forge_status":
         return _text(json.dumps(task_facade.status(str(args.get("task_id", ""))), ensure_ascii=False))

@@ -221,6 +221,8 @@ class AgentRuntime:
         # reasoning_content 400을 한 번 겪은 세션 — 이후 호출은 미리 reasoning을 벗긴다.
         self._strip_reasoning_sessions: set[str] = set()
         self._auto_approve_sessions: set[str] = set()
+        # 계획을 외부(MCP 호출부)가 제공한 세션 — 내부 planner를 건너뛰고 코딩만 한다.
+        self._planner_off_sessions: set[str] = set()
         # 세션별 컨텍스트 압축 상태: {session_id: {"summary": str, "covered": int}}
         # summary가 all_messages[:covered]를 대체(모델 전송 시에만).
         self._compaction: dict[str, dict] = {}
@@ -508,6 +510,7 @@ class AgentRuntime:
         self._running_sessions.discard(session_id)
         self._injections.pop(session_id, None)
         self._cancel_sessions.discard(session_id)
+        self._planner_off_sessions.discard(session_id)
         self._compaction.pop(session_id, None)
         self._status.pop(session_id, None)
         for pid, meta in list(self._pending_meta.items()):
@@ -532,6 +535,13 @@ class AgentRuntime:
             self._auto_approve_sessions.add(session_id)
         else:
             self._auto_approve_sessions.discard(session_id)
+
+    def set_planner_off(self, session_id: str, enabled: bool) -> None:
+        """이 세션에서 내부 planner를 건너뛴다(계획을 외부 호출부가 제공할 때)."""
+        if enabled:
+            self._planner_off_sessions.add(session_id)
+        else:
+            self._planner_off_sessions.discard(session_id)
 
     def resolve_pending_approvals(self, session_id: str = "") -> int:
         """해당 세션의 대기 승인만 승인 처리한다(자동 승인 켤 때).
@@ -1076,7 +1086,7 @@ class AgentRuntime:
         # 1. Planner — COMPLEX 작업에서만 실행한다. SIMPLE(한두 단계 수정)은 coder가
         #    바로 실행해 planner의 과탐색·컨텍스트 재전송(토큰 폭주)을 없앤다.
         #    빈 task여도 아래 reviewer가 1회 검토 후 완료하므로 흐름은 안전하다.
-        if complexity == "high" and not settings.planner_off:
+        if complexity == "high" and not settings.planner_off and session_id not in self._planner_off_sessions:
             status, p, c, route = await self._run_role(
                 "planner", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory,
                 skills=skills, complexity=complexity,

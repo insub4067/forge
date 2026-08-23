@@ -22,7 +22,7 @@ async def main():
         assert banned not in names, f"저수준 도구 노출됨: {banned}"
 
     # 4) tools/call forge_execute (facade 목킹 — LLM 실행 안 함)
-    async def fake_execute(goal, workspace, auto_approve=False):
+    async def fake_execute(goal, workspace, auto_approve=False, plan=""):
         assert goal and workspace
         return "task_abc"
     with mock.patch.object(server.task_facade, "execute", fake_execute):
