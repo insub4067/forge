@@ -1,7 +1,8 @@
 <script setup>
 // 세션 상세 패널 — 컨텍스트·토큰·비용·에이전트/모델별 사용량·실행 이력.
 // App.vue의 showSessionDetail 관련 상태·함수·마크업을 이 컴포넌트로 이관.
-import { ref, computed, onMounted } from 'vue'
+import { ref, nextTick, onMounted } from 'vue'
+import html2canvas from 'html2canvas'
 import { balance as adminBalance, loadBalance } from '../store'
 
 const props = defineProps({
@@ -25,54 +26,53 @@ const toolUsage = ref([])  // 도구별 호출 횟수(어떤 툴 몇 번)
 const CTX_LABELS = { system_base_role: 'System·규칙', memory: '메모리', skills: 'Skills', history: '대화', tool_results: '도구 결과' }
 const showRunHistory = ref(false)
 const capturing = ref(false)
-// getDisplayMedia는 iOS Safari 등 모바일 브라우저에 없다 — 지원될 때만 버튼을 노출한다
-// (없는 데서 누르면 실패 alert만 떴다. 모바일은 기기 스크린샷을 쓴다).
-const canScreenshot = computed(() => !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia))
+const panelEl = ref(null)   // 캡처 대상: 패널 프레임(헤더+본문)
+const bodyEl = ref(null)    // 스크롤 컨테이너 — 캡처 동안 제약을 풀어 전체 길이를 담는다
 
-// 전체화면 스크린샷 — 브라우저 내장 getDisplayMedia로 화면/창/탭을 캡처해 PNG로 저장.
-// 별도 의존성 없이 전체 화면(모니터)을 담는다. 사용자가 캡처 대상을 선택해야 한다.
+// 전체 페이지(긴 내용까지) 스크린샷 — DOM을 html2canvas로 통째로 래스터화한다.
+// getDisplayMedia는 iOS PWA(standalone)에서 "화면 녹화" 권한 프롬프트만 띄우고 폰 화면만
+// 잡혀 쓸모가 없었다. html2canvas는 권한 없이 스크롤 밖 내용까지 한 장으로 담는다.
+// 저장은 iOS에서 다운로드가 막히므로 Web Share(파일 공유)를 먼저 시도하고, 없으면 다운로드.
 async function captureScreenshot() {
   if (capturing.value) return
-  if (!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)) {
-    alert('이 브라우저는 화면 캡처를 지원하지 않습니다. 기기 스크린샷 기능을 사용하세요.')
-    return
-  }
+  const panel = panelEl.value
+  if (!panel) return
   capturing.value = true
-  let stream = null
+  const body = bodyEl.value
+  const saved = body ? { height: body.style.height, maxHeight: body.style.maxHeight, overflow: body.style.overflow } : null
+  if (body) { body.style.height = 'auto'; body.style.maxHeight = 'none'; body.style.overflow = 'visible' }
   try {
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { mediaSource: 'screen' },
-      audio: false,
+    await nextTick()
+    const bg = getComputedStyle(panel).backgroundColor
+    const canvas = await html2canvas(panel, {
+      backgroundColor: bg && bg !== 'rgba(0, 0, 0, 0)' ? bg : '#0b0b0d',
+      scale: Math.min(2, window.devicePixelRatio || 1),
+      useCORS: true,
+      windowWidth: panel.scrollWidth,
+      windowHeight: panel.scrollHeight,
+      height: panel.scrollHeight,
     })
-    const video = document.createElement('video')
-    video.srcObject = stream
-    video.muted = true
-    await video.play()
-    // 첫 프레임이 준비될 때까지 대기 — 안 그러면 검은 화면이 찍힌다.
-    await new Promise((resolve) => {
-      if (video.videoWidth) return resolve()
-      video.addEventListener('loadeddata', resolve, { once: true })
-    })
-    const canvas = document.createElement('canvas')
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    canvas.getContext('2d').drawImage(video, 0, 0)
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
     if (!blob) throw new Error('PNG 변환 실패')
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `forge-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    const name = `forge-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`
+    const file = new File([blob], name, { type: 'image/png' })
+    // iOS: 다운로드가 막혀 있어 공유 시트(→ 이미지 저장)가 정석. 지원되면 우선 사용.
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file] })
+    } else {
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = name
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    }
   } catch (err) {
-    // 사용자가 캡처를 취소한 경우(NotAllowedError)는 조용히 무시, 그 외만 알림.
-    if (err && err.name !== 'NotAllowedError' && err.name !== 'AbortError') {
+    if (err && err.name !== 'AbortError') {
       alert('스크린샷 실패: ' + (err.message || err))
     }
   } finally {
-    // 화면 점유 해제 — 트랙을 정지하지 않으면 캡처 표시가 계속 남는다.
-    if (stream) stream.getTracks().forEach((t) => t.stop())
+    if (body && saved) { body.style.height = saved.height; body.style.maxHeight = saved.maxHeight; body.style.overflow = saved.overflow }
     capturing.value = false
   }
 }
@@ -154,15 +154,15 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="kanban-overlay">
+  <div class="kanban-overlay" ref="panelEl">
     <div class="kanban-head">
       <span class="kanban-title">{{ roomTitle }} · 사용량</span>
       <div class="kanban-head-actions">
-        <button v-if="canScreenshot" :disabled="capturing" @click="captureScreenshot">{{ capturing ? '캡처 중…' : '스크린샷' }}</button>
+        <button :disabled="capturing" @click="captureScreenshot">{{ capturing ? '캡처 중…' : '스크린샷' }}</button>
         <button @click="emit('close')">닫기</button>
       </div>
     </div>
-    <div class="admin-body">
+    <div class="admin-body" ref="bodyEl">
       <div class="admin-section">
         <div class="admin-stat-title">컨텍스트 윈도우 (최근 호출)</div>
         <div class="admin-big">{{ ctxPct(room) }}%</div>
