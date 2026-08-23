@@ -185,7 +185,8 @@ APPROVAL_REQUIRED = {"write_file", "edit_file", "bash", "save_skill", "build_fro
 # host 모드에서 bash가 호스트에 직접 닿으므로, FORGE를 실행 중인 백엔드 프로세스를
 # 스스로 죽이는 것을 막는다(자기 세션 자멸·완전 다운 방지). 백엔드 변경 적용을 위한
 # 재시작은 FORGE가 아니라 사람이/슈퍼바이저가 한다. 빌드는 build_frontend 도구를 쓴다.
-BLOCKED_COMMANDS = ["rm -rf", "git push", "sudo ", "chmod 777",
+# git push는 사용자가 명시적으로 허용함 — FORGE가 자기 작업을 origin까지 올릴 수 있다.
+BLOCKED_COMMANDS = ["rm -rf", "sudo ", "chmod 777",
                     "kill ", "killall", "pkill", "uvicorn"]
 
 
