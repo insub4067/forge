@@ -18,6 +18,9 @@ Proposal 채택 여부도 기능 수나 token 절감보다 success/verification 
 
 ## Product / Capability
 
+- `browser-computer-use.md` — **proposal**. Playwright 기반 Browser Use로 런타임·UI 검증 사각을
+  메운다(build 통과를 '실제로 뜨고 동작함'으로 승격). 1단계는 verify에 런타임 스모크 추가(콘솔
+  에러 0·셀렉터 렌더), 2단계 에이전트 도구화. Computer Use는 철학·안전 이유로 보류.
 - `forge-runtime-hardening-roadmap.md` — **우선순위 로드맵 proposal**. Verification 3-state → ExecutionBackend → authoritative event/replay → benchmark-driven model routing → task worktree → RSI promotion → optional parallel Developer → visual loop 순으로 FORGE를 Verified Autonomous Software Execution Runtime으로 강화하는 제안.
 - `global-workspace-skills.md` — **구현됨**. 실제는 Curated/Learned/Project 3-tier로 확장됨.
 - `token-cost-reduction.md` — living research. 단, 비용 절감은 항상 success-rate gate 아래에 둔다.
