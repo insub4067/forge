@@ -655,7 +655,9 @@ async function openWorkspacePicker(roomId) {
 const fsFilter = ref('')
 const fsVisible = computed(() => {
   const q = fsFilter.value.trim().toLowerCase()
-  return q ? fsEntries.value.filter((e) => e.name.toLowerCase().includes(q)) : fsEntries.value
+  const list = q ? fsEntries.value.filter((e) => e.name.toLowerCase().includes(q)) : fsEntries.value
+  // 폴더 먼저(선택 가능한 것이 위로), 그다음 이름순.
+  return [...list].sort((a, b) => (Number(b.is_dir) - Number(a.is_dir)) || a.name.localeCompare(b.name))
 })
 
 async function navigateFs(path) {
