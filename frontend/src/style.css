@@ -376,6 +376,15 @@ header .todo-btn {
   color: #f87171;
 }
 
+/* 충전 잔액 항목 — 세션 사용량 아래에 표시, 탭하면 충전 화면 이동 확인 팝업 */
+.menu-item.menu-balance {
+  color: var(--accent);
+}
+.menu-item.menu-balance .menu-ctx {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .ctx-btn {
   position: relative;
   background: none;
