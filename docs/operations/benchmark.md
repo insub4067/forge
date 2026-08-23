@@ -18,7 +18,7 @@ Benchmark는 단순 비용 측정이 아니다.
 
 ## R0 Harness
 
-`backend/bench.py` + `backend/bench_tasks.py`는 격리 fixture에서 Agent를 실행하고 deterministic checker로 결과를 채점한다. 현재 21개 task가 있다.
+`backend/bench.py` + `backend/bench_tasks.py`는 격리 fixture에서 Agent를 실행하고 deterministic checker로 결과를 채점한다. 현재 25개 task가 있다.
 
 ```bash
 cd backend
@@ -73,7 +73,7 @@ PROMOTE 후보가 되어도 현재는 자동 main merge하지 않고 사람 승�
 
 ## 확장 방향
 
-21개 task를 기반으로 현실 난이도와 failure-mode coverage를 늘린다.
+25개 task를 기반으로 현실 난이도와 failure-mode coverage를 늘린다.
 
 - multi-file feature/refactoring
 - failing-test debugging

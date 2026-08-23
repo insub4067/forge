@@ -282,10 +282,111 @@ def _t_bugfix_recursion():
                 setup=setup, check=check, fix=fix)
 
 
+def _t_failing_test_debug():
+    """failing-test debugging: 실패하는 테스트를 예외 traceback을 따라가며 원인을 찾는 디버깅."""
+    def setup(d):
+        W(d, "parse.py", "def to_int(s):\n    return int(s)\n")
+        W(d, "process.py",
+          "import parse\n\ndef total(rows):\n    return sum(parse.to_int(r) for r in rows)\n")
+        W(d, "test_process.py",
+          "from process import total\n"
+          "assert total(['1', '2', '3']) == 6, total(['1','2','3'])\n"
+          "assert total(['1', 'x', '3']) == 4, total(['1','x','3'])  # 'x'는 건너뛰어야 함\n"
+          "print('ok')\n")
+    def check(d): return run_py(d, "test_process.py")
+    def fix(d):
+        W(d, "process.py",
+          "import parse\n\ndef total(rows):\n    s = 0\n    for r in rows:\n        try:\n            s += parse.to_int(r)\n        except ValueError:\n            pass\n    return s\n")
+    return dict(code="U", category="failing-test 디버깅(예외 경로 추적)", complex=True,
+                prompt="test_process.py가 ValueError로 실패한다. process.total이 숫자가 아닌 문자열을 만나면 예외를 던진다. 숫자로 변환 가능한 값만 합산하고 나머지는 건너뛰도록 고쳐줘. test_process.py가 통과해야 한다.",
+                setup=setup, check=check, fix=fix)
+
+
+def _t_ambiguous_requirement():
+    """ambiguous requirement: 요구사항이 모호하고, 정확한 규칙은 테스트로만 드러난다."""
+    def setup(d):
+        W(d, "clean.py", "def clean(s):\n    return s\n")
+        W(d, "test_clean.py",
+          "from clean import clean\n"
+          "assert clean('  Hello  World  ') == 'hello world', clean('  Hello  World  ')\n"
+          "assert clean('A!B@C#') == 'abc', clean('A!B@C#')\n"
+          "assert clean('') == '', clean('')\n"
+          "print('ok')\n")
+    def check(d): return run_py(d, "test_clean.py")
+    def fix(d):
+        W(d, "clean.py", "import re\n\ndef clean(s):\n    return re.sub(r'\\s+', ' ', re.sub(r'[^a-z0-9 ]', '', s.lower())).strip()\n")
+    return dict(code="V", category="모호한 요구사항(테스트로 규칙 파악)", complex=False,
+                prompt="clean 함수를 구현해줘. 문자열을 '정리'하는 함수인데 정확한 규칙은 명시하지 않겠다. test_clean.py를 읽고 어떤 규칙을 기대하는지 파악해서 그대로 구현해줘.",
+                setup=setup, check=check, fix=fix)
+
+
+def _t_long_running_restart():
+    """long-running/restart: 상태를 파일에 영속화하고 재실행 시 이어간다."""
+    def setup(d):
+        W(d, "counter.py",
+          "import json\nfrom pathlib import Path\n\n"
+          "STATE = Path('state.json')\n\n"
+          "def load():\n"
+          "    # TODO: state.json에서 count 읽기(없으면 0)\n"
+          "    return 0\n\n"
+          "def bump():\n"
+          "    # TODO: count를 1 올리고 state.json에 저장\n"
+          "    return load() + 1\n")
+        W(d, "test_counter.py",
+          "import counter\n"
+          "assert counter.bump() == 1, counter.bump()\n"
+          "assert counter.bump() == 2, counter.bump()\n"
+          "print('ok')\n")
+    def check(d): return run_py(d, "test_counter.py")
+    def fix(d):
+        W(d, "counter.py",
+          "import json\nfrom pathlib import Path\n\n"
+          "STATE = Path('state.json')\n\n"
+          "def load():\n"
+          "    if STATE.exists():\n"
+          "        return json.loads(STATE.read_text()).get('count', 0)\n"
+          "    return 0\n\n"
+          "def bump():\n"
+          "    n = load() + 1\n"
+          "    STATE.write_text(json.dumps({'count': n}))\n"
+          "    return n\n")
+    return dict(code="W", category="long-running 상태 영속화", complex=True,
+                prompt="counter.py의 bump가 호출될 때마다 1씩 증가하는 카운터를 구현해줘. 단, 카운트는 state.json 파일에 저장되어 프로세스가 재시작돼도 이어져야 한다(메모리 변수만으로는 안 됨). test_counter.py가 통과해야 한다.",
+                setup=setup, check=check, fix=fix)
+
+
+def _t_frontend_backend_integration():
+    """frontend/backend 통합: HTML 폼과 JS 검증 로직이 함께 동작해야 한다."""
+    def setup(d):
+        W(d, "index.html",
+          "<!doctype html>\n<html><head><title>Form</title></head>\n<body>\n"
+          "<form id='f'><input id='email'><button>submit</button></form>\n"
+          "<script src='validate.js'></script>\n"
+          "</body></html>\n")
+        W(d, "validate.js", "// TODO: validateEmail 구현\n")
+        W(d, "test_validate.py",
+          "import re\n"
+          "src = open('validate.js').read()\n"
+          "assert 'validateEmail' in src, 'validateEmail 함수 없음'\n"
+          "assert 'includes' in src or 'indexOf' in src, '이메일 검증 로직 없음'\n"
+          "print('ok')\n")
+    def check(d): return run_py(d, "test_validate.py")
+    def fix(d):
+        W(d, "validate.js",
+          "function validateEmail(e) {\n"
+          "  return e.includes('@') && e.includes('.');\n"
+          "}\n")
+    return dict(code="X", category="frontend/backend 통합", complex=False,
+                prompt="index.html의 폼에서 이메일을 검증하려고 한다. validate.js에 validateEmail 함수를 구현해줘. 이메일 형식(@와 . 포함)을 검사하는 함수다. test_validate.py가 통과해야 한다.",
+                setup=setup, check=check, fix=fix)
+
+
 TASKS = [
     _t_edit(), _t_bugfix(), _t_offbyone(), _t_multifile_feature(), _t_multifile_bug(),
     _t_explore_fix(), _t_refactor(), _t_api_change(), _t_config(), _t_frontend(),
     _t_reuse_helper(), _t_no_new_code(), _t_verify_assumption(), _t_dead_code(),
     _t_validation(), _t_multi_caller_const(), _t_json_parse(), _t_complex_pipeline(),
     _t_complex_statemachine(), _t_import_fix(), _t_bugfix_recursion(),
+    _t_failing_test_debug(), _t_ambiguous_requirement(), _t_long_running_restart(),
+    _t_frontend_backend_integration(),
 ]

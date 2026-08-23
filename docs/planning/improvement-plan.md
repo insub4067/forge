@@ -29,20 +29,20 @@ FORGE의 핵심은:
 - event polling/seq dedup
 - 3-tier Skills
 - application HTTP/WebSocket auth
-- deterministic R0 benchmark 21 tasks
+- deterministic R0 benchmark 25 tasks
 - bounded RSI promotion gate
 
 따라서 과거 문서의 "durable resume 미구현", "benchmark 실물 없음", "Planner 폭주가 현재 구조의 중심" 같은 항목은 더 이상 현재 backlog가 아니다.
 
 ## P0 — Benchmark 현실성 확대
 
-현재 21 task를 단순 숫자 증가보다 failure-mode coverage 중심으로 확장한다.
+현재 25 task를 단순 숫자 증가보다 failure-mode coverage 중심으로 확장한다. (2025-03-11: 21 → 25, 신규 4개)
 
 - multi-file/integration
-- frontend/backend
-- failing-test debugging
-- ambiguous requirement
-- long-running/restart
+- frontend/backend — X
+- failing-test debugging — U (예외 traceback을 따라 호출 경로 추적)
+- ambiguous requirement — V (모호한 요구를 테스트로 규칙 파악)
+- long-running/restart — W (상태를 파일에 영속화)
 - 잘못된 사용자 가정 검증
 - no-change가 정답인 task
 
