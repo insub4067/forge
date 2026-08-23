@@ -2510,18 +2510,14 @@ document.addEventListener('visibilitychange', () => {
             <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_compactions || 0 }}</span><span class="metric-lbl">압축</span></div>
             <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_retries || 0 }}</span><span class="metric-lbl">재시도</span></div>
           </div>
-          <div v-if="sessionMetrics.estimated_cost != null" class="admin-sub">추정 비용 ${{ sessionMetrics.estimated_cost.toFixed(4) }} · 상태 {{ sessionMetrics.final_status || '—' }}</div>
           <div v-if="sessionMetrics.selected_skills" class="admin-sub">skill: {{ sessionMetrics.selected_skills }}</div>
           <div v-for="(b, bi) in (sessionMetrics.bottlenecks || [])" :key="bi" class="metric-warn">⚠ {{ b }}</div>
         </div>
 
-        <div v-if="sessionMetrics && sessionMetrics.runs && sessionMetrics.runs.length" class="admin-section">
-          <div class="admin-stat-title">이번 세션 비용 (run별)</div>
-          <div class="admin-sub">합계 ${{ sessionMetrics.estimated_cost != null ? sessionMetrics.estimated_cost.toFixed(4) : '—' }}</div>
-          <div v-for="(r, ri) in sessionMetrics.runs" :key="ri" class="admin-row">
-            <span>{{ ROLE_LABELS[r.role] || r.role }} <span class="run-count">×{{ r.model_calls || 0 }}호출</span></span>
-            <span class="mono">{{ r.cost_usd != null ? '$' + r.cost_usd.toFixed(6) : '가격표 없음' }}</span>
-          </div>
+        <div v-if="sessionMetrics && sessionMetrics.estimated_cost != null" class="admin-section">
+          <div class="admin-stat-title">이번 세션 비용</div>
+          <div class="admin-big">${{ sessionMetrics.estimated_cost.toFixed(4) }}</div>
+          <div class="admin-sub">상태 {{ sessionMetrics.final_status || '—' }}</div>
         </div>
 
         <div class="admin-section">
