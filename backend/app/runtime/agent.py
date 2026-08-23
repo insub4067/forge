@@ -402,6 +402,9 @@ class AgentRuntime:
         self.pending_approvals: dict[str, asyncio.Future] = {}
         self.pending_questions: dict[str, asyncio.Future] = {}
         self._cancel_sessions: set[str] = set()
+        # 실행 중인 tool(긴 bash 등)을 즉시 깨우기 위한 취소 이벤트. 플래그는 스텝 경계에서만
+        # 폴링돼 실행 중 subprocess를 못 멈췄다 — 이벤트로 tool await를 race해 즉시 중단한다.
+        self._cancel_events: dict[str, asyncio.Event] = {}
         self._injections: dict[str, list[str]] = {}
         self._running_sessions: set[str] = set()
         # 세션별 마지막 이벤트 seq — run마다 0부터 시작하면 폴링 since가 깨지므로
@@ -666,8 +669,16 @@ class AgentRuntime:
             return True
         return False
 
+    def _cancel_event(self, session_id: str) -> asyncio.Event:
+        ev = self._cancel_events.get(session_id)
+        if ev is None:
+            ev = asyncio.Event()
+            self._cancel_events[session_id] = ev
+        return ev
+
     def cancel(self, session_id: str) -> None:
         self._cancel_sessions.add(session_id)
+        self._cancel_event(session_id).set()  # 실행 중인 tool await를 즉시 깨운다
         # 승인/질문 future에 매달린 run은 cancel 플래그만으론 안 깨어난다.
         # 대기 future를 resolve해 await를 반환시키면, 다음 스텝에서 cancel을 보고 종료한다.
         for pid, meta in list(self._pending_meta.items()):
@@ -704,6 +715,7 @@ class AgentRuntime:
         self._running_sessions.discard(session_id)
         self._injections.pop(session_id, None)
         self._cancel_sessions.discard(session_id)
+        self._cancel_events.pop(session_id, None)
         self._compaction.pop(session_id, None)
         self._status.pop(session_id, None)
         for pid, meta in list(self._pending_meta.items()):
@@ -1158,7 +1170,10 @@ class AgentRuntime:
                     if tc["id"] in prefetched:
                         result, diff = prefetched[tc["id"]]  # 병렬 prefetch된 읽기 결과
                     else:
-                        result, diff = await execute_tool(name, args, ws)
+                        _r = await self._exec_tool_cancellable(name, args, ws, session_id)
+                        if _r is None:  # 실행 중 사용자가 취소 — subprocess까지 종료됨
+                            return "cancelled", total_prompt, total_completion, route
+                        result, diff = _r
                     if name in ("write_file", "edit_file") and not result.startswith("오류"):
                         state["files_changed"].append(str(args.get("path")))
                 except Exception as err:
@@ -1182,6 +1197,28 @@ class AgentRuntime:
                 )
 
         return "max_steps", total_prompt, total_completion, route
+
+    async def _exec_tool_cancellable(self, name, args, ws, session_id):
+        """execute_tool을 실행하되, 실행 중 취소되면 하위 subprocess까지 죽이고 None을 반환한다.
+        긴 bash가 취소 플래그를 스텝 경계에서만 봐서 못 멈추던 구멍을 메운다.
+        정상 완료 시 (result, diff), 취소 시 None."""
+        if not session_id:
+            return await execute_tool(name, args, ws)
+        tool_task = asyncio.ensure_future(execute_tool(name, args, ws))
+        cancel_task = asyncio.ensure_future(self._cancel_event(session_id).wait())
+        try:
+            await asyncio.wait({tool_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            cancel_task.cancel()
+        if tool_task.done() and not self._cancel_event(session_id).is_set():
+            return tool_task.result()
+        # 취소됨 — 실행 중 tool을 중단하면 executor가 CancelledError에서 subprocess를 죽인다.
+        tool_task.cancel()
+        try:
+            await tool_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        return None
 
     async def _finalize_tasks(self, session_id: str, send: EventSink) -> None:
         """성공 완료 시 남은 task를 done으로 마감한다 — 모델이 update_tasks로 상태를
@@ -1530,6 +1567,7 @@ class AgentRuntime:
             await emit({"seq": seq, "type": event_type, "data": data})
 
         self._cancel_sessions.discard(session_id)
+        self._cancel_events.pop(session_id, None)  # 이전 run의 취소 이벤트 잔재 제거
         self._injections.pop(session_id, None)
         if session_id:
             self._running_sessions.add(session_id)

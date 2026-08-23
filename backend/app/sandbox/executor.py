@@ -62,6 +62,14 @@ class DockerSandbox:
             proc.kill()
             await proc.communicate()
             return f"(타임아웃 {timeout}초 초과, 강제 종료)"
+        except asyncio.CancelledError:
+            # 사용자가 실행 중 취소 — docker run 클라이언트를 죽이면 --rm 컨테이너도 정리된다.
+            proc.kill()
+            try:
+                await proc.communicate()
+            except Exception:
+                pass
+            raise
         return stdout.decode(errors="replace")
 
     async def _run_host(self, command: str, timeout: int) -> str:
@@ -77,15 +85,25 @@ class DockerSandbox:
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,  # 셸+자식을 한 프로세스 그룹으로 — 타임아웃 시 그룹째 종료
         )
-        try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
+        def _kill_group():
             # proc.kill()은 셸만 죽여 자식(find 등)이 orphan으로 남아 디스크를 계속 스캔한다.
             # 프로세스 그룹 전체(셸+자식)를 SIGKILL로 확실히 종료한다.
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except Exception:
                 proc.kill()
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            _kill_group()
             await proc.communicate()
             return f"(타임아웃 {timeout}초 초과, 강제 종료)"
+        except asyncio.CancelledError:
+            # 사용자가 실행 중 취소 — 그룹째 죽이지 않으면 긴 명령이 백그라운드로 계속 돈다.
+            _kill_group()
+            try:
+                await proc.communicate()
+            except Exception:
+                pass
+            raise
         return stdout.decode(errors="replace")
