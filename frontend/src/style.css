@@ -104,6 +104,7 @@ header {
   display: flex;
   align-items: center;
   gap: 10px;
+  margin-left: auto; /* 햄버거가 숨어도(고정 모드) 항상 우측 정렬 */
 }
 /* 타이틀은 아이콘 개수와 무관하게 화면 정중앙 고정 */
 header .room-btn {
@@ -3181,13 +3182,13 @@ button {
     z-index: 120;
     pointer-events: none; /* 콘텐츠 클릭을 막지 않게 — 레일/패널만 잡는다 */
   }
-  .rooms-overlay.peek::before { /* 좌측 hover 감지 레일 */
+  .rooms-overlay.peek::before { /* 좌측 hover 감지 레일 — 넉넉히 잡아 마우스가 쉽게 닿게 */
     content: '';
     position: absolute;
     left: 0;
     top: 0;
     bottom: 0;
-    width: 14px;
+    width: 28px;
     pointer-events: auto;
   }
   .rooms-overlay.peek .rooms-panel {

@@ -1875,7 +1875,7 @@ document.addEventListener('visibilitychange', () => {
 <template>
   <div class="app" :class="{ 'sidebar-pinned': isWide && pinnedSidebar }">
     <header>
-      <button v-if="!(isWide && pinnedSidebar)" class="icon-btn" @click="showRooms = true" aria-label="세션 목록">
+      <button v-if="!(isWide && pinnedSidebar)" class="icon-btn" @click="isWide ? togglePin() : (showRooms = true)" aria-label="세션 목록">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
       <button class="room-btn" @click="showRooms = true">
