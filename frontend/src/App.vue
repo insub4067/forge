@@ -9,6 +9,7 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { balance as adminBalance, loadBalance } from './store'
 import '@xterm/xterm/css/xterm.css'
 
 const _EXT_LANG = {
@@ -217,7 +218,6 @@ const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window
 const adminStats = ref(null)
 const showModelPicker = ref(false)
 const pickerRole = ref('')
-const adminBalance = ref(null)
 const adminPolicyOpen = ref(false)
 const adminErrors = ref([])
 const showSessionDetail = ref(false)
@@ -448,13 +448,6 @@ async function loadAdmin() {
   try {
     const res = await fetch('/api/admin/stats')
     if (res.ok) adminStats.value = await res.json()
-  } catch {}
-}
-
-async function loadBalance() {
-  try {
-    const res = await fetch('/api/admin/balance')
-    if (res.ok) adminBalance.value = await res.json()
   } catch {}
 }
 
@@ -1881,6 +1874,7 @@ onMounted(async () => {
   const applyWide = () => { isWide.value = mq.matches }
   applyWide()
   mq.addEventListener('change', applyWide)
+  loadBalance() // 앱 실행 시 잔액 최초 1회 fetch(전역 상태로 공유)
   await loadRooms()
   // 유효한 현재 세션이 없으면 가장 최근 세션으로 랜딩
   const valid = rooms.value.some((r) => r.id === currentRoomId.value)
@@ -1917,7 +1911,7 @@ document.addEventListener('visibilitychange', () => {
         <button class="icon-btn" @click="openPush(); showMenu = false" aria-label="알림">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
         </button>
-        <button class="todo-btn" @click="showMenu = !showMenu; if (!showMenu) loadBalance()" aria-label="메뉴">
+        <button class="todo-btn" @click="showMenu = !showMenu" aria-label="메뉴">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
         </button>
       </div>
