@@ -17,10 +17,10 @@ const fileParent = ref(null)
 const fileEntries = ref([])
 const viewingFile = ref('')
 
-async function navigateFiles(path) {
+async function navigateFiles(path, hidden = props.showHidden) {
   try {
     const res = await fetch(
-      `/api/fs/list?path=${encodeURIComponent(path || '')}&show_hidden=${props.showHidden}&session_id=${props.sessionId}`
+      `/api/fs/list?path=${encodeURIComponent(path || '')}&show_hidden=${hidden}&session_id=${props.sessionId}`
     )
     if (res.ok) {
       const data = await res.json()
@@ -40,8 +40,10 @@ const fileVisible = computed(() =>
 )
 
 function toggleHidden() {
+  // prop 업데이트는 비동기라 emit 직후 props.showHidden은 아직 옛 값 — 새 값을 직접 넘겨 fetch한다.
+  const next = !props.showHidden
   emit('toggle-hidden')
-  navigateFiles(filePath.value)
+  navigateFiles(filePath.value, next)
 }
 
 // 파일 길게 누르면 다운로드(iOS는 공유시트로 '파일에 저장'). 폴더는 제외.
