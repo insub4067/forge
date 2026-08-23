@@ -1661,8 +1661,8 @@ function tokenShare(t) {
 function toggleAutoApprove() {
   autoApprove.value = !autoApprove.value
   localStorage.setItem('forge_auto_approve', autoApprove.value ? '1' : '0')
-  // 실행 중이면 서버에 즉시 반영
-  if (busy.value && currentRoomId.value) {
+  // 실행 중이면 서버에 즉시 반영(스트림이 끊겨 busy가 false여도 sessionRunning이면 반영)
+  if ((busy.value || sessionRunning.value) && currentRoomId.value) {
     fetch(`/api/sessions/${currentRoomId.value}/auto-approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2331,19 +2331,19 @@ document.addEventListener('visibilitychange', () => {
           <button class="attach-btn" @click="fileInput.click()" aria-label="첨부">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
           </button>
-          <button class="mode-chip" @click="showModelPick = true" aria-label="모델 선택">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-4 12.7V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.3A7 7 0 0 0 12 2z"/><path d="M9 22h6"/></svg>
-            {{ tierLabel() }}
-          </button>
-          <button class="mode-chip" :class="{ on: autoApprove }" @click="toggleAutoApprove">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
-            {{ autoApprove ? '자동 승인' : '수동 승인' }}
-          </button>
-          <template v-if="busy || sessionRunning">
-            <button class="mode-chip small" :class="{ on: steerMode === 'queue' }" @click="steerMode = 'queue'">작업 대기</button>
-            <button class="mode-chip small" :class="{ on: steerMode === 'switch' }" @click="steerMode = 'switch'">계획 수정</button>
-          </template>
-          <div class="composer-spacer"></div>
+          <div class="composer-chips">
+            <button class="mode-chip" @click="showModelPick = true" aria-label="모델 선택">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-4 12.7V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.3A7 7 0 0 0 12 2z"/><path d="M9 22h6"/></svg>
+              {{ tierLabel() }}
+            </button>
+            <button class="mode-chip" :class="{ on: autoApprove }" @click="toggleAutoApprove">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
+              {{ autoApprove ? '자동 승인' : '수동 승인' }}
+            </button>
+            <button v-if="busy || sessionRunning" class="mode-chip small" @click="steerMode = steerMode === 'queue' ? 'switch' : 'queue'">
+              {{ steerMode === 'queue' ? '작업 대기' : '계획 수정' }}
+            </button>
+          </div>
           <button id="send" class="composer-send" :disabled="!input.trim() && !attachedImages.length && !attachedText" @click="send" aria-label="전송">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
           </button>
