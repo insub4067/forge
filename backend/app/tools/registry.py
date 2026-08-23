@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from ..config import settings
@@ -9,8 +10,8 @@ TOOL_SCHEMAS: list[dict] = [
             "name": "read_file",
             "description": (
                 "Read a file's contents. Returns the file text with line numbers. "
-                "For large files, pass offset/limit to read only a line range "
-                "instead of running bash sed/cat — this is faster (parallel, no approval)."
+                "For large files, prefer find_symbol(path, name) for a specific function/class, "
+                "or offset/limit for a line range — reading the whole file wastes tokens."
             ),
             "parameters": {
                 "type": "object",
@@ -176,6 +177,21 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "find_symbol",
+            "description": "파일에서 함수/클래스/심볼 정의를 찾아 그 범위만 반환한다. 큰 파일 전체를 read_file하는 대신 특정 심볼만 볼 때 써서 토큰을 아낀다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Absolute or workspace-relative path"},
+                    "symbol": {"type": "string", "description": "함수/클래스/변수 이름"},
+                },
+                "required": ["path", "symbol"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_tool_result",
             "description": "축약된 도구 결과의 원본 일부를 다시 가져온다. 큰 결과는 축약본+result_id로만 컨텍스트에 남으므로, 더 필요할 때만 이 도구로 원본을 조회한다.",
             "parameters": {
@@ -194,7 +210,7 @@ TOOL_SCHEMAS: list[dict] = [
 # chat 에이전트는 읽기·질문만 — 코드 수정/실행 도구는 제외한다.
 CHAT_TOOLS = [
     t for t in TOOL_SCHEMAS
-    if t["function"]["name"] in {"read_file", "list_dir", "grep", "ask_user"}
+    if t["function"]["name"] in {"read_file", "list_dir", "grep", "find_symbol", "ask_user"}
 ]
 
 # build_frontend는 host에서 npm run build를 직접 실행(Docker 우회) — 승인 필요.
@@ -273,7 +289,44 @@ def _make_diff(old_text: str, new_text: str, path: str) -> str:
     return "".join(diff)
 
 
+def _find_symbol_range(text: str, symbol: str, max_lines: int = 200) -> str:
+    """파일 텍스트에서 심볼 정의를 찾아 그 범위(줄번호 포함)만 반환한다. tree-sitter 없이
+    정규식 + 들여쓰기/최상위 경계로 근사한다(python·js 등 범용). 못 찾으면 안내."""
+    if not symbol:
+        return "오류: symbol이 필요합니다"
+    lines = text.splitlines()
+    esc = re.escape(symbol)
+    def_pat = re.compile(rf"\b(def|class|function|interface|type|struct|enum|fn)\s+{esc}\b")
+    assign_pat = re.compile(rf"\b(const|let|var)\s+{esc}\b|^\s*{esc}\s*[=:]")
+    start = None
+    for i, ln in enumerate(lines):
+        if def_pat.search(ln) or assign_pat.search(ln):
+            start = i
+            break
+    if start is None:
+        return f"심볼 '{symbol}'을(를) 찾지 못했습니다. grep으로 검색하거나 read_file로 확인하세요."
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        l2 = lines[j]
+        if not l2.strip():
+            continue
+        ind2 = len(l2) - len(l2.lstrip())
+        # 같은/더 낮은 들여쓰기에서 새 정의가 나오면 심볼 끝으로 본다.
+        if ind2 <= indent and (def_pat.search(l2) or re.search(r"\b(def|class|function)\b", l2) or (ind2 == 0 and l2[0] not in " \t}")):
+            end = j
+            break
+    capped = min(end, start + max_lines)
+    numbered = "\n".join(f"{k + 1}\t{lines[k]}" for k in range(start, capped))
+    more = f"\n... (심볼이 {end - start}줄 — 전체는 read_file offset={start + 1}) ..." if end - start > max_lines else ""
+    return numbered + more
+
+
 async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]:
+    if name == "find_symbol":
+        p = _resolve(workspace, str(args["path"]))
+        text = p.read_text(encoding="utf-8", errors="replace")
+        return _find_symbol_range(text, str(args.get("symbol", ""))), ""
     if name == "read_tool_result":
         from ..runtime import tool_store
         return tool_store.load(str(args.get("result_id", "")),
