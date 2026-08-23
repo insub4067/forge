@@ -1434,9 +1434,17 @@ class AgentRuntime:
                 data["content"] = content
             await send("done", data)
 
-        # 0. 라우터 — 단순 대화는 최저가 flash chat으로 빼고, 코드 작업만 Developer로.
-        route_kind, tp, tc = await self._triage(all_messages)
-        await record("triage", tp, tc, {"model": self.router.triage_model, "model_calls": 1})
+        # 0. 라우터 — 방 모드가 정해져 있으면 triage를 건너뛴다(비용·오분류 제거).
+        #    "chat"=항상 대화(읽기전용), "work"=항상 작업(검증·커밋), ""=triage 자동 분류.
+        _room = await store.get_room(session_id) if session_id else None
+        _mode = (_room or {}).get("mode", "") if _room else ""
+        if _mode == "chat":
+            route_kind = "chat"
+        elif _mode == "work":
+            route_kind = "code"
+        else:
+            route_kind, tp, tc = await self._triage(all_messages)
+            await record("triage", tp, tc, {"model": self.router.triage_model, "model_calls": 1})
         if route_kind == "chat":
             status, p, c, route = await self._run_role(
                 "chat", all_messages, send, session_id, ws, state, recent_calls,

@@ -32,7 +32,7 @@ async def ensure_session(
         await s.commit()
 
 
-async def create_room(name: str, workspace_path: str = "") -> str:
+async def create_room(name: str, workspace_path: str = "", mode: str = "") -> str:
     room_id = uuid.uuid4().hex
     locked = bool(workspace_path)
     if not workspace_path:
@@ -44,6 +44,7 @@ async def create_room(name: str, workspace_path: str = "") -> str:
                 title=name,
                 workspace_path=workspace_path,
                 workspace_locked=locked,
+                mode=mode if mode in ("chat", "work") else "",
             )
         )
         await s.commit()
@@ -55,6 +56,14 @@ async def update_room_workspace(session_id: str, workspace_path: str) -> None:
         sess = await s.get(Session, session_id)
         if sess:
             sess.workspace_path = workspace_path
+            await s.commit()
+
+
+async def update_room_mode(session_id: str, mode: str) -> None:
+    async with async_session() as s:
+        sess = await s.get(Session, session_id)
+        if sess and mode in ("chat", "work", ""):
+            sess.mode = mode
             await s.commit()
 
 
@@ -85,6 +94,7 @@ async def get_room(session_id: str) -> dict | None:
             "title": sess.title,
             "workspace_path": sess.workspace_path,
             "workspace_locked": sess.workspace_locked,
+            "mode": sess.mode,
         }
 
 
@@ -179,6 +189,7 @@ async def list_rooms() -> list[dict]:
                 "title": sess.title,
                 "workspace_path": sess.workspace_path,
                 "workspace_locked": sess.workspace_locked,
+                "mode": sess.mode,
                 "count": count,
                 "used_tokens": sess.used_tokens,
                 "logical_budget": sess.logical_budget,

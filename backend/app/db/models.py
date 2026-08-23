@@ -16,6 +16,9 @@ class Session(Base):
     workspace_id: Mapped[str] = mapped_column(String, default="")
     workspace_path: Mapped[str | None] = mapped_column(String, nullable=True)
     workspace_locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 방 모드 — "" (auto: triage로 chat/code 자동 분류, 하위호환) | "chat" (읽기전용 대화만)
+    # | "work" (항상 작업 경로 + 검증·커밋, 워크스페이스 필수). triage 비용·오분류를 없앤다.
+    mode: Mapped[str] = mapped_column(String, default="")
     status: Mapped[str] = mapped_column(String, default="active")
     model: Mapped[str] = mapped_column(String, default="")
     logical_budget: Mapped[int] = mapped_column(Integer, default=131072)

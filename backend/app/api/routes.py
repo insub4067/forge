@@ -283,7 +283,13 @@ async def create_room(req: Request):
     # 빈 값으로 대체해 기본 워크스페이스(settings.workspace)로 폴백시킨다.
     if workspace_path == "/":
         workspace_path = ""
-    room_id = await store.create_room(name, workspace_path)
+    mode = str(body.get("mode", "")).strip()
+    if mode not in ("chat", "work"):
+        mode = ""
+    # 작업 모드는 워크스페이스가 있어야 한다(홈·루트에서 작업하다 사고 방지).
+    if mode == "work" and not workspace_path:
+        return {"error": "작업 모드는 워크스페이스가 필요합니다."}
+    room_id = await store.create_room(name, workspace_path, mode)
     return await store.get_room(room_id)
 
 
@@ -306,6 +312,15 @@ async def update_room(session_id: str, req: Request):
         await store.update_room_title(session_id, title)
     if workspace_path:
         await store.update_room_workspace(session_id, workspace_path)
+    if "mode" in body:
+        mode = str(body.get("mode", "")).strip()
+        # 작업 모드로 바꾸려면 워크스페이스가 있어야 한다.
+        if mode == "work":
+            room = await store.get_room(session_id)
+            ws = room and room.get("workspace_path")
+            if not ws or ws == os.path.expanduser("~") or ws == "/":
+                return {"ok": False, "error": "작업 모드는 워크스페이스가 필요합니다."}
+        await store.update_room_mode(session_id, mode if mode in ("chat", "work") else "")
     return {"ok": True}
 
 

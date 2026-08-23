@@ -3551,3 +3551,24 @@ button {
   padding: 2px 4px;
   text-align: right;
 }
+
+/* 헤더 방 모드 세그먼트 — 작업(work) / 채팅(chat) */
+.mode-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.mode-seg button {
+  padding: 5px 11px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.mode-seg button.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}

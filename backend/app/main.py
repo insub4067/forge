@@ -30,6 +30,7 @@ _COLUMN_PATCHES = [
     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS auto_approve BOOLEAN DEFAULT FALSE",
     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS running BOOLEAN DEFAULT FALSE",
     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS final_status VARCHAR DEFAULT ''",
+    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS mode VARCHAR DEFAULT ''",
     # 컨텍스트 예산을 모델 실제 한도(128k)로 통일 — 옛 256k 세션은 표시가 실제의 절반이었다.
     "UPDATE sessions SET logical_budget = 131072 WHERE logical_budget = 262144",
 ]

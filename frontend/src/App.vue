@@ -452,6 +452,26 @@ async function loadMessages(isNew = false) {
   }
 }
 
+// 방 모드 전환 — work(작업: 검증·커밋) / chat(대화: 읽기전용). triage 자동 분류를 대체한다.
+// work는 워크스페이스가 있어야 해서, 없으면 백엔드가 거부하고 안내한다.
+async function setRoomMode(mode) {
+  const id = currentRoomId.value
+  if (!id) return
+  try {
+    const res = await fetch(`/api/rooms/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (data && data.ok === false) {
+      alert(data.error || '모드 변경에 실패했습니다.')
+      return
+    }
+    await loadRooms()
+  } catch {}
+}
+
 async function selectRoom(id, isNew = false) {
   stopRunningPoll()
   stopEventPolling()   // 이전 방의 이벤트 폴러가 새 방을 옛 seq로 폴링하던 버그 방지
@@ -1275,6 +1295,10 @@ document.addEventListener('visibilitychange', () => {
         </span>
       </button>
       <div class="header-right">
+        <div class="mode-seg" role="group" aria-label="방 모드">
+          <button :class="{ on: (currentRoom()?.mode || 'work') !== 'chat' }" @click="setRoomMode('work')">작업</button>
+          <button :class="{ on: currentRoom()?.mode === 'chat' }" @click="setRoomMode('chat')">채팅</button>
+        </div>
         <button class="todo-btn" @click="showMenu = !showMenu" aria-label="메뉴">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
         </button>
