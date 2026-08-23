@@ -36,6 +36,7 @@
 ## Product / Capability
 
 - [`global-workspace-skills.md`](global-workspace-skills.md) — Global+Workspace 2-tier skill: **G0/G1 구현됨**(병합·override·경계·save_skill scope·UI 배지, `~/.forge/skills` 인덱스 README). G3 telemetry·G4 promotion 미구현
+- [`token-cost-reduction.md`](token-cost-reduction.md) — 토큰 비용 절감 전략(living). L1 추론/실행 분리(외부계획→planner off, 실측 −66%)가 최대 레버
 - [`forge-mcp-agent-runtime.md`](forge-mcp-agent-runtime.md) — FORGE를 MCP 호출 가능한 autonomous execution runtime으로(forge_execute/status/result/cancel). **설계 proposal**. 선결: 보안경계·Runtime Boundary·[[durable-worker-resume]]. 미구현
 - [`durable-worker-resume.md`](durable-worker-resume.md) — Durable Worker/Resume: **설계 proposal**(role 경계 체크포인트→opt-in 재개→worker 분리). 외부 감사가 지적한 최대 reliability gap. 미구현
 - [`recursive-self-improvement.md`](recursive-self-improvement.md) — bounded RSI: **설계 proposal**(telemetry→worktree→고정benchmark→사전식 게이트→사람 승인). 미구현. 선결은 R0 결정적 benchmark 하네스
