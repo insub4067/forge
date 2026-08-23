@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -38,8 +39,25 @@ async def lifespan(app: FastAPI):
             await conn.run_sync(Base.metadata.create_all)
             for stmt in _COLUMN_PATCHES:
                 await conn.execute(text(stmt))
-        # 재시작으로 중단된 run 정리(복구 메시지 + 플래그 해제).
-        await store.reconcile_interrupted_runs()
+        # 재시작으로 중단된 run 처리 — auto_resume면 저장된 history에서 이어서 완주,
+        # 아니면 안내 메시지만 남긴다.
+        interrupted = await store.take_interrupted_runs()
+        if interrupted:
+            if settings.auto_resume:
+                from .api.routes import resume_run
+
+                async def _resume_all(items):
+                    for it in items:
+                        # 크래시 루프 가드: 재개 중 또 죽은 것(resuming)은 재재개하지 않고 안내만.
+                        if it["final_status"] == "resuming":
+                            await store.mark_interrupted_note(it["id"])
+                            continue
+                        await resume_run(it["id"], it["workspace_path"])  # 순차 — 스파이크 방지
+
+                asyncio.create_task(_resume_all(interrupted))
+            else:
+                for it in interrupted:
+                    await store.mark_interrupted_note(it["id"])
     except Exception:
         pass
     # 예약 작업 스케줄러 시작(DB next_run_at이 authoritative → 재시작 복원).

@@ -225,6 +225,30 @@ async def reconcile_interrupted_runs() -> int:
     return len(ids)
 
 
+async def take_interrupted_runs() -> list[dict]:
+    """재시작으로 중단된(running=True) 세션을 찾아 running=False로 내리고 목록을 반환한다.
+    재개할지(auto-resume) 안내 메시지만 남길지는 호출측이 final_status로 판단한다.
+    각 항목: {id, final_status, workspace_path}."""
+    async with async_session() as s:
+        result = await s.execute(select(Session).where(Session.running == True))  # noqa: E712
+        stuck = result.scalars().all()
+        out = [{"id": x.id, "final_status": x.final_status or "",
+                "workspace_path": x.workspace_path} for x in stuck]
+        for x in stuck:
+            x.running = False
+        await s.commit()
+    return out
+
+
+async def mark_interrupted_note(session_id: str) -> None:
+    """재개하지 않는 중단 세션에 안내 메시지를 남긴다(마지막이 user 턴일 때만)."""
+    history = await load_history(session_id)
+    if history and history[-1].get("role") == "user":
+        history.append({"role": "assistant",
+                        "content": "서버가 재시작되어 진행 중이던 작업이 중단되었습니다. 필요하면 다시 요청해주세요."})
+        await save_history(session_id, history)
+
+
 async def save_checkpoint(session_id: str, step_no: int, git_sha: str) -> None:
     async with async_session() as s:
         s.add(Checkpoint(session_id=session_id, step_no=step_no, git_sha=git_sha))

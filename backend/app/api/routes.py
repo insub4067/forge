@@ -143,6 +143,33 @@ async def _notify_done(session_id: str, history: list) -> None:
         push.send_one(sub, f"✓ {title[:40]}", body, "/")
 
 
+async def resume_run(session_id: str, workspace_path: str | None) -> None:
+    """중단된 run을 저장된 history에서 이어서 완주한다(headless — SSE 클라이언트 없음).
+    스텝별 저장 덕분에 진행이 남아 있고, 검증 게이트·자동커밋이 그대로 적용된다.
+    크래시 루프 방지: 시작 시 final_status='resuming'으로 표시(재개 중 또 죽으면 재재개 안 함)."""
+    try:
+        history = await store.load_history(session_id)
+        if not history:
+            return
+        await store.set_session_final_status(session_id, "resuming")
+        await store.mark_running(session_id, True)
+        # headless 재개는 승인할 클라이언트가 없으므로 auto_approve를 켠다 — 안 켜면
+        # write_file/bash에서 approval_request로 영영 멈춘다(재개의 목적은 무인 완주).
+        runtime.set_auto_approve(session_id, True)
+
+        async def _noop(_evt: dict) -> None:
+            return None
+
+        new_history = await runtime.run(history, _noop, session_id, workspace_path)
+        await store.save_history(session_id, new_history)
+        await _notify_done(session_id, new_history)
+    except Exception as err:
+        error_log.record("resume_run", str(err), session_id)
+    finally:
+        await store.mark_running(session_id, False)
+        runtime.cleanup_session(session_id)
+
+
 @router.post("/chat")
 async def chat(req: Request):
     body = await req.json()

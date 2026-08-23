@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # 작업 성공 완료 시 하네스가 자동으로 git commit(+push)한다 — 커밋 누락 방지. 기본 True.
     # git 워크스페이스이고 변경이 있을 때만. 끄려면 AUTO_COMMIT=0.
     auto_commit: bool = True
+    # 서버 재시작으로 중단된 run을 시작 시 저장된 history에서 자동 이어서 완주한다. 기본 True.
+    # 크래시 루프 방지: 재개 중 또 중단되면(final_status=resuming) 재재개하지 않는다. 끄려면 AUTO_RESUME=0.
+    auto_resume: bool = True
     # Web Push (VAPID). public_key는 브라우저 구독용(비밀 아님). private key는 PEM 파일 경로.
     vapid_public_key: str = "BEdgt7HlWXy3-F1M2MKCkcBrOuW0uWoUvg58WzYFA7z1GBVu9IRGy15NlRP-A1cWINwTO4x4n0HMOmgiukK3HCQ"
     vapid_private_key_path: str = str(BASE_DIR / "vapid_private.pem")
