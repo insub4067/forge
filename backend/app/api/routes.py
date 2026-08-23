@@ -389,6 +389,18 @@ async def session_status(session_id: str):
     return runtime.get_status(session_id)
 
 
+@router.get("/sessions/{session_id}/tool-usage")
+async def tool_usage(session_id: str):
+    """세션에서 어떤 도구를 몇 번 호출했는지(eventlog 집계). read_file×9 처럼 툴별 카운트."""
+    from .. import eventlog
+    import collections
+    counter: collections.Counter = collections.Counter()
+    for r in eventlog.tail(session_id, limit=5000):
+        if r.get("type") == "tool_call":
+            counter[(r.get("data") or {}).get("name", "?")] += 1
+    return {"tools": [{"name": n, "count": c} for n, c in counter.most_common()]}
+
+
 @router.get("/sessions/{session_id}/context")
 async def session_context(session_id: str):
     """마지막 LLM 호출의 context 영역별 분해(debug view) — 무엇이 컨텍스트를 차지하는지.

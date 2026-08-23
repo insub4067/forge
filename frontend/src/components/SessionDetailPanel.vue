@@ -21,6 +21,7 @@ const ROLE_LABELS = {
 const sessionRuns = ref([])
 const sessionMetrics = ref(null)
 const ctxBreakdown = ref(null)  // 마지막 LLM 호출의 context 영역 분해(debug view)
+const toolUsage = ref([])  // 도구별 호출 횟수(어떤 툴 몇 번)
 const CTX_LABELS = { system_base_role: 'System·규칙', memory: '메모리', skills: 'Skills', history: '대화', tool_results: '도구 결과' }
 const showRunHistory = ref(false)
 
@@ -94,6 +95,8 @@ onMounted(async () => {
       const c = await cres.json()
       if (c && c.areas) ctxBreakdown.value = c
     }
+    const tres = await fetch(`/api/sessions/${props.roomId}/tool-usage`)
+    if (tres.ok) toolUsage.value = (await tres.json()).tools || []
   } catch {}
 })
 </script>
@@ -147,8 +150,8 @@ onMounted(async () => {
         <div class="metric-grid">
           <div class="metric-cell"><span class="metric-num">{{ Math.round((sessionMetrics.cache_hit_ratio || 0) * 100) }}%</span><span class="metric-lbl">cache 적중</span></div>
           <div v-if="sessionMetrics.tool_raw_tokens" class="metric-cell"><span class="metric-num">{{ Math.round((1 - sessionMetrics.tool_visible_tokens / sessionMetrics.tool_raw_tokens) * 100) }}%</span><span class="metric-lbl">tool 출력 절감</span></div>
-          <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_model_calls || 0 }}</span><span class="metric-lbl">model 호출</span></div>
-          <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_tool_calls || 0 }}</span><span class="metric-lbl">tool 호출</span></div>
+          <div class="metric-cell"><span class="metric-num">{{ (sessionMetrics.total_model_calls || 0).toLocaleString() }}</span><span class="metric-lbl">model 호출</span></div>
+          <div class="metric-cell"><span class="metric-num">{{ (sessionMetrics.total_tool_calls || 0).toLocaleString() }}</span><span class="metric-lbl">tool 호출</span></div>
           <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.pro_calls || 0 }}</span><span class="metric-lbl">Pro 호출</span></div>
           <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_compactions || 0 }}</span><span class="metric-lbl">압축</span></div>
           <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_retries || 0 }}</span><span class="metric-lbl">재시도</span></div>
@@ -159,11 +162,19 @@ onMounted(async () => {
 
       <div v-if="ctxBreakdown && ctxBreakdown.areas" class="admin-section">
         <div class="admin-stat-title">Context 분해 (마지막 호출 · 추정)</div>
-        <div class="admin-sub">약 {{ ctxBreakdown.total_est }} tok · 예산 대비 {{ ctxBreakdown.pct_est }}%</div>
+        <div class="admin-sub">약 {{ ctxBreakdown.total_est.toLocaleString() }} tok · 예산 대비 {{ ctxBreakdown.pct_est }}%</div>
         <div v-for="(tok, area) in ctxBreakdown.areas" :key="area" class="ctx-row">
           <span class="ctx-label">{{ CTX_LABELS[area] || area }}</span>
           <div class="ctx-bar"><div class="ctx-fill" :style="{ width: (ctxBreakdown.total_est ? Math.round(tok / ctxBreakdown.total_est * 100) : 0) + '%' }"></div></div>
-          <span class="ctx-tok mono">{{ tok }}</span>
+          <span class="ctx-tok mono">{{ tok.toLocaleString() }}</span>
+        </div>
+      </div>
+
+      <div v-if="toolUsage.length" class="admin-section">
+        <div class="admin-stat-title">도구별 호출</div>
+        <div v-for="t in toolUsage" :key="t.name" class="admin-row">
+          <span>{{ t.name }}</span>
+          <span class="mono">×{{ t.count.toLocaleString() }}</span>
         </div>
       </div>
 
