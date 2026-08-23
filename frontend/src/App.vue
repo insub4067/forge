@@ -2498,7 +2498,7 @@ document.addEventListener('visibilitychange', () => {
                   :key="t.id"
                   class="tool"
                   :class="t.status"
-                  :open="t.status === 'running' || !!(t.diff && t.diff.length)"
+                  :open="t.status === 'running'"
                 >
                   <summary>
                     <span class="tool-dot" :class="t.status"></span>
