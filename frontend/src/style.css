@@ -3208,3 +3208,58 @@ button {
     transform: translateX(0);
   }
 }
+
+/* 모델 선택 시트(클로드식 바텀시트) */
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.sheet {
+  width: 100%;
+  max-width: 640px;
+  background: var(--panel);
+  border-radius: 20px 20px 0 0;
+  padding: 12px 12px calc(16px + env(safe-area-inset-bottom));
+  animation: sheet-up 0.2s ease-out;
+}
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 8px 0 12px;
+}
+.sheet-title { font-size: 16px; font-weight: 700; }
+.sheet-x {
+  position: absolute;
+  left: 4px;
+  background: var(--panel-2);
+  border: none;
+  color: var(--muted);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+.sheet-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 14px 8px;
+}
+.sheet-item:last-child { border-bottom: none; }
+.sheet-item.on .sheet-item-label { color: var(--accent); }
+.sheet-item-main { display: flex; align-items: center; justify-content: space-between; }
+.sheet-item-label { font-size: 16px; font-weight: 600; color: var(--text); }
+.sheet-item-check { color: var(--accent); font-weight: 700; }
+.sheet-item-desc { font-size: 13px; color: var(--muted); }

@@ -49,6 +49,22 @@ const input = ref('')
 const busy = ref(false)
 const isAtBottom = ref(true)
 const autoApprove = ref(localStorage.getItem('forge_auto_approve') === '1')
+// 모델 티어(클로드식 선택) — auto: flash+think, 막히면 pro 승격 / pro: 항상 pro / flash: flash만
+const modelTier = ref(localStorage.getItem('forge_model_tier') || 'auto')
+const showModelPick = ref(false)
+const MODEL_TIERS = [
+  { key: 'auto', label: '자동', desc: 'Flash로 처리하고 막히면 Pro로 승격 (권장·균형)' },
+  { key: 'pro', label: '프로', desc: '항상 Pro — 가장 정확, 비용 높음' },
+  { key: 'flash', label: '플래시', desc: 'Flash만 — 가장 빠르고 저렴, 승격 없음' },
+]
+function pickModel(key) {
+  modelTier.value = key
+  localStorage.setItem('forge_model_tier', key)
+  showModelPick.value = false
+}
+function tierLabel() {
+  return (MODEL_TIERS.find((t) => t.key === modelTier.value) || MODEL_TIERS[0]).label
+}
 const sessionRunning = ref(false)
 const agentStatus = ref(null)
 const showSkills = ref(false)
@@ -1690,7 +1706,7 @@ async function send() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: roomId, message: payloadMsg, image_urls: imageUrls, auto_approve: autoApprove.value }),
+      body: JSON.stringify({ session_id: roomId, message: payloadMsg, image_urls: imageUrls, auto_approve: autoApprove.value, model_tier: modelTier.value }),
     })
     console.log('[forge] 응답:', res.status, res.headers.get('content-type'))
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
@@ -2315,6 +2331,10 @@ document.addEventListener('visibilitychange', () => {
           <button class="attach-btn" @click="fileInput.click()" aria-label="첨부">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
           </button>
+          <button class="mode-chip" @click="showModelPick = true" aria-label="모델 선택">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-4 12.7V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.3A7 7 0 0 0 12 2z"/><path d="M9 22h6"/></svg>
+            {{ tierLabel() }}
+          </button>
           <button class="mode-chip" :class="{ on: autoApprove }" @click="toggleAutoApprove">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
             {{ autoApprove ? '자동 승인' : '수동 승인' }}
@@ -2330,6 +2350,23 @@ document.addEventListener('visibilitychange', () => {
         </div>
       </div>
     </footer>
+
+    <!-- 모델 선택 시트(클로드식) -->
+    <div v-if="showModelPick" class="sheet-overlay" @click="showModelPick = false">
+      <div class="sheet" @click.stop>
+        <div class="sheet-head">
+          <span class="sheet-title">모델 선택</span>
+          <button class="sheet-x" @click="showModelPick = false" aria-label="닫기">✕</button>
+        </div>
+        <button v-for="t in MODEL_TIERS" :key="t.key" class="sheet-item" :class="{ on: modelTier === t.key }" @click="pickModel(t.key)">
+          <div class="sheet-item-main">
+            <span class="sheet-item-label">{{ t.label }}</span>
+            <span v-if="modelTier === t.key" class="sheet-item-check">✓</span>
+          </div>
+          <span class="sheet-item-desc">{{ t.desc }}</span>
+        </button>
+      </div>
+    </div>
 
     <div v-if="activeQuestion" class="modal-overlay" @click="activeQuestion = null">
       <div class="modal" @click.stop>

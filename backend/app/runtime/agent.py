@@ -219,6 +219,8 @@ class AgentRuntime:
         # reasoning_content 400을 한 번 겪은 세션 — 이후 호출은 미리 reasoning을 벗긴다.
         self._strip_reasoning_sessions: set[str] = set()
         self._auto_approve_sessions: set[str] = set()
+        # 세션별 모델 티어: auto(flash+막히면 pro) | pro(항상) | flash(승격 없음)
+        self._model_tier: dict[str, str] = {}
         # 세션별 컨텍스트 압축 상태: {session_id: {"summary": str, "covered": int}}
         # summary가 all_messages[:covered]를 대체(모델 전송 시에만).
         self._compaction: dict[str, dict] = {}
@@ -530,6 +532,9 @@ class AgentRuntime:
             self._auto_approve_sessions.add(session_id)
         else:
             self._auto_approve_sessions.discard(session_id)
+
+    def set_model_tier(self, session_id: str, tier: str) -> None:
+        self._model_tier[session_id] = tier if tier in ("auto", "pro", "flash") else "auto"
 
     def resolve_pending_approvals(self, session_id: str = "") -> int:
         """해당 세션의 대기 승인만 승인 처리한다(자동 승인 켤 때).
@@ -1050,18 +1055,20 @@ class AgentRuntime:
             return all_messages
 
         # 1. Developer — 코드 작업 실행 역할. 설계(3줄)+구현+자체검증+수정을 한 컨텍스트에서.
-        #    별도 Planner/Reviewer/Debugger 없이 컨텍스트 재읽기·역할 전환 호출을 없앤다.
+        #    모델 티어(사용자 선택): pro=항상 pro / flash=승격 없음 / auto=막히면 pro 승격.
+        tier = self._model_tier.get(session_id, "auto")
+        always_pro = tier == "pro" or settings.developer_pro
         status, p, c, route = await self._run_role(
-            "developer", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory, skills=skills
+            "developer", all_messages, send, session_id, ws, state, recent_calls,
+            step_base, room_memory, skills=skills, escalate=always_pro,
         )
         await record("developer", p, c, route)
 
-        # 막혀서 못 풀면 pro+think-high로 승격해 재시도하되, 상한 있는 루프로 푼다.
-        #    (막힘=max_steps/repeated일 때만. done/cancelled/context_blocked는 재시도 안 함.)
-        #    무한 루프·비용 폭주를 막으려 최대 MAX_ESCALATIONS회로 제한한다(DeepSeek 권고).
+        # auto 티어만 막힘 시 pro로 승격해 상한 루프로 재시도. flash는 승격 없음, pro는 이미 pro.
+        #    (막힘=max_steps/repeated일 때만. 무한 루프·비용 폭주는 MAX_ESCALATIONS로 제한.)
         escalations = 0
-        while (status in ("max_steps", "repeated")
-               and escalations < MAX_ESCALATIONS and not settings.developer_pro):
+        while (tier == "auto" and not always_pro
+               and status in ("max_steps", "repeated") and escalations < MAX_ESCALATIONS):
             escalations += 1
             step_base += DEVELOPER_MAX_STEPS
             status, p, c, route = await self._run_role(
