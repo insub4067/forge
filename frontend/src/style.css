@@ -3653,3 +3653,10 @@ button {
   border-top: 1px solid var(--border);
   font-size: 13px;
 }
+
+/* Context 분해 debug view */
+.ctx-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; }
+.ctx-label { flex-shrink: 0; width: 78px; color: var(--muted); }
+.ctx-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
+.ctx-fill { height: 100%; background: var(--accent); }
+.ctx-tok { flex-shrink: 0; width: 52px; text-align: right; color: var(--text); }

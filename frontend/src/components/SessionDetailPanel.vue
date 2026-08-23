@@ -20,6 +20,8 @@ const ROLE_LABELS = {
 
 const sessionRuns = ref([])
 const sessionMetrics = ref(null)
+const ctxBreakdown = ref(null)  // 마지막 LLM 호출의 context 영역 분해(debug view)
+const CTX_LABELS = { system_base_role: 'System·규칙', memory: '메모리', skills: 'Skills', history: '대화', tool_results: '도구 결과' }
 const showRunHistory = ref(false)
 
 function formatTokens(n) {
@@ -87,6 +89,11 @@ onMounted(async () => {
     if (res.ok) sessionRuns.value = await res.json()
     const mres = await fetch(`/api/rooms/${props.roomId}/metrics`)
     if (mres.ok) sessionMetrics.value = await mres.json()
+    const cres = await fetch(`/api/sessions/${props.roomId}/context`)
+    if (cres.ok) {
+      const c = await cres.json()
+      if (c && c.areas) ctxBreakdown.value = c
+    }
   } catch {}
 })
 </script>
@@ -147,6 +154,16 @@ onMounted(async () => {
         </div>
         <div v-if="sessionMetrics.selected_skills" class="admin-sub">skill: {{ sessionMetrics.selected_skills }}</div>
         <div v-for="(b, bi) in (sessionMetrics.bottlenecks || [])" :key="bi" class="metric-warn">⚠ {{ b }}</div>
+      </div>
+
+      <div v-if="ctxBreakdown && ctxBreakdown.areas" class="admin-section">
+        <div class="admin-stat-title">Context 분해 (마지막 호출 · 추정)</div>
+        <div class="admin-sub">약 {{ ctxBreakdown.total_est }} tok · 예산 대비 {{ ctxBreakdown.pct_est }}%</div>
+        <div v-for="(tok, area) in ctxBreakdown.areas" :key="area" class="ctx-row">
+          <span class="ctx-label">{{ CTX_LABELS[area] || area }}</span>
+          <div class="ctx-bar"><div class="ctx-fill" :style="{ width: (ctxBreakdown.total_est ? Math.round(tok / ctxBreakdown.total_est * 100) : 0) + '%' }"></div></div>
+          <span class="ctx-tok mono">{{ tok }}</span>
+        </div>
       </div>
 
       <div class="admin-section">
