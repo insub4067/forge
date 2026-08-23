@@ -289,8 +289,6 @@ const kanbanOpen = ref({
   todo: false,
   planning: false,
   in_progress: false,
-  review: false,
-  debug: false,
   done: false,
 })
 
@@ -958,8 +956,6 @@ const kanbanCols = [
   { key: 'todo', label: 'TODO' },
   { key: 'planning', label: 'PLANNING' },
   { key: 'in_progress', label: 'IN PROGRESS' },
-  { key: 'review', label: 'REVIEW' },
-  { key: 'debug', label: 'DEBUG' },
   { key: 'done', label: 'DONE' },
 ]
 
