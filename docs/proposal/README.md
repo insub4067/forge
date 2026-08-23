@@ -1,63 +1,56 @@
 # FORGE Proposal Index / Adoption Status
 
-> Proposal은 설계 의도를 보존한다. 현재 구현 판단은 [`../status/work-status.md`](../status/work-status.md), [`../core/architecture.md`](../core/architecture.md), [`../core/agent-loop.md`](../core/agent-loop.md)을 우선한다.
+> Proposal은 당시의 설계 의도와 연구 기록이다. 현재 구현 판단은 코드와 `docs/core`, `docs/status`를 우선한다.
+
+## 제품 원칙
+
+FORGE는 단순 저비용 LLM wrapper가 아니다.
+
+> **저렴한 모델의 불확실성을 Harness의 실행·검증·수리·복구·계측으로 통제해 품질을 보장한다.**
+
+Proposal 채택 여부도 기능 수나 token 절감보다 success/verification 효과를 먼저 본다.
 
 ## Harness Adoption
 
-### DeepSeek Harness
-
-[`deepseek-harness-adoption.md`](deepseek-harness-adoption.md)
-
-- ✅ Tool-result pruning / Context compaction
-- ✅ Provider retry/recovery / reasoning 400 session optimization
-- ✅ read-only parallel tools / JSONL event logging
-- ⬜ authoritative event replay / true resume
-- ⬜ Tool Script/RPC
-
-### Claude Code Clean-room
-
-[`claude-code-cleanroom-adoption.md`](claude-code-cleanroom-adoption.md)
-
-- ✅ Task lifecycle / Reviewer-Debugger loop
-- ✅ Permission boundary / runtime steering
-- ⬜ Coordinator / isolated workers
-- ⬜ durable background worker
-
-### Hermes Agent
-
-[`hermes-agent-adoption.md`](hermes-agent-adoption.md)
-
-- ✅ Self-Improving Skills / selective retrieval / stable prefix
-- ✅ Session search / metrics
-- ⬜ Tool Script/RPC
-- 🟡 Scheduled/Condition Jobs
-- ⬜ ExecutionBackend / isolated subagents
+- `deepseek-harness-adoption.md` — context/pruning/recovery/event logging 등 다수 반영. 당시 Planner 중심 내용은 현재 올인원 Developer 구조와 다를 수 있음.
+- `claude-code-cleanroom-adoption.md` — permission/runtime steering/task lifecycle 아이디어 일부 반영. 별도 Reviewer/Debugger 기본 구조는 현재 제거됨.
+- `hermes-agent-adoption.md` — Skills/selective retrieval/metrics 등 반영.
 
 ## Product / Capability
 
-- [`global-workspace-skills.md`](global-workspace-skills.md) — Global+Workspace 2-tier skill: **G0/G1 구현됨**(병합·override·경계·save_skill scope·UI 배지, `~/.forge/skills` 인덱스 README). G3 telemetry·G4 promotion 미구현
-- [`token-cost-reduction.md`](token-cost-reduction.md) — 토큰 비용 절감 전략(living). L1 추론/실행 분리(외부계획→planner off, 실측 −66%)가 최대 레버
-- [`forge-mcp-agent-runtime.md`](forge-mcp-agent-runtime.md) — FORGE를 MCP 호출 가능한 autonomous execution runtime으로(forge_execute/status/result/cancel). **설계 proposal**. 선결: 보안경계·Runtime Boundary·[[durable-worker-resume]]. 미구현
-- [`durable-worker-resume.md`](durable-worker-resume.md) — Durable Worker/Resume: **설계 proposal**(role 경계 체크포인트→opt-in 재개→worker 분리). 외부 감사가 지적한 최대 reliability gap. 미구현
-- [`recursive-self-improvement.md`](recursive-self-improvement.md) — bounded RSI: **설계 proposal**(telemetry→worktree→고정benchmark→사전식 게이트→사람 승인). 미구현. 선결은 R0 결정적 benchmark 하네스
-- [`tauri-desktop-host.md`](tauri-desktop-host.md) — Desktop Host / sidecar: proposal
-- [`web-search-tools.md`](web-search-tools.md) — bounded web search/fetch: proposal (보류 권장 — 실측 병목 근거 없음, planner 63% 등이 우선)
-- [`vision-agent.md`](vision-agent.md) — Vision: 일부 구현
-- [`scheduled-condition-jobs.md`](scheduled-condition-jobs.md) — 예약/조건 실행: **기반 구현 진행 중**
-- [`remote-terminal.md`](remote-terminal.md) — **v1 구현됨. 단, proposal의 Docker-only가 아니라 현재는 Mac host PTY**
-- [`live-screen-preview.md`](live-screen-preview.md) — **view-only 화면 보기 1차 구현됨**; WebRTC 고도화는 미구현
-- [`home-camera-monitor.md`](home-camera-monitor.md) — **Mac camera JPEG polling PoC 구현됨**; WebRTC/Condition 연동은 미구현
+- `global-workspace-skills.md` — **구현됨**. 실제는 Curated/Learned/Project 3-tier로 확장됨.
+- `token-cost-reduction.md` — living research. 단, 비용 절감은 항상 success-rate gate 아래에 둔다.
+- `durable-worker-resume.md` — **핵심 Auto Resume 구현됨**. worker 완전 분리/권한 semantics는 추가 과제.
+- `recursive-self-improvement.md` — **부분 구현**. R0 deterministic benchmark + promotion gate 구현, candidate worktree orchestration 미구현.
+- `remote-terminal.md` — **v1 구현됨**. proposal의 Docker-only가 아니라 현재 Mac host PTY.
+- `live-screen-preview.md` — **view-only 1차 구현**. WebRTC 고도화 미구현.
+- `home-camera-monitor.md` — **JPEG polling PoC 구현**. WebRTC/Condition 연동 미구현.
+- `scheduled-condition-jobs.md` — **Scheduled 기반 구현 중**. durable semantics/Condition/Deferred 고도화 필요.
+- `forge-mcp-agent-runtime.md` — MCP server 관련 기반은 존재하지만 proposal 전체 autonomous runtime 계약은 별도 평가 필요.
+- `tauri-desktop-host.md` — proposal.
+- `web-search-tools.md` — proposal/보류. 품질 개선 효과가 benchmark로 확인될 때 채택.
+- `vision-agent.md` — Vision 기능 일부 구현.
 
-## 구현과 Proposal이 다른 부분
+## 현재 구현과 과거 Proposal이 다른 대표 사례
 
-Proposal은 미래 설계이므로 실제 코드와 다를 수 있다.
+- 기본 Agent 구조: 과거 Planner/Reviewer/Debugger 분리 → 현재 올인원 Developer + process verification.
+- Durable Resume: 과거 미구현 → 현재 startup auto-resume 구현.
+- Benchmark: 과거 계획 → 현재 21-task deterministic R0 harness 구현.
+- RSI: 과거 설계 → 현재 promotion gate까지 구현.
+- Skills: Global/Workspace 2-tier 제안 → Curated/Learned/Project 3-tier 구현.
+- Terminal: Docker sandbox 제안 → host PTY v1.
+- Camera: WebRTC 제안 → `imagesnap` polling PoC.
 
-- Terminal: 설계는 Docker sandbox 우선이었으나 실제 v1은 개인 Mac host PTY + WebSocket + xterm.js로 구현됐다.
-- Camera: 설계는 WebRTC 중심이었으나 실제 PoC는 `imagesnap` JPEG polling이다.
-- Screen: view-only 기능은 구현됐지만 WebRTC 기반 저지연 streaming은 아직 아니다.
-
-이 차이는 proposal 본문을 과거 사실처럼 덮어쓰지 않고 이 index와 status 문서에서 명시한다.
+Proposal 본문은 역사적 설계 기록이므로 전부 현재형으로 덮어쓰지 않는다. 대신 이 인덱스에서 구현 상태와 divergence를 명시한다.
 
 ## 판단 원칙
 
-FORGE는 기능 개수보다 **cost per successfully completed task**를 최상위 기준으로 둔다. 원격 host capability는 성능보다 보안 경계를 먼저 검증하고, RSI는 candidate → benchmark → promotion/rollback이 닫히기 전까지 bounded/human-triggered self-improvement로 취급한다.
+```text
+success_rate / correctness
+→ verified completion
+→ cost_per_success
+→ elapsed
+→ human intervention
+```
+
+저렴한 모델을 쓰는 것은 수단이다. **저렴한 모델로도 품질을 보장하게 만드는 Harness 프로세스가 제품의 핵심 기술**이다.

@@ -1,128 +1,117 @@
 # FORGE — 시스템 아키텍처
 
-> 기준: 2026-08-22 `main`
+> 기준: 2026-08-23 `main`
 
-## 전체 구조
+## 설계 중심
+
+FORGE의 핵심은 저가 모델 선택이 아니라 **모델 위에 품질 보증 프로세스를 올리는 Harness**다.
 
 ```text
-Vue3 PWA (Mobile/Desktop)
-        │ SSE + REST + status polling
-        ▼
-FastAPI
-        │
-        ▼
-AgentRuntime (현재 API 프로세스 내부)
-  ├─ Triage (경량 라우터)
-  ├─ Developer (설계+구현+검증+수정 올인원)
-  ├─ Context/Compaction/Recovery
-  └─ Tool Executor
-        │
-        ├─ DeepSeek V4 Adapter
-        ├─ Execution: Docker(default) / Host(opt-in)
-        └─ PostgreSQL
-
-보조 지속성:
-- JSONL durable event/action log
-- sessions.running 플래그
-- metrics/agent_runs
+Vue3 PWA
+  │ REST / SSE / event polling / WebSocket
+  ▼
+FastAPI Control Plane
+  ├─ auth (`FORGE_AUTH_TOKEN`)
+  ├─ Scheduler
+  ├─ Mac Terminal/Screen/Camera
+  └─ AgentRuntime
+       ├─ Triage
+       ├─ Chat
+       ├─ Developer
+       ├─ Context / Skills / Recovery
+       ├─ Tool Executor
+       └─ Strict Verification Gate
+             ↓
+     Docker(default) / Host(opt-in)
+             ↓
+ PostgreSQL + JSONL event log + Git
 ```
 
-Redis 컨테이너는 존재하지만 현재 Agent event replay/worker queue의 authoritative 경로로 사용하지 않는다. Worker 분리와 Redis Streams 기반 durable resume은 미래 과제다.
-
-## 실행 흐름
+## Agent 흐름
 
 ```text
 Request
  ↓
-Triage ── CHAT → Chat Flash → Done
+Triage ── CHAT → Chat
  │
  AGENT
  ↓
-Developer (flash + thinking medium)
-  ↻ Plan(3줄) → Execute → Verify(테스트/빌드)
-     PASS → completed
-     FAIL → Diagnose → Repair → Verify
- ↓ 막힘(max_steps/repeated)
-Developer 승격 1회 (pro + thinking high, Sr)
+Developer (Flash + thinking)
+ ↻ Plan → Execute → Self-verify/Repair
+ ↓ 필요 시 Pro escalation
+Strict Verification Gate
+ ├─ test/build PASS → completed → commit/push 가능
+ └─ FAIL → bounded repair → 재검증 → verification_failed
 ```
 
-역할은 Developer/Chat 2개(+Triage 라우터). 이미지는 별도 Vision 에이전트 없이 Developer가 vision 모델로 직접 처리한다. 별도 Planner/Reviewer/Debugger는 없다 — 에이전트마다
-컨텍스트를 다시 읽는 input token 비용을 없애기 위해 한 Developer가 끝까지 책임진다.
-세션 final_status가 성공 판정의 authority다. Sr 승격은 실패 시 1회로 제한한다.
+별도 Planner/Reviewer/Debugger를 기본 실행 경로에서 제거해 컨텍스트 재전송을 줄였다. 그러나 비용 절감보다 중요한 것은 **Developer의 결과를 모델 스스로 최종 승인하지 못하게 하고 프로세스 검증을 별도 authority로 둔 것**이다.
 
-## Context / 비용 구조
+## Durable Execution
 
-- context pressure는 provider 실측 `prompt_tokens` 기준
-- 75% 초과 시 오래된 model surface를 Flash로 요약(compaction)
-- compaction 성공 직후 압축 전 usage로 차단하지 않고 다음 호출에서 재실측
-- 95% 초과이면서 더 줄일 수 없을 때 hard block
-- 긴 tool result는 head/tail/오류 중심으로 pruning
-- 원본 conversation history와 model projected context는 분리
-- stable prefix: BASE_PROMPT + role instructions
-- dynamic tail: memory + selected skills + conversation
-- cache hit/miss와 prefix hash를 계측
+Agent step마다 history를 영속화한다. 서버 시작 시 unfinished/running session을 찾아 저장된 history 기반으로 headless resume한다.
 
-## Skill / Memory
+- `AUTO_RESUME=0`으로 비활성화 가능
+- resume 중 재충돌 시 무한 재개를 막는 guard 존재
+- Python coroutine 자체를 복원하는 것이 아니라 저장된 Agent state/history에서 실행을 재구성한다.
 
-`.forge/skills/*.md`는 모두 prompt에 넣지 않는다. 현재 요청과 키워드 겹침으로 상위 최대 3개, 총 6000자 예산 내에서 선택한다. `save_skill`은 승인 게이트를 통과한다.
+현재 남은 과제는 resume 과정에서 approval 권한이 확대되지 않도록 capability 경계를 더 엄밀히 만드는 것이다.
 
-## Provider Recovery
+## Verification Authority
 
-- `reasoning_content` 계약 오류: reasoning 제거 + thinking off 재시도
-- 429/5xx/timeout/connection: 1/2/4초 backoff, 최대 3회
-- 일부 delta가 이미 사용자에게 전달된 뒤 실패한 stream은 중복 생성을 막기 위해 재시도하지 않는다.
+최종 `completed`는 모델 발화가 아니라 `_verify()` 결과가 결정한다.
+
+현재 자동 탐색 대상은 root/frontend의 npm build와 root/backend의 pytest 중심이다. 실패하면 1회 bounded repair 후 다시 검증한다.
+
+현재 구현의 주의점: pytest의 일부 실행/설정 오류를 false failure 방지 목적으로 통과시키는 경로가 있어, 장기적으로 `PASSED / FAILED / UNAVAILABLE` 3상태로 분리해야 한다.
+
+## Context / Skills
+
+- prompt token pressure 기반 compaction/hard block
+- tool result pruning
+- stable prefix/cache telemetry
+- reasoning 호환 오류 recovery
+- Skills 3계층: Curated / Learned / Project
+- 관련 Skill만 제한적으로 주입
+
+## Persistence / Events
+
+- PostgreSQL: sessions/messages/tasks/checkpoints/agent_runs 등
+- JSONL: durable action/event log
+- SSE: live stream
+- eventlog polling + sequence dedup: proxy buffering/재접속 보완
+- status polling: foreground 복귀 및 stale UI reconcile
+
+## Benchmark / RSI
+
+`backend/bench.py` + `bench_tasks.py`가 격리 fixture와 deterministic checker로 R0 평가를 수행한다. 현재 21개 task가 있다.
+
+`backend/rsi.py`는 baseline/candidate 결과를 `success_rate → cost_per_success → elapsed` 순으로 비교하는 promotion gate를 구현한다. candidate worktree 실행과 merge는 아직 자동화하지 않으며 사람 승인을 유지한다.
 
 ## Tool / Execution
 
-읽기 전용 `read_file/list_dir/grep` 다중 호출은 병렬 prefetch 가능하다. `write_file/edit_file/bash/save_skill`은 승인 대상이며 변경 전 git SHA checkpoint를 기록한다.
-
-### Docker mode — 기본
-
-`SANDBOX_MODE=docker`가 기본값이다. bash를 제한된 Docker 환경에서 실행해 non-root/resource isolation을 유지한다.
-
-### Host mode — 명시적 옵트인
-
-`SANDBOX_MODE=host`는 bash를 호스트에서 직접 실행한다. Agent가 FORGE 자신의 개발/검증이나 로컬 도구를 더 자유롭게 사용할 수 있지만 격리가 사라지므로 신뢰된 개인 환경에서만 사용한다. `/workspace` 경로는 실제 세션 workspace로 치환된다.
-
-파일 브라우저 API는 실행 모드와 별개로 session workspace 경계를 강제해 지정 workspace 밖 접근을 차단한다.
+읽기/수정/bash/build_frontend/Git 계열 도구를 사용한다. Docker가 기본이며 Host는 명시적 opt-in이다. Host mode와 Terminal은 높은 신뢰 경계로 취급한다.
 
 ## Remote Operation
 
-- SSE: 실시간 thinking/text/tool/task/diff 이벤트
-- `/sessions/{id}/status`: `running`, 현재 `role`, `activity`, `waiting_for`, idle 상태 조회
-- SSE가 끊겨도 PWA는 status polling으로 진행 상황을 추적
-- 승인/질문은 최대 600초 대기 후 안전하게 종료
-- cancel 시 pending approval/question future를 해제
-- 모든 send 이벤트는 JSONL event log에 기록
-- 첨부 이미지는 채팅 썸네일로 표시하고 전체화면 viewer에서 확인 가능
-- Skills viewer는 카드 단위 collapsible UI 제공
+PWA 정보구조는 세션 / 예약 / 맥 중심이다.
 
-### 서버 재시작
+- Agent activity / approval / steering
+- Git / Files / Skills / Metrics / Kanban
+- Mac host PTY Terminal
+- view-only Screen
+- Camera JPEG polling PoC
+- Scheduled Job 기반
 
-`sessions.running=true`로 남은 세션을 시작 시 reconcile해 중단 사실을 메시지로 남기고 플래그를 정리한다. 이는 **중단 감지/복구 안내**이며, 실행 stack을 복원해 이어서 실행하는 durable resume은 아니다.
+## 보안
 
-## Telemetry
-
-`agent_runs`와 metrics 집계를 통해 role/model별 token, cache, model/tool call, retry, compaction, elapsed, selected skill, Pro 승격 등을 기록한다.
-
-API:
-
-- `GET /api/metrics/summary`
-- `GET /api/rooms/{id}/metrics`
-
-성공 정의의 기본값은 `final_status == completed`이며 핵심 최적화 지표는 `cost per successfully completed task`다.
-
-## 현재 데이터 계층
-
-- PostgreSQL: sessions/messages/tasks/checkpoints/agent_runs 및 실행 상태/metrics 영속화
-- JSONL: durable action/event log
-- Redis: 컨테이너 구성됨, durable Agent queue/replay는 미연결
+HTTP와 WebSocket `/api/*`는 `FORGE_AUTH_TOKEN` 기반 application auth를 사용한다. Zero Trust/VPN은 추가 방어층이지 application auth 대체물이 아니다.
 
 ## 다음 구조적 과제
 
-1. Agent worker를 API 프로세스와 분리
-2. durable queue + event replay
-3. 서버 재시작 후 실제 run resume
-4. Tool Script/RPC Mode
-5. Scheduled/Condition Jobs + Web Push
-6. ExecutionBackend(Local/SSH/Docker)
+1. verification 3상태 및 completion/commit invariant
+2. resume-safe approval/capability
+3. benchmark 확대
+4. RSI candidate worktree + benchmark + human promotion
+5. Scheduler durable semantics
+6. Tool Script/RPC
+7. ExecutionBackend(Local/Docker/SSH)

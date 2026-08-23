@@ -2,63 +2,95 @@
 
 [English](README.md) | **한국어**
 
-셀프호스팅 **Agent Runtime 기반 코딩 AI 플랫폼**. 자연어 목표를 받아 실행·검토·수정을 반복하고, Mac에서 장시간 작업하며 모바일 PWA로 원격 제어한다.
+셀프호스팅 **Agent Runtime 기반 코딩 AI 플랫폼**. 자연어 목표를 받아 실행하고, 실제 test/build로 검증하고, 실패하면 수리하며, Mac에서 장시간 작업하고 모바일 PWA로 원격 제어한다.
 
-최상위 목표는 **동일하거나 더 높은 성공률을 유지하면서 더 적은 토큰·API 호출·시간·비용으로 작업을 끝내는 것**이다. 핵심 지표는 `tokens/task`가 아니라 **cost per successfully completed task**다.
+## 핵심 철학
+
+FORGE의 목표는 단순히 **저렴하게 LLM을 돌리는 것**이 아니다.
+
+> **저렴한 모델도 강한 Harness와 결정적 검증 프로세스 안에서 사용해, 실제 소프트웨어 작업의 품질과 완료 신뢰성을 보장하는 것**이 핵심이다.
+
+비싼 모델의 지능에 품질을 맡기기보다 프로세스가 품질을 보증한다.
+
+```text
+저렴한 모델
+  ↓
+명확한 실행 루프
+  ↓
+도구로 실제 코드 변경
+  ↓
+결정적 test/build 검증
+  ├─ PASS → 완료/커밋
+  └─ FAIL → 진단/수리 → 재검증
+                  ↓ 계속 막힐 때만 강한 모델 승격
+```
+
+따라서 최적화 순서는 다음과 같다.
+
+1. **성공률과 결과 품질을 유지/향상한다.**
+2. 검증되지 않은 결과를 완료로 인정하지 않는다.
+3. 그 조건 안에서 `cost per successful task`를 낮춘다.
+4. elapsed time과 human intervention을 줄인다.
+
+토큰 절감이나 Flash 사용 자체는 목표가 아니다. 성공률을 떨어뜨려 얻은 비용 절감은 개선으로 인정하지 않는다.
+
+## 현재 Agent 구조
 
 ```text
 User Goal
   ↓
-Triage (Flash, 경량 라우터)
-  ├─ CHAT → Chat
-  └─ AGENT → Developer (flash + thinking medium)
-               ↻ Plan(3줄) → Execute → Verify(테스트/빌드) → 완료
-                                            └ 실패 → Diagnose → Repair → Verify
-               ↓ 막히면 pro + thinking high로 승격(최대 2회 루프, Sr)
+Triage
+  ├─ CHAT → Chat (Flash)
+  └─ AGENT → Developer (Flash + thinking)
+               ↻ Plan → Execute → Self-verify/Repair
+               ↓ 필요 시 Pro 승격
+               ↓
+          Strict Verification Gate
+          test / build 실제 실행
+               ├─ PASS → completed → auto commit/push 가능
+               └─ FAIL → bounded repair → verification_failed
 ```
 
-역할: Triage(최저가 라우터)가 단순 대화는 Chat(최저가 flash)으로, 코드는 Developer로 보낸다. 이미지는 Vision. 별도 Planner/Reviewer/Debugger를 두지 않는다 —
-에이전트가 늘 때마다 컨텍스트를 처음부터 다시 읽는 input token 비용이 발생하기 때문이다.
-Developer 하나가 설계·구현·자체검증·수정을 한 컨텍스트에서 끝까지 책임진다.
-
-## ⚠️ 보안 경고
-
-FORGE는 파일 수정, shell 실행, Git 변경뿐 아니라 현재 **Mac host PTY Terminal, 화면 보기, 카메라 보기**까지 제공한다. 공용 인터넷에 직접 노출하지 말 것.
-
-Cloudflare Tunnel 자체는 사용자 인증이 아니다. 원격 사용 시 **Cloudflare Zero Trust / Access, Tailscale, VPN 등 별도 접근제어**를 사용한다. 현재 개발 배포는 Cloudflare Zero Trust Access 정책으로 제한한다.
-
-특히 Host Terminal은 사실상 원격 shell이다. application-level WebSocket authorization과 네트워크 경계를 독립적으로 검증해야 한다.
+별도 Planner/Reviewer/Debugger를 기본 파이프라인에 두지 않고 Developer가 하나의 컨텍스트에서 설계·구현·수정을 담당한다. 모델이 "완료"라고 말하는 것은 완료 조건이 아니며, 최종 품질 판정은 프로세스의 verification gate가 담당한다.
 
 ## 현재 구현
 
-- DeepSeek V4 streaming / tool calling / thinking
-- 올인원 Developer(설계+구현+자체검증+수정) — flash+think 기본, 실패 시 pro 승격(Jr→Sr)
-- Flash-first / Pro-on-demand routing
-- context pruning / 75% compaction / 95% hard block
-- cache hit/miss telemetry + selective Skills
-- reasoning_content 400 recovery 및 session 반복 retry 제거
-- read/write/edit/bash/grep/list + approval
-- `build_frontend` host build 도구: FORGE가 자기 프론트 수정 후 production build까지 수행
-- Docker Sandbox 기본 + `SANDBOX_MODE=host` opt-in
-- PostgreSQL persistence / agent telemetry / JSONL event log
-- SSE 단절 후 `/status` polling 및 pending approval 복구
-- 모바일 PWA: Session / 예약 / Mac 중심 원격 운영
+- DeepSeek V4 / OpenRouter 계열 model routing, streaming/tool calling/thinking
+- Flash-first + 필요 시 Pro escalation
+- 올인원 Developer loop
+- **Strict Verification Gate**: `npm run build` / pytest 실제 실행 후 완료 판정
+- 검증 실패 시 bounded repair, 재실패 시 `verification_failed`
+- 검증 성공 경로에서만 auto commit/push
+- step-level history persistence
+- **Durable Auto Resume**: 서버 재시작 후 미완료 run을 history 기반으로 재개
+- crash-loop guard / `AUTO_RESUME=0`
+- PostgreSQL persistence / JSONL event log / metrics
+- context pruning / compaction / cache telemetry
+- Curated / Learned / Project 3-tier Skills
+- 결정적 R0 benchmark harness + 21개 task
+- bounded RSI promotion gate(`success_rate → cost_per_success → elapsed`)
+- Docker Sandbox 기본 + Host mode opt-in
+- application-level API/WebSocket auth(`FORGE_AUTH_TOKEN`)
+- 모바일 PWA: 세션 / 예약 / 맥
 - Git / Files / Skills / Metrics / Kanban / Vision
-- Mac view-only 화면 보기
-- Mac host PTY + WebSocket + xterm.js Terminal
-- Mac Camera `imagesnap` JPEG polling PoC
-- 예약 작업 기반 및 workspace fallback
+- Mac host PTY Terminal / 화면 보기 / Camera PoC
+- 예약 작업 기반
 
-## 아직 중요한 미완료
+## 현재 중요한 미완료
 
-- 서버 재시작 후 실제 run continuation을 위한 Durable Worker / authoritative event replay
-- Terminal/Screen/Camera authorization 보안 검증
-- Scheduled / Deferred / Condition Jobs 완성 + Web Push
+- Durable Resume의 approval/capability 안전 경계 고도화
+- verification을 `PASSED / FAILED / UNAVAILABLE`로 엄밀히 구분
+- benchmark 규모/난이도 확대 및 외부 harness 비교
+- candidate worktree 실행 + benchmark + 사람 승인까지 이어지는 bounded RSI R1 완성
+- Scheduled / Deferred / Condition Job의 restart/idempotency/timezone semantics 완성
 - Tool Script/RPC Mode
-- ExecutionBackend 추상화
-- bounded RSI: candidate branch → benchmark → promotion/rollback
+- ExecutionBackend(Local/Docker/SSH) 정리
 
-FORGE는 자기 코드를 수정하고 일부 빌드까지 수행할 수 있지만, 자동 평가·선택 루프가 닫히기 전에는 완전한 RSI로 간주하지 않는다.
+## 보안
+
+FORGE는 파일 수정, shell, Git, host PTY Terminal, 화면/카메라 접근 권한을 가진다. 공용 인터넷에 직접 노출하지 않는다.
+
+Cloudflare Tunnel 자체는 authorization이 아니다. 원격 사용 시 Cloudflare Zero Trust / Access, Tailscale, VPN 등 별도 접근통제를 사용하고 `FORGE_AUTH_TOKEN` 기반 application auth도 독립적으로 유지한다.
 
 ## 시작하기
 
@@ -71,7 +103,7 @@ cp ../.env.example ../.env
 .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8790
 ```
 
-프론트엔드:
+Frontend:
 
 ```bash
 cd frontend
@@ -81,14 +113,7 @@ npm run build
 
 ## 문서
 
-[`docs/README.md`](docs/README.md)를 authoritative 문서 인덱스로 사용한다.
-
-- `docs/core/` — 현재 구조와 Agent loop
-- `docs/status/` — 실제 구현 상태
-- `docs/operations/` — benchmark / troubleshooting
-- `docs/planning/` — roadmap
-- `docs/proposal/` — 제안 및 adoption 기록
-- `docs/agents/` — **실제 runtime prompt**
+[`docs/README.md`](docs/README.md)를 authoritative 문서 인덱스로 사용한다. Proposal/Archive보다 실제 코드와 `docs/core`, `docs/status`를 우선한다.
 
 ## 라이선스
 
