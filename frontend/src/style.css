@@ -3142,3 +3142,31 @@ button {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
 }
 
+
+/* 넓은 화면(맥): 세션 사이드바를 고정 좌측 컬럼으로 — 콘텐츠는 그만큼 오른쪽으로 */
+@media (min-width: 900px) {
+  .app {
+    padding-left: 300px;
+  }
+  .rooms-overlay.pinned {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 300px;
+    background: none;
+    padding: 0;
+    z-index: 90;
+  }
+  .rooms-overlay.pinned .rooms-panel {
+    width: 300px;
+    max-width: none;
+    height: 100%;
+    border-radius: 0;
+    border: none;
+    border-right: 1px solid var(--border);
+    box-shadow: none;
+    animation: none;
+  }
+  .rooms-overlay.pinned .drawer-close {
+    display: none;
+  }
+}

@@ -119,6 +119,7 @@ const rooms = ref([])
 const currentRoomId = ref(localStorage.getItem('forge_room') || '')
 const loadingMessages = ref(false)
 const showRooms = ref(false)
+const isWide = ref(false) // 넓은 화면(맥)에선 사이드바를 고정 컬럼으로
 const sidebarTab = ref('sessions') // sessions | jobs | mac
 const showCreateRoom = ref(false)
 const newRoomName = ref('')
@@ -1834,6 +1835,11 @@ watch(showRooms, (v) => {
 applyTheme(theme.value)
 
 onMounted(async () => {
+  // 넓은 화면(맥)에선 사이드바를 고정 노출. 좁아지면 오버레이 드로어로 복귀.
+  const mq = window.matchMedia('(min-width: 900px)')
+  const applyWide = () => { isWide.value = mq.matches; if (mq.matches) showRooms.value = true }
+  applyWide()
+  mq.addEventListener('change', applyWide)
   await loadRooms()
   // 유효한 현재 세션이 없으면 가장 최근 세션으로 랜딩
   const valid = rooms.value.some((r) => r.id === currentRoomId.value)
@@ -1927,7 +1933,7 @@ document.addEventListener('visibilitychange', () => {
       </div>
     </div>
 
-    <div v-if="showRooms" class="rooms-overlay" @click="showRooms = false">
+    <div v-if="showRooms" class="rooms-overlay" :class="{ pinned: isWide }" @click="!isWide && (showRooms = false)">
       <div class="rooms-panel" @click.stop>
         <div class="drawer-head">
           <span class="drawer-title">{{ sidebarTab === 'sessions' ? '세션' : sidebarTab === 'jobs' ? '예약 작업' : '맥' }}</span>
