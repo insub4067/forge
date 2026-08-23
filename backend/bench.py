@@ -100,7 +100,7 @@ async def _cleanup_session(sid: str):
     await store.delete_room(sid)
 
 
-async def _run_one(task: dict, idx: int, keep: bool) -> dict:
+async def _run_one(task: dict, idx: int, keep: bool, tier: str = "auto") -> dict:
     from app.api.routes import runtime
     from app.db import store
     from app.metrics import sum_cost
@@ -111,6 +111,7 @@ async def _run_one(task: dict, idx: int, keep: bool) -> dict:
         sid = uuid.uuid4().hex
         await store.ensure_session(sid, f"bench-{task['code']}-{idx}", str(d))
         runtime.set_auto_approve(sid, True)
+        runtime.set_model_tier(sid, tier)  # 모델 비교용: auto|flash|pro|ox
         history = [{"role": "user", "content": task["prompt"]}]
         await store.save_history(sid, history)
         await store.mark_running(sid, True)
@@ -145,7 +146,8 @@ async def _run_one(task: dict, idx: int, keep: bool) -> dict:
     return result
 
 
-async def _run_all(repeat: int, keep: bool, only: set | None, complex_only: bool) -> dict:
+async def _run_all(repeat: int, keep: bool, only: set | None, complex_only: bool,
+                   tier: str = "auto") -> dict:
     results = []
     for task in TASKS:
         if only and task["code"] not in only:
@@ -153,8 +155,8 @@ async def _run_all(repeat: int, keep: bool, only: set | None, complex_only: bool
         if complex_only and not task.get("complex"):
             continue
         for i in range(repeat):
-            print(f"실행: {task['code']} ({task['category']}) #{i + 1}/{repeat} …")
-            results.append(await _run_one(task, i, keep))
+            print(f"실행: {task['code']} ({task['category']}) [{tier}] #{i + 1}/{repeat} …")
+            results.append(await _run_one(task, i, keep, tier))
     return aggregate(results)
 
 
@@ -200,10 +202,11 @@ def main():
     ap.add_argument("--task", default="", help="특정 task만(쉼표 구분)")
     ap.add_argument("--complex", action="store_true", help="COMPLEX task만 실행")
     ap.add_argument("--json", default="", help="집계 결과를 이 경로에 JSON으로 저장(compare.py용)")
+    ap.add_argument("--tier", default="auto", help="모델 티어: auto|flash|pro|ox (모델 비교용)")
     args = ap.parse_args()
     if args.run:
         only = {c.strip().upper() for c in args.task.split(",") if c.strip()} or None
-        agg = asyncio.run(_run_all(args.repeat, args.keep, only, args.complex))
+        agg = asyncio.run(_run_all(args.repeat, args.keep, only, args.complex, args.tier))
         variant = _variant_label()
         _print_report(agg, variant)
         if args.json:
