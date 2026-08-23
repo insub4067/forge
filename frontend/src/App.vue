@@ -66,21 +66,6 @@ function tierLabel() {
   return (MODEL_TIERS.find((t) => t.key === modelTier.value) || MODEL_TIERS[0]).label
 }
 // 에이전트 모드 — auto: FORGE가 복잡도로 판단 / multi: 계획→구현→리뷰 3역할 / single: 올인원 Developer
-const agentMode = ref(localStorage.getItem('forge_agent_mode') || 'auto')
-const showAgentPick = ref(false)
-const AGENT_MODES = [
-  { key: 'auto', label: '자동', desc: 'FORGE가 작업 복잡도를 판단해 필요할 때만 멀티로 전환 (권장)' },
-  { key: 'multi', label: '멀티', desc: 'Planner(계획) → Developer(구현) → Reviewer(검증) — 큰 작업에 강함' },
-  { key: 'single', label: '싱글', desc: 'Developer 하나가 끝까지 — 빠르고 저렴, 단순 작업용' },
-]
-function pickAgentMode(key) {
-  agentMode.value = key
-  localStorage.setItem('forge_agent_mode', key)
-  showAgentPick.value = false
-}
-function agentModeLabel() {
-  return (AGENT_MODES.find((t) => t.key === agentMode.value) || AGENT_MODES[0]).label
-}
 const sessionRunning = ref(false)
 const agentStatus = ref(null)
 const showSkills = ref(false)
@@ -1734,7 +1719,7 @@ async function send() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: roomId, message: payloadMsg, image_urls: imageUrls, auto_approve: autoApprove.value, model_tier: modelTier.value, agent_mode: agentMode.value }),
+      body: JSON.stringify({ session_id: roomId, message: payloadMsg, image_urls: imageUrls, auto_approve: autoApprove.value, model_tier: modelTier.value }),
     })
     console.log('[forge] 응답:', res.status, res.headers.get('content-type'))
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
@@ -2369,10 +2354,6 @@ document.addEventListener('visibilitychange', () => {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-4 12.7V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.3A7 7 0 0 0 12 2z"/><path d="M9 22h6"/></svg>
               {{ tierLabel() }}
             </button>
-            <button class="mode-chip" @click="showAgentPick = true" aria-label="에이전트 모드 선택">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
-              {{ agentModeLabel() }}
-            </button>
             <button class="mode-chip" :class="{ on: autoApprove }" @click="toggleAutoApprove">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
               {{ autoApprove ? '자동 승인' : '수동 승인' }}
@@ -2405,23 +2386,6 @@ document.addEventListener('visibilitychange', () => {
       </div>
     </div>
 
-    <!-- 에이전트 모드 선택 시트 -->
-    <div v-if="showAgentPick" class="sheet-overlay" @click="showAgentPick = false">
-      <div class="sheet" @click.stop>
-        <div class="sheet-head">
-          <span class="sheet-title">에이전트 모드</span>
-          <button class="sheet-x" @click="showAgentPick = false" aria-label="닫기">✕</button>
-        </div>
-        <button v-for="a in AGENT_MODES" :key="a.key" class="sheet-item" :class="{ on: agentMode === a.key }" @click="pickAgentMode(a.key)">
-          <div class="sheet-item-main">
-            <span class="sheet-item-label">{{ a.label }}</span>
-            <span v-if="agentMode === a.key" class="sheet-item-check">✓</span>
-          </div>
-          <span class="sheet-item-desc">{{ a.desc }}</span>
-        </button>
-      </div>
-    </div>
-
     <div v-if="activeQuestion" class="modal-overlay" @click="activeQuestion = null">
       <div class="modal" @click.stop>
         <div class="modal-head">확인이 필요합니다</div>
@@ -2445,7 +2409,7 @@ document.addEventListener('visibilitychange', () => {
     </div>
 
     <!-- 잔액 탭 → 충전 화면 이동 확인 팝업 -->
-    <div v-if="showTopUpConfirm" class="modal-overlay" @click="showTopUpConfirm = false">
+    <div v-if="showTopUpConfirm" class="modal-overlay topup-modal" @click="showTopUpConfirm = false">
       <div class="modal" @click.stop>
         <div class="modal-head">충전 안내</div>
         <div class="modal-question">충전 화면으로 이동하시겠습니까?</div>

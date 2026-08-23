@@ -150,7 +150,6 @@ async def chat(req: Request):
     message = str(body.get("message", ""))
     runtime.set_auto_approve(session_id, bool(body.get("auto_approve", False)))
     runtime.set_model_tier(session_id, str(body.get("model_tier", "auto")))
-    runtime.set_agent_mode(session_id, str(body.get("agent_mode", "auto")))
 
     # 이미 실행 중인 세션이면 새 run을 띄우지 않고 기존 run에 주입한다 —
     # 같은 세션에 run이 겹쳐 돌며 상태를 밟아 멈추는 것을 방지(동시 run 레이스).

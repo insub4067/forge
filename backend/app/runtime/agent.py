@@ -618,11 +618,14 @@ class AgentRuntime:
         self._model_tier[session_id] = tier if tier in ("auto", "pro", "flash") else "auto"
 
     def set_agent_mode(self, session_id: str, mode: str) -> None:
-        """에이전트 모드: auto(복잡도 기반 자동 전환) | multi(Planner→Developer→Reviewer) | single(올인원)."""
-        self._agent_mode[session_id] = mode if mode in ("auto", "multi", "single") else "auto"
+        """에이전트 모드: auto(복잡도 기반 자동 전환) | multi(Planner→Developer→Reviewer) | single(올인원).
+        사용자 선택 UI는 제거됐고 항상 FORGE가 판단한다(auto). 하위호환을 위해 메서드는 유지하되
+        저장하지 않는다."""
+        return
 
     def get_agent_mode(self, session_id: str) -> str:
-        return self._agent_mode.get(session_id, "auto")
+        # 항상 auto — FORGE가 작업 복잡도로 single/multi를 자동 판단한다.
+        return "auto"
 
     def resolve_pending_approvals(self, session_id: str = "") -> int:
         """해당 세션의 대기 승인만 승인 처리한다(자동 승인 켤 때).

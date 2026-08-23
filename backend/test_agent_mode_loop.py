@@ -94,18 +94,17 @@ async def main():
     print("Case B (auto+complex → multi, plan 전달): OK", roles)
 
     # Case C — multi + Reviewer FAIL: developer가 1회 재수정(리뷰 루프 1회 상한)
+    #   (항상 auto — 복잡도 키워드로 multi 경로를 유도)
     rt, calls = make_runtime(review_text="FAIL: calc.py에 하드코딩 발견")
-    rt.set_agent_mode("s1", "multi")
-    data, mode, roles, all_calls = await run_case(rt, calls, msg="간단한 작업")
-    assert mode == "multi", mode  # auto라 simple이지만 명시적 multi가 우선
+    data, mode, roles, all_calls = await run_case(rt, calls, msg="모듈을 설계에 따라 리팩토링해줘")
+    assert mode == "multi", mode
     assert roles == ["planner", "developer", "reviewer", "developer"], roles
     assert data.get("status") == "completed", data
     print("Case C (Reviewer FAIL → 1회 재수정): OK", roles)
 
     # Case D — multi + Reviewer PASS: 재수정 없음
     rt, calls = make_runtime()
-    rt.set_agent_mode("s1", "multi")
-    data, mode, roles, _ = await run_case(rt, calls)
+    data, mode, roles, _ = await run_case(rt, calls, msg="아키텍처를 리팩토링해줘")
     assert roles == ["planner", "developer", "reviewer"], roles
     assert data.get("status") == "completed", data
     print("Case D (Reviewer PASS → 재수정 없음): OK", roles)
@@ -113,24 +112,21 @@ async def main():
     # Case D2 — FAIL 본문에 'pass' 단어가 있어도 FAIL로 판정(마지막 줄만 본다).
     #   전체 부분검색이면 여기서 PASS로 뒤집혀 재수정을 건너뛰는 버그가 난다.
     rt, calls = make_runtime(review_text="FAIL: 경계 테스트를 pass하지 못함")
-    rt.set_agent_mode("s1", "multi")
-    data, mode, roles, _ = await run_case(rt, calls)
+    data, mode, roles, _ = await run_case(rt, calls, msg="설계에 따라 리팩토링해줘")
     assert roles == ["planner", "developer", "reviewer", "developer"], roles
     print("Case D2 (FAIL 본문에 pass 포함 → 여전히 FAIL): OK", roles)
 
-    # Case E — 명시적 single + complex 키워드: 사용자 명시가 auto 판정보다 우선
+    # Case E — simple 요청은 복잡도 키워드가 없으면 single(항상 auto 판정)
     rt, calls = make_runtime()
-    rt.set_agent_mode("s1", "single")
-    data, mode, roles, _ = await run_case(rt, calls, msg="전체 아키텍처를 리팩토링해줘")
+    data, mode, roles, _ = await run_case(rt, calls, msg="간단한 작업")
     assert mode == "single", mode
     assert roles == ["developer"], roles
     assert data.get("status") == "completed", data
-    print("Case E (명시적 single → 복잡해도 single): OK", roles)
+    print("Case E (simple → single): OK", roles)
 
     # Case F — multi + Planner 실패: 올인원 Developer로 안전 폴백
     rt, calls = make_runtime(planner_status="max_steps")
-    rt.set_agent_mode("s1", "multi")
-    data, mode, roles, _ = await run_case(rt, calls)
+    data, mode, roles, _ = await run_case(rt, calls, msg="설계에 따라 리팩토링해줘")
     assert roles == ["planner", "developer"], roles
     assert data.get("status") == "completed", data
     print("Case F (Planner 실패 → Developer 폴백): OK", roles)
@@ -139,8 +135,7 @@ async def main():
     def stuck_then_ok(role, n, escalate):
         return "done" if escalate else "max_steps"
     rt, calls = make_runtime(dev_status=stuck_then_ok)
-    rt.set_agent_mode("s1", "multi")
-    data, mode, roles, all_calls = await run_case(rt, calls, msg="간단한 작업")
+    data, mode, roles, all_calls = await run_case(rt, calls, msg="설계에 따라 리팩토링해줘")
     assert roles == ["planner", "developer", "developer", "reviewer"], roles
     assert plan_flags(all_calls) == [False, True, True, False], plan_flags(all_calls)
     assert data.get("status") == "completed", data
@@ -148,8 +143,7 @@ async def main():
 
     # Case H — multi + Developer 최종 실패: 실패 종료
     rt, calls = make_runtime(dev_status="max_steps")
-    rt.set_agent_mode("s1", "multi")
-    data, mode, roles, _ = await run_case(rt, calls)
+    data, mode, roles, _ = await run_case(rt, calls, msg="설계에 따라 리팩토링해줘")
     assert roles == ["planner", "developer", "developer", "developer"], roles  # 1+MAX_ESCALATIONS(2)
     assert data.get("status") == "max_steps", data
     print("Case H (multi+최종 실패 → 종료): OK", roles)

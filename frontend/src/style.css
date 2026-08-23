@@ -1729,6 +1729,10 @@ footer .image-preview-row {
 .modal-overlay.job-modal {
   z-index: 200;
 }
+/* 충전 확인 팝업은 우측 메뉴 드로어(z-index 160) 위로 — 메뉴에서 열려도 보이게 */
+.modal-overlay.topup-modal {
+  z-index: 300;
+}
 
 .modal {
   background: var(--panel);
