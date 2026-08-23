@@ -148,6 +148,23 @@ async def main():
     assert c["count"] == 0
     print(f"이어붙임 상한 {A.NUDGE_MAX}회 + 그래도 변경 0 → completed_unverified: OK")
 
+    # ── planner context invariant: 도구 이력을 빼 orphan tool 400을 원천 차단 ──
+    # (read 루프로 tool 메시지가 쌓인 세션에서 [-N:] 슬라이스가 tool로 시작해 DeepSeek 400 →
+    #  planner가 done 없이 죽어 run 전체가 중단되던 실제 버그.)
+    hist = [
+        {"role": "user", "content": "작업"},
+        {"role": "assistant", "tool_calls": [{"id": "1"}]},
+        {"role": "tool", "tool_call_id": "1", "content": "결과1"},
+        {"role": "assistant", "tool_calls": [{"id": "2"}]},
+        {"role": "tool", "tool_call_id": "2", "content": "결과2"},
+    ] * 3
+    ctx = A._planner_context(hist, max_msgs=4)
+    assert all(m["role"] != "tool" for m in ctx), ctx
+    assert all(not m.get("tool_calls") for m in ctx), ctx
+    assert ctx and ctx[0]["role"] != "tool"      # orphan tool로 시작하지 않는다
+    assert len(ctx) <= 4
+    print("planner context invariant: 도구 이력 제외로 orphan tool 400 차단: OK")
+
     # ── 칸반 invariant: 모델은 done/testing을 설정 못 한다 ──
     assert A._clamp_task_status("done") == "working", "모델 done → working로 강등"
     assert A._clamp_task_status("testing") == "working", "모델 testing → working로 강등"

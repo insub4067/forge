@@ -231,8 +231,27 @@ def _system_for(role: str, room_memory: str = "", skills: str = "", plan: str = 
 
 def _planner_context(all_messages: list[dict], max_msgs: int = 8) -> list[dict]:
     """Planner에게 주는 축소 컨텍스트 — 전체 재전송 비용을 피하려고 최근 메시지만 준다.
-    (과거 planner가 컨텍스트 전체를 재전송해 비용 73%를 차지했던 문제의 재발 방지)"""
-    return [*all_messages[-max_msgs:]]
+    (과거 planner가 컨텍스트 전체를 재전송해 비용 73%를 차지했던 문제의 재발 방지)
+
+    도구 이력(tool_calls / role:tool)은 제외한다. 이유가 둘이다.
+    1) 최근 N개를 그냥 자르면 슬라이스가 orphan `tool` 메시지로 시작해 DeepSeek이 400을
+       낸다("tool must follow tool_calls") — 실제로 planner를 죽인 버그. read 루프로 tool
+       메시지가 많이 쌓인 세션에서 재현된다.
+    2) Planner는 계획만 세우므로 과거 도구 호출·결과가 필요 없다. user 요청과 assistant
+       텍스트만으로 충분하다.
+    """
+    clean: list[dict] = []
+    for m in all_messages:
+        role = m.get("role")
+        if role == "tool":
+            continue  # 도구 결과 — planner에 불필요, orphan이면 400 유발
+        if role == "assistant" and m.get("tool_calls"):
+            # 도구 호출 어시스턴트 — tool_calls를 벗기고 텍스트만(있을 때) 남긴다.
+            if m.get("content"):
+                clean.append({"role": "assistant", "content": m["content"]})
+            continue
+        clean.append(m)
+    return clean[-max_msgs:]
 
 
 def _last_assistant_text(messages: list[dict]) -> str:
