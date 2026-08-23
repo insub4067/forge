@@ -62,7 +62,7 @@ Agent step마다 history를 영속화한다. 서버 시작 시 unfinished/runnin
 
 현재 자동 탐색 대상은 root/frontend의 npm build와 root/backend의 pytest 중심이다. 실패하면 1회 bounded repair 후 다시 검증한다.
 
-현재 구현의 주의점: pytest의 일부 실행/설정 오류를 false failure 방지 목적으로 통과시키는 경로가 있어, 장기적으로 `PASSED / FAILED / UNAVAILABLE` 3상태로 분리해야 한다.
+현재 `_verify()`는 `PASSED / FAILED / UNAVAILABLE` 3상태를 반환한다. pytest exit 0=passed, 1=failed, 그 외(수집/설정 오류·timeout·미설치)=unavailable이며, unavailable은 성공으로 기록되지 않는다. 회귀 테스트(`test_reliability_gates.py`·`test_reliability_invariants.py`)로 고정되어 있다.
 
 ## Context / Skills
 

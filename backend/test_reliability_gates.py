@@ -96,6 +96,48 @@ async def main():
         assert st == "unavailable", st
     print("verify 3-state: OK — passed/failed/unavailable 구분, 거짓 failed 방지")
 
+    # ── _verify pytest: exit code별 3상태 분리 ──
+    # 가짜 .venv/bin/python — `import pytest` 결과와 `-m pytest` exit code를 제어.
+    # exit 0=passed, 1=failed, 2(수집/설정 오류)=unavailable, 미설치=unavailable.
+    with tempfile.TemporaryDirectory() as d:
+        bd = os.path.join(d, "backend")
+        os.makedirs(os.path.join(bd, ".venv", "bin"))
+        with open(os.path.join(bd, "test_x.py"), "w") as f:
+            f.write("def test_x():\n    pass\n")
+        interp = os.path.join(bd, ".venv", "bin", "python")
+        with open(interp, "w") as f:
+            f.write("#!/usr/bin/env python3\n"
+                    "import os, sys\n"
+                    "if sys.argv[1:2] == ['-c']:\n"
+                    "    sys.exit(0 if os.environ.get('FAKE_PYTEST_INSTALLED', '1') == '1' else 1)\n"
+                    "sys.exit(int(os.environ.get('FAKE_PYTEST_EXIT', '0')))\n")
+        os.chmod(interp, 0o755)
+
+        def _set(**kw):
+            for k in ("FAKE_PYTEST_INSTALLED", "FAKE_PYTEST_EXIT"):
+                os.environ.pop(k, None)
+            os.environ.update(kw)
+
+        _set(FAKE_PYTEST_EXIT="0")  # exit 0 = 통과 → passed
+        st, rep = await rt._verify(d, _ns)
+        assert st == "passed", (st, rep)
+
+        _set(FAKE_PYTEST_EXIT="1")  # exit 1 = 실제 실패 → failed
+        st, rep = await rt._verify(d, _ns)
+        assert st == "failed", (st, rep)
+
+        _set(FAKE_PYTEST_EXIT="2")  # exit 2 = 수집/설정 오류 → unavailable(거짓 failed 방지)
+        st, rep = await rt._verify(d, _ns)
+        assert st == "unavailable", (st, rep)
+
+        _set(FAKE_PYTEST_INSTALLED="0")  # pytest 미설치 → 실행 불가 → unavailable
+        st, rep = await rt._verify(d, _ns)
+        assert st == "unavailable", (st, rep)
+
+        for k in ("FAKE_PYTEST_INSTALLED", "FAKE_PYTEST_EXIT"):
+            os.environ.pop(k, None)
+    print("verify pytest 3-state: OK — exit 0=passed / 1=failed / 2·미설치=unavailable")
+
     print("\n모든 케이스 통과 ✓")
 
 

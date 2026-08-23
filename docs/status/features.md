@@ -12,7 +12,7 @@
 | Strict test/build Verification Gate | ✅ |
 | verification 실패 bounded repair | ✅ |
 | 모델의 done과 process completed 분리 | ✅ |
-| verification PASSED/FAILED/UNAVAILABLE 3상태 | ⬜ |
+| verification PASSED/FAILED/UNAVAILABLE 3상태 | ✅ |
 | repeated tool / concurrent-run guard | ✅ |
 | runtime steering / cancel | ✅ |
 
@@ -78,10 +78,9 @@
 
 ## 다음 우선순위
 
-1. verification 3상태와 완료/commit invariant
-2. resume-safe approval/capability
-3. benchmark 확대
-4. bounded RSI candidate pipeline
-5. Scheduler durable semantics
-6. Tool Script/RPC
-7. ExecutionBackend
+1. resume-safe approval/capability
+2. benchmark 확대
+3. bounded RSI candidate pipeline
+4. Scheduler durable semantics
+5. Tool Script/RPC
+6. ExecutionBackend

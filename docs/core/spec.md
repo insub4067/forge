@@ -62,7 +62,7 @@ Developer는 Flash+thinking을 기본으로 하고 막힐 때만 Pro로 승격�
 - 감지된 build/test를 실제 실행한다.
 - 실패 시 제한된 횟수만 repair한다.
 - 검증 실패 상태에서 commit/push하지 않는다.
-- 검증 결과를 장기적으로 `PASSED / FAILED / UNAVAILABLE`로 분리한다.
+- 검증 결과를 `PASSED / FAILED / UNAVAILABLE`로 분리한다(실행 불가·설정 오류·timeout은 UNAVAILABLE).
 - 테스트를 실행할 수 없었다는 사실을 테스트 성공으로 기록하지 않는다.
 
 ## 5. Model Policy

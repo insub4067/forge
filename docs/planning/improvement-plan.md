@@ -20,6 +20,8 @@ FORGE의 핵심은:
 - host/self-build 경로 확보
 - Strict Verification Gate 도입
 - 검증 실패 bounded repair
+- verification PASSED/FAILED/UNAVAILABLE 3상태(실행 불가/설정 오류/timeout=UNAVAILABLE)
+- FAILED/UNAVAILABLE에서 commit/push 차단 invariant(pytest exit code별 테스트 포함)
 - step-level persistence
 - Durable Auto Resume
 - auto commit/push 경로
@@ -31,18 +33,7 @@ FORGE의 핵심은:
 
 따라서 과거 문서의 "durable resume 미구현", "benchmark 실물 없음", "Planner 폭주가 현재 구조의 중심" 같은 항목은 더 이상 현재 backlog가 아니다.
 
-## P0 — 검증 의미를 엄밀하게
-
-현재 `_verify()`는 false failure를 줄이려 일부 pytest 비정상 종료를 통과시킬 수 있다.
-
-다음:
-
-- `PASSED / FAILED / UNAVAILABLE`
-- 실행 불가/설정 오류/timeout은 UNAVAILABLE
-- completion policy 명시
-- FAILED/UNAVAILABLE에서 commit/push 우회 경로 테스트
-
-## P1 — Resume 권한 안전성
+## P0 — Resume 권한 안전성
 
 Auto Resume은 실제 동작한다. 이제 "재시작했다고 권한이 확대되지 않는다"를 보장한다.
 
@@ -53,7 +44,7 @@ Auto Resume은 실제 동작한다. 이제 "재시작했다고 권한이 확대�
 
 거대한 permission framework는 만들지 않는다.
 
-## P2 — Benchmark 현실성 확대
+## P1 — Benchmark 현실성 확대
 
 현재 21 task를 단순 숫자 증가보다 failure-mode coverage 중심으로 확장한다.
 
@@ -67,7 +58,7 @@ Auto Resume은 실제 동작한다. 이제 "재시작했다고 권한이 확대�
 
 외부 harness 비교도 동일 fixture/checker를 사용한다.
 
-## P3 — Bounded RSI R1
+## P2 — Bounded RSI R1
 
 `backend/rsi.py` promotion gate는 구현됐다. 다음은 orchestration이다.
 
@@ -82,7 +73,7 @@ candidate worktree
 
 자동 merge는 아직 하지 않는다.
 
-## P4 — Automation durability
+## P3 — Automation durability
 
 예약 기능은 존재한다. 다음은 기능 수보다 semantics다.
 
@@ -92,11 +83,11 @@ candidate worktree
 - retry/history
 - Deferred/Condition
 
-## P5 — Tool 효율
+## P4 — Tool 효율
 
 Tool Script/RPC는 성공률을 유지하면서 탐색 model round-trip을 줄일 수 있을 때만 도입한다.
 
-## P6 — Skills / Model Routing
+## P5 — Skills / Model Routing
 
 Skill과 model tier는 신념이 아니라 benchmark로 평가한다.
 
