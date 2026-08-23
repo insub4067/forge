@@ -1,66 +1,84 @@
 # FORGE Agent Loop
 
-> 기준: 2026-08-23 `main` (올인원 구조)
+> 기준: 2026-08-23 `main`
 
-FORGE는 단일 LLM 호출형 챗봇이 아니라 **Flash-first / Pro-on-demand** 반복 실행 Runtime이다.
-에이전트 수를 줄이는 것이 최고의 비용 절감이다 — 에이전트가 늘 때마다 그 역할이 컨텍스트를
-처음부터 다시 읽는 input token 비용이 발생한다. 그래서 Planner/Reviewer/Debugger를 별도
-역할로 두지 않고 **Developer 하나**가 설계·구현·검증·수정을 한 컨텍스트에서 처리한다.
+FORGE의 Agent Loop는 **저렴한 모델을 쓰기 위한 비용 절감 트릭이 아니라, 저렴한 모델의 불확실성을 프로세스로 보완해 품질을 확보하는 Harness**다.
 
-## 역할 파이프라인 (2 roles)
+## 실행 흐름
 
 ```text
 User
  ↓
-Triage (flash, 최저가 라우터: chat vs code)
- ├─ CHAT → Chat (flash no-think, 최저가) — 단순 대화·인사·짧은 질문
- └─ CODE → Developer (flash + thinking medium)
-             ↻ Plan(3줄) → Execute → Verify(테스트/빌드) → PASS: 완료
-                                  └ FAIL: Diagnose → Repair → Verify
-             ↓ 막히면 pro + think-high로 승격(최대 2회 루프)
-(이미지가 있으면 Developer가 vision 모델로 실행 — 별도 Vision 에이전트 없음, role은 developer)
+Triage
+ ├─ CHAT → Chat (Flash)
+ └─ AGENT → Developer (Flash + thinking)
+              ↻ Plan → Execute → Self-verify / Repair
+              ↓ 막히면 Pro + stronger thinking
+              ↓
+         Strict Verification Gate
+           ├─ PASS → completed
+           └─ FAIL → repair 1회 → 재검증
+                         ├─ PASS → completed
+                         └─ FAIL → verification_failed
 ```
 
-Developer는 execute→verify→repair를 **같은 컨텍스트에서** 돈다. 역할 전환에 따른 컨텍스트
-재전송·별도 LLM 호출이 사라져 토큰·시간·API 호출이 준다. 무한 수정은
-`DEVELOPER_MAX_STEPS`(45) + 반복 도구 호출 차단 + 승격 1회 상한으로 막는다.
+핵심은 두 층을 구분하는 것이다.
 
-외부(MCP 호출부)가 계획을 제공하면 그 계획을 Developer 컨텍스트에 실어 그대로 따른다
-(별도 Planner 없음).
+1. **Model loop**: Developer가 설계·구현·자체수정을 수행한다.
+2. **Process gate**: 모델과 독립된 test/build 실행이 최종 완료 여부를 판정한다.
+
+모델이 "완료했다"고 말해도 verification gate가 실패하면 완료가 아니다.
+
+## 왜 올인원 Developer인가
+
+Planner/Reviewer/Debugger를 별도 agent로 기본 호출하면 각 역할이 컨텍스트를 다시 읽어 비용과 지연이 증가한다. 현재는 한 Developer가 동일 컨텍스트에서 작업하고, 품질 authority는 별도 LLM Reviewer가 아니라 deterministic verification에 둔다.
+
+따라서 **agent 수 감소는 비용 최적화**, **verification gate는 품질 보증**이라는 서로 다른 목적을 가진다.
 
 ## Model Policy
 
-| Role | 기본 | Thinking | 승격 |
-|---|---|---|---|
-| Triage | `deepseek-v4-flash` | off / low | 없음 (chat vs code 라우터) |
-| Chat | `deepseek-v4-flash` | off / low | 없음 (단순 대화 최저가) |
-| **Developer** | `deepseek-v4-flash` | **on / medium** | 막힘 시 pro + think-high로 승격(최대 2회 루프, Jr→Sr) |
-| Vision | `deepseek-v4-flash-vision-exp` | off / low | 없음(이미지 전처리) |
+| 역할 | 기본 정책 |
+|---|---|
+| Triage | Flash, 경량 분류 |
+| Chat | Flash, non-thinking |
+| Developer | Flash + thinking, 막힘 시 Pro escalation |
+| Vision | 필요 시 vision model |
 
-핵심 전략(DeepSeek 권고): 무조건 pro를 쓰지 않는다. **기본 flash+think-medium으로 대부분을
-한 번에 완성**하고, 실패할 때만 pro+think-high로 승격한다. 90% 비용을 아끼며 품질을 확보한다.
-`FORGE_DEVELOPER_PRO=1`이면 항상 pro(실험용). 단순 대화는 최저가 flash Chat으로 빠지고, Developer는 코드 작업에만 flash+think를 쓴다.
+Flash가 기본인 이유는 "싸기 때문"만이 아니다. 실패를 검출하고 수리하거나 강한 모델로 승격할 수 있는 Harness가 있기 때문에 낮은 모델 비용과 높은 완료 신뢰성을 함께 노릴 수 있다.
 
-## 완료 판정
+## Verification
 
-Developer가 스스로 검증(테스트/빌드 실행)해 통과하면 완료한다. 세션 `final_status ==
-"completed"`가 성공의 authoritative 정의다(telemetry 집계 기준).
+현재 Runtime은 workspace에서 감지한 npm build/pytest를 실제 실행한다.
 
-## Telemetry
+- PASS: `completed`
+- FAIL: Developer에 실제 오류를 되먹여 bounded repair
+- 재실패: `verification_failed`
+- 검증 실패 경로는 commit/push 금지
 
-- `pro_escalation_rate` = Sr(pro) 승격이 일어난 세션 비율 = Developer가 flash로 자주 막히는지.
-- `review_first_pass_rate` = 승격 없이 완료한 비율 = Developer 첫 패스 성공률.
-- role·model·tokens·model_calls·tool_calls·retries·elapsed는 `agent_runs`에 그대로 기록.
+향후 `검증 성공`, `실패`, `검증 불가`를 엄밀히 분리한다.
 
-## MCP External Planner
+## Durable Resume
 
-향후 상위 모델(GPT/Claude)이 계획을 담당하고 FORGE는 실행만 하는 구조:
+Agent step마다 history를 저장한다. 서버가 재시작되면 unfinished run을 찾아 저장된 history로 headless resume한다.
+
+재시작은 품질 gate를 우회하지 않는다. resume된 run도 최종 verification을 통과해야 완료된다.
+
+## Telemetry / Evaluation
+
+최적화 판단 순서:
 
 ```text
-External Planner (GPT / Claude)  ← 무제한 chat, 추론 비용 사실상 0
-        ↓ TaskSpec(goal, plan, constraints, acceptance_criteria)
-Forge Developer
-        ↓ Execute → Verify → Repair
+success_rate
+→ verified completion
+→ cost_per_success
+→ elapsed
+→ human intervention
 ```
 
-`forge_execute(goal, workspace, plan)` — plan을 주면 Developer가 그 계획대로 실행한다.
+R0 benchmark는 deterministic checker로 결과물을 판정한다. 비용이 낮아져도 success_rate가 후퇴하면 정책 변경을 채택하지 않는다.
+
+## Bounded RSI
+
+FORGE는 자기 repository를 수정하고 benchmark 결과를 비교할 수 있다. `backend/rsi.py`에는 promotion gate가 있다.
+
+하지만 candidate worktree 실행/merge는 아직 자동 폐루프가 아니며 최종 승인은 사람에게 둔다. 현재 목표는 무제한 자기수정이 아니라 **측정 가능한 bounded self-improvement**다.
