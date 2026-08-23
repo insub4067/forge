@@ -113,6 +113,7 @@ const tasks = ref([])
 // 칸반 카드 상태 변경을 채팅에 알리기 위한 직전 상태 스냅샷(title→status).
 const showKanban = ref(false)
 const showWorkspacePicker = ref(false)
+const showHidden = ref(false)  // 리팩토링 중 선언이 유실돼 워크스페이스 피커가 빈 목록이었다(복구)
 const fsPath = ref('')
 const fsParent = ref(null)
 const fsEntries = ref([])
@@ -452,23 +453,42 @@ async function loadMessages(isNew = false) {
   }
 }
 
-// 방 모드 전환 — work(작업: 검증·커밋) / chat(대화: 읽기전용). triage 자동 분류를 대체한다.
-// work는 워크스페이스가 있어야 해서, 없으면 백엔드가 거부하고 안내한다.
-async function setRoomMode(mode) {
+// 방 모드 — work(작업: 검증·커밋) / chat(대화: 읽기전용). triage 자동 분류를 대체한다.
+function roomModeLabel() {
+  return currentRoom()?.mode === 'chat' ? '채팅' : '작업'
+}
+
+// 타이틀 탭 → 방 설정 시트(이름·모드 변경). 방이 없으면 방 목록을 연다.
+const showRoomSettings = ref(false)
+const roomSettingsTitle = ref('')
+const roomSettingsMode = ref('work')
+function openRoomSettings() {
+  const r = currentRoom()
+  if (!r) { showRooms.value = true; return }
+  roomSettingsTitle.value = r.title || ''
+  roomSettingsMode.value = r.mode === 'chat' ? 'chat' : 'work'
+  showRoomSettings.value = true
+}
+async function saveRoomSettings() {
   const id = currentRoomId.value
   if (!id) return
+  // work는 워크스페이스가 있어야 해서, 없으면 백엔드가 거부하고 안내한다.
+  const body = { mode: roomSettingsMode.value }
+  const t = roomSettingsTitle.value.trim()
+  if (t) body.title = t
   try {
     const res = await fetch(`/api/rooms/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode }),
+      body: JSON.stringify(body),
     })
     const data = await res.json().catch(() => ({}))
     if (data && data.ok === false) {
-      alert(data.error || '모드 변경에 실패했습니다.')
+      alert(data.error || '저장에 실패했습니다.')
       return
     }
     await loadRooms()
+    showRoomSettings.value = false
   } catch {}
 }
 
@@ -566,7 +586,7 @@ async function loadTasks() {
 }
 
 async function createRoom() {
-  const name = newRoomName.value.trim() || 'Forge'
+  const name = newRoomName.value.trim() || 'New Session'
   // 워크스페이스는 필수 — 미선택 시 홈으로 잘못 잡혀 git·skills가 깨진다.
   if (!newRoomPath.value.trim()) {
     alert('워크스페이스 폴더를 선택하세요.')
@@ -666,7 +686,7 @@ async function pickCurrentPath() {
   } else {
     newRoomPath.value = fsPath.value
     const parts = fsPath.value.split('/').filter(Boolean)
-    newRoomName.value = parts[parts.length - 1] || 'Forge'
+    newRoomName.value = parts[parts.length - 1] || 'New Session'
   }
   showWorkspacePicker.value = false
 }
@@ -677,7 +697,7 @@ async function ensureRoom(text) {
     const res = await fetch('/api/rooms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Forge', workspace_path: '' }),
+      body: JSON.stringify({ name: 'New Session', workspace_path: '' }),
     })
     if (res.ok) {
       const room = await res.json()
@@ -1285,20 +1305,17 @@ document.addEventListener('visibilitychange', () => {
       <button v-if="!(isWide && pinnedSidebar)" class="icon-btn" @click="isWide ? togglePin() : (showRooms = true)" aria-label="세션 목록">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
-      <button class="room-btn" @click="showRooms = true">
+      <button class="room-btn" @click="openRoomSettings()">
         <span class="room-title-main">
           <span class="status-dot" :class="busy ? 'working' : 'idle'"></span>
           {{ currentRoom()?.title || 'FORGE' }}
+          <span class="room-mode-badge" :class="{ chat: currentRoom()?.mode === 'chat' }">{{ roomModeLabel() }}</span>
         </span>
         <span class="room-sub">
           <span v-if="busy || sessionRunning" class="status-live">실행 중</span><template v-if="busy || sessionRunning"> · </template>{{ shortPath(currentRoom()?.workspace_path) || 'Mobile Coding Agent' }}
         </span>
       </button>
       <div class="header-right">
-        <div class="mode-seg" role="group" aria-label="방 모드">
-          <button :class="{ on: (currentRoom()?.mode || 'work') !== 'chat' }" @click="setRoomMode('work')">작업</button>
-          <button :class="{ on: currentRoom()?.mode === 'chat' }" @click="setRoomMode('chat')">채팅</button>
-        </div>
         <button class="todo-btn" @click="showMenu = !showMenu" aria-label="메뉴">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
         </button>
@@ -1634,9 +1651,9 @@ document.addEventListener('visibilitychange', () => {
     <div v-if="showCreateRoom" class="modal-overlay" @click="showCreateRoom = false">
       <div class="modal" @click.stop>
         <div class="modal-head">새 세션</div>
-        <input v-model="newRoomName" class="modal-field" placeholder="세션 이름 (기본: Forge)" />
+        <input v-model="newRoomName" class="modal-field" placeholder="세션 이름 (기본: New Session)" />
         <button type="button" class="modal-field ws-btn" @click="openWorkspacePicker(null)">
-          {{ newRoomPath || '워크스페이스 폴더 선택 (선택 사항)' }}
+          {{ newRoomPath || '워크스페이스 선택(필수)' }}
         </button>
         <div class="modal-actions">
           <button class="no" @click="showCreateRoom = false">취소</button>
@@ -1706,6 +1723,19 @@ document.addEventListener('visibilitychange', () => {
       @toggle-hidden="showHidden = !showHidden"
       @image-click="openViewer($event)"
     />
+
+    <div v-if="showRoomSettings" class="sheet-overlay" @click="showRoomSettings = false">
+      <div class="sheet" @click.stop>
+        <div class="sheet-head">방 설정</div>
+        <input v-model="roomSettingsTitle" class="modal-field" placeholder="방 이름" />
+        <div class="mode-seg big" role="group" aria-label="방 모드">
+          <button :class="{ on: roomSettingsMode !== 'chat' }" @click="roomSettingsMode = 'work'">작업</button>
+          <button :class="{ on: roomSettingsMode === 'chat' }" @click="roomSettingsMode = 'chat'">채팅</button>
+        </div>
+        <p class="sheet-note">작업: 코드를 고치고 검증·커밋 · 채팅: 읽기전용 대화</p>
+        <button class="sheet-save" @click="saveRoomSettings">저장</button>
+      </div>
+    </div>
 
     <div v-if="showWorkspacePicker" class="fs-overlay">
       <div class="fs-head">

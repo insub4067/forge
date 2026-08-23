@@ -3572,3 +3572,32 @@ button {
   background: var(--accent-soft);
   color: var(--accent);
 }
+
+/* 헤더 타이틀 옆 모드 배지 — 작업/채팅 */
+.room-mode-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--accent-soft);
+  color: var(--accent);
+  vertical-align: middle;
+}
+.room-mode-badge.chat { background: var(--panel-2); color: var(--muted); }
+
+/* 방 설정 시트의 모드 세그먼트(큰 버전) + 저장 */
+.mode-seg.big { display: flex; width: 100%; margin: 10px 0 8px; }
+.mode-seg.big button { flex: 1; padding: 11px 0; font-size: 15px; }
+.sheet-note { font-size: 12px; color: var(--muted); margin: 0 2px 12px; }
+.sheet-save {
+  width: 100%;
+  padding: 13px 0;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+}
