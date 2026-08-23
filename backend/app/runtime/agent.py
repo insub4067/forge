@@ -1331,8 +1331,54 @@ class AgentRuntime:
                     any_passed = True
                 elif isinstance(rc, int) and rc > 0:
                     return "failed", f"[{label}] 빌드 실패 (exit {rc}):\n{out[-1500:]}"
-        return ("passed", "검증 통과: " + ", ".join(c[0] for c in checks)) if any_passed \
+        # self-repo 런타임 스모크 — build는 통과하지만 런타임에 앱이 깨지는 것을 잡는다
+        # (undefined ref로 크래시·핵심 UI 미렌더 등). build만으로는 못 잡던 사각.
+        labels = [c[0] for c in checks]
+        smoke_state, smoke_report = await self._runtime_smoke(ws, send)
+        if smoke_state == "failed":
+            return "failed", smoke_report
+        if smoke_state == "passed":
+            any_passed = True
+            labels.append("runtime smoke")
+        return ("passed", "검증 통과: " + ", ".join(labels)) if any_passed \
             else ("unavailable", "검증 실행 불가(모든 check가 unavailable)")
+
+    async def _runtime_smoke(self, ws: str, send: EventSink) -> tuple[str, str]:
+        """self-repo(FORGE 자신)일 때만: 빌드된 앱을 headless로 로드해 런타임 검증한다.
+        반환 (state, report). failed=런타임 크래시/핵심 미렌더, unavailable=대상 아님/실행 불가.
+        console.error는 SW·PWA 잡음이 많아 무시하고, uncaught 예외(pageerror)와 핵심 셀렉터
+        렌더만 본다(false positive 억제). 8790에 앱이 떠 있어야 하며, StaticFiles라 방금 빌드된
+        dist가 재시작 없이 서빙된다."""
+        import os as _os
+        if _os.path.realpath(ws) != _os.path.realpath(str(_REPO_ROOT)):
+            return "unavailable", ""
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            return "unavailable", "playwright 미설치"
+        try:
+            errors: list[str] = []
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                try:
+                    await page.goto("http://127.0.0.1:8790",
+                                    wait_until="networkidle", timeout=20000)
+                    header = await page.locator("header").count()
+                    composer = await page.locator(".composer-input").count()
+                finally:
+                    await browser.close()
+            if errors:
+                return "failed", "런타임 스모크 실패 — 앱에서 uncaught 예외:\n" + "\n".join(errors[:8])
+            if not header or not composer:
+                return "failed", ("런타임 스모크 실패 — 핵심 UI 미렌더 "
+                                  f"(header={header}, composer={composer})")
+            await send("verify_start", {"checks": ["runtime smoke"]})
+            return "passed", "런타임 스모크 통과(로드·핵심 렌더·uncaught 예외 0)"
+        except Exception as err:
+            # 8790 미기동·타임아웃 등은 검증 불가로 처리(거짓 failed 방지).
+            return "unavailable", f"런타임 스모크 실행 불가: {err}"
 
     async def run(
         self,

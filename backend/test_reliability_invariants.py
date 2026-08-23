@@ -163,6 +163,13 @@ async def main():
     assert len(A._plan_to_tasks("\n".join(f"{i}. 단계{i}" for i in range(20)))) == 8  # 상위 8개 상한
     print("칸반 강제: planner 계획 번호목록 → 태스크(완료조건 제외·상한8): OK")
 
+    # ── 런타임 스모크 invariant: 비 self-repo는 unavailable(타 프로젝트 빌드를 FORGE 앱으로 오검증 안 함) ──
+    async def _noop_send(t, d=None):
+        return None
+    ss, _ = await A.AgentRuntime()._runtime_smoke("/tmp", _noop_send)
+    assert ss == "unavailable", ss
+    print("런타임 스모크 invariant: 비 self-repo는 unavailable: OK")
+
     # ── compaction 분할 invariant: user 1개 + 이후 전부 tool 호출인 run도 경계를 찾는다 ──
     # (tool_calls 없는 assistant만 경계로 허용해 developer run에서 compaction이 영영 안 돌던 버그.)
     dev_msgs = [{"role": "user", "content": "작업"}]
