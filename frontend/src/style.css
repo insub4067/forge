@@ -3462,3 +3462,20 @@ button {
 .refine-btns .ok { background: #34d399; color: #06231a; }
 .refine-btns .no { background: var(--panel); color: var(--text); }
 .refine-status { flex: 1; font-size: 12px; color: var(--muted); }
+
+/* 워크스페이스 피커 검색 — 지금 보는 폴더 안에서만 거른다. */
+.fs-search {
+  width: 100%;
+  padding: 11px 16px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+}
+.fs-empty {
+  padding: 16px;
+  color: var(--muted);
+  font-size: 14px;
+}

@@ -1453,7 +1453,15 @@ async function openWorkspacePicker(roomId) {
   await navigateFs(initial || '')
 }
 
+// 피커 검색 — 지금 보는 폴더 안에서 이름으로 거른다(디스크 전체 탐색 아님).
+const fsFilter = ref('')
+const fsVisible = computed(() => {
+  const q = fsFilter.value.trim().toLowerCase()
+  return q ? fsEntries.value.filter((e) => e.name.toLowerCase().includes(q)) : fsEntries.value
+})
+
 async function navigateFs(path) {
+  fsFilter.value = ''
   try {
     const res = await fetch(
       `/api/fs/list?path=${encodeURIComponent(path || '')}&show_hidden=${showHidden.value}`
@@ -3146,10 +3154,12 @@ document.addEventListener('visibilitychange', () => {
         </button>
         <button class="fs-done" @click="pickCurrentPath">선택</button>
       </div>
+        <input v-model="fsFilter" class="fs-search" type="search" placeholder="이 폴더에서 이름 검색" />
         <div class="fs-list">
-          <button v-if="fsParent" class="fs-item parent" @click="navigateFs(fsParent)">.. 상위 폴더</button>
+          <button v-if="fsParent && !fsFilter" class="fs-item parent" @click="navigateFs(fsParent)">.. 상위 폴더</button>
+          <div v-if="fsFilter && !fsVisible.length" class="fs-empty">일치하는 항목 없음</div>
           <button
-            v-for="e in fsEntries"
+            v-for="e in fsVisible"
             :key="e.path"
             class="fs-item"
             :class="e.is_dir ? 'dir' : 'file'"
