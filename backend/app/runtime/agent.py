@@ -61,9 +61,12 @@ _STATUS_CODES = {
 
 EventSink = Callable[[dict[str, Any]], Awaitable[None]]
 
-AGENTS_DIR = Path(__file__).resolve().parent.parent.parent / "docs" / "agents"
-GLOBAL_MEMORY_PATH = Path(__file__).resolve().parent.parent.parent / "GLOBAL_MEMORY.md"
-UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
+# repo 루트 = agent.py(backend/app/runtime) 기준 parents[3]. docs·GLOBAL_MEMORY는 루트에 있다.
+# (예전 parent×3은 backend를 가리켜 role 프롬프트·글로벌 메모리가 로드된 적이 없었다.)
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+AGENTS_DIR = _REPO_ROOT / "docs" / "agents"
+GLOBAL_MEMORY_PATH = _REPO_ROOT / "GLOBAL_MEMORY.md"
+UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"  # backend/app/uploads(정상)
 
 
 def _has_image(msg: dict) -> bool:
