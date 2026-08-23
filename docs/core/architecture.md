@@ -46,7 +46,7 @@ Developer (flash + thinking medium)
 Developer 승격 1회 (pro + thinking high, Sr)
 ```
 
-역할은 Developer/Vision/Chat 3개. 별도 Planner/Reviewer/Debugger는 없다 — 에이전트마다
+역할은 Developer/Chat 2개(+Triage 라우터). 이미지는 별도 Vision 에이전트 없이 Developer가 vision 모델로 직접 처리한다. 별도 Planner/Reviewer/Debugger는 없다 — 에이전트마다
 컨텍스트를 다시 읽는 input token 비용을 없애기 위해 한 Developer가 끝까지 책임진다.
 세션 final_status가 성공 판정의 authority다. Sr 승격은 실패 시 1회로 제한한다.
 

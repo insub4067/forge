@@ -18,7 +18,7 @@ Triage (flash, 최저가 라우터: chat vs code)
              ↻ Plan(3줄) → Execute → Verify(테스트/빌드) → PASS: 완료
                                   └ FAIL: Diagnose → Repair → Verify
              ↓ 막히면 pro + think-high로 승격(최대 2회 루프)
-(이미지가 있으면 Vision이 먼저 분석해 텍스트로 전달)
+(이미지가 있으면 Developer가 vision 모델로 실행 — 별도 Vision 에이전트 없음, role은 developer)
 ```
 
 Developer는 execute→verify→repair를 **같은 컨텍스트에서** 돈다. 역할 전환에 따른 컨텍스트

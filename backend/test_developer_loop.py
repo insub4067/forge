@@ -14,7 +14,7 @@ def make_runtime(role_status="done", route_kind="code"):
 
     async def fake_run_role(role, all_messages, send, session_id, ws, state,
                             recent_calls, step_base, room_memory="", retry_count=0,
-                            tools=None, skills="", complexity="normal", escalate=False):
+                            tools=None, skills="", complexity="normal", escalate=False, has_image=False):
         calls.append((role, escalate))
         st = role_status(role, len(calls), escalate) if callable(role_status) else role_status
         return st, 0, 0, {"model": "m", "thinking": False, "reasoning_effort": ""}

@@ -632,56 +632,6 @@ class AgentRuntime:
         route = "chat" if "CHAT" in "".join(parts).upper() else "code"
         return route, pt, ct
 
-    async def _run_vision(
-        self,
-        user_msg: dict,
-        send: Callable[[str, dict], Awaitable[None]],
-        session_id: str,
-    ) -> str:
-        route = self.router.select_model("vision")
-        await send("role_start", {"role": "vision", "model": route["model"]})
-
-        content = user_msg.get("content", "")
-        if isinstance(content, list):
-            content = [_to_data_uri_item(c) for c in content]
-
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "당신은 FORGE Vision 에이전트입니다. 제공된 이미지를 분석하고, "
-                    "레이아웃·정렬·간격·색상 대비·다크모드·반응형·오류 화면 등 발견한 사항을 "
-                    "한국어로 상세히 설명합니다. 이모지와 이미지는 사용하지 않습니다."
-                ),
-            },
-            {"role": "user", "content": content},
-        ]
-
-        parts: list[str] = []
-        total_prompt = 0
-        total_completion = 0
-        async for delta in self._adapter_for(route["model"]).stream_chat(messages):
-            if delta.get("content"):
-                parts.append(delta["content"])
-                await send("text_delta", {"content": delta["content"]})
-            if delta.get("usage"):
-                total_prompt += delta["usage"].get("prompt_tokens", 0)
-                total_completion += delta["usage"].get("completion_tokens", 0)
-
-        analysis = "".join(parts)
-        if session_id:
-            await store.save_agent_run(
-                session_id,
-                "vision",
-                route["model"],
-                total_prompt,
-                total_completion,
-                route.get("thinking", False),
-                route.get("reasoning_effort", ""),
-            )
-            await store.save_vision_analysis(session_id, "", analysis)
-        return analysis
-
     async def _run_role(
         self,
         role: str,
@@ -698,8 +648,10 @@ class AgentRuntime:
         skills: str = "",
         complexity: str = "normal",
         escalate: bool = False,
+        has_image: bool = False,
     ) -> tuple:
-        route = self.router.select_model(role, retry_count, complexity, escalate=escalate)
+        route = self.router.select_model(role, retry_count, complexity, escalate=escalate,
+                                         has_image=has_image)
         tool_schemas = tools if tools is not None else TOOL_SCHEMAS
         await send("role_start", {
             "role": role, "model": route["model"], "thinking": route["thinking"],
@@ -739,9 +691,20 @@ class AgentRuntime:
             usage: dict[str, int] = {}
             last_emit = 0.0
 
-            # non-vision role에는 이미지를 보내지 않는다(모델이 image 미지원 → 400).
-            # 이미지는 Vision이 이미 분석해 텍스트로 대화에 포함됐고, 원본은 히스토리에만 남긴다.
-            call_messages = [system_msg, *self._strip_images(self._project(all_messages, session_id))]
+            # vision 모델(이미지 작업)이면 원본 이미지를 data URI로 실어 보낸다(/uploads 경로는
+            # 모델이 못 읽음). non-vision 모델에는 이미지를 보내지 않는다(모델이 image 미지원 → 400).
+            projected = self._project(all_messages, session_id)
+            if has_image:
+                call_messages = [
+                    system_msg,
+                    *[
+                        {**m, "content": [_to_data_uri_item(c) for c in m["content"]]}
+                        if isinstance(m.get("content"), list) else m
+                        for m in projected
+                    ],
+                ]
+            else:
+                call_messages = [system_msg, *self._strip_images(projected)]
             # reasoning_content 400을 겪은 세션은 이후 내내 reasoning을 벗기고 thinking도 끈다.
             # (thinking을 켜둔 채 보내면 매 콜마다 400→재시도가 반복돼 낭비 — recovery의 성공
             #  상태와 동일하게 처음부터 thinking을 꺼서 그 재시도 사이클을 없앤다.)
@@ -1001,11 +964,9 @@ class AgentRuntime:
         skill_count = len(skill_names)
         skill_csv = ", ".join(skill_names)
 
-        # 이미지가 포함된 요청이면 Vision 에이전트로 먼저 분석
-        last_user = history[-1] if history and history[-1].get("role") == "user" else None
-        if last_user and _has_image(last_user):
-            analysis = await self._run_vision(last_user, send, session_id)
-            all_messages.append({"role": "user", "content": "[이미지 분석 결과]\n" + analysis})
+        # 이미지가 포함된 요청이면 Developer를 vision 모델로 실행한다(별도 Vision 호출 없이 —
+        # Developer가 이미지를 직접 받아 분석·구현). role은 developer로 기록, 모델만 vision.
+        has_image = any(_has_image(m) for m in history if m.get("role") == "user")
 
         step_base = 0
 
@@ -1061,7 +1022,7 @@ class AgentRuntime:
         always_pro = tier == "pro" or settings.developer_pro
         status, p, c, route = await self._run_role(
             "developer", all_messages, send, session_id, ws, state, recent_calls,
-            step_base, room_memory, skills=skills, escalate=always_pro,
+            step_base, room_memory, skills=skills, escalate=always_pro, has_image=has_image,
         )
         await record("developer", p, c, route)
 
@@ -1074,7 +1035,7 @@ class AgentRuntime:
             step_base += DEVELOPER_MAX_STEPS
             status, p, c, route = await self._run_role(
                 "developer", all_messages, send, session_id, ws, state, recent_calls,
-                step_base, room_memory, skills=skills, escalate=True,
+                step_base, room_memory, skills=skills, escalate=True, has_image=has_image,
             )
             await record("developer", p, c, route)
 

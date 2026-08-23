@@ -36,8 +36,16 @@ class ModelRouter:
         self.utility_model = self.triage_model
 
     def select_model(self, agent_type: str, retry_count: int = 0,
-                     complexity: str = "normal", escalate: bool = False) -> dict:
+                     complexity: str = "normal", escalate: bool = False,
+                     has_image: bool = False) -> dict:
         base = dict(self._policy.get(agent_type, self._policy["developer"]))
+
+        # Developer + 이미지: 텍스트 모델(flash/pro)은 이미지를 못 받으므로(400) vision 모델로 실행.
+        # 승격 시에도 이미지를 잃는 text-pro로 넘기지 않는다 — vision 계열 pro 모델이 없어
+        # 같은 vision 모델로 재시도한다(무한 루프·비용 폭주는 상한 루프가 막는다).
+        if agent_type == "developer" and has_image:
+            base.update(dict(self._policy["vision"]))
+            return base
 
         # Developer 승격: 실패 재시도(escalate) 또는 항상-pro 옵션일 때 pro+think-high.
         if agent_type == "developer" and (escalate or settings.developer_pro):
