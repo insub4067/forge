@@ -22,7 +22,7 @@ async def main():
         assert banned not in names, f"저수준 도구 노출됨: {banned}"
 
     # 4) tools/call forge_execute (facade 목킹 — LLM 실행 안 함)
-    async def fake_execute(goal, workspace, auto_approve=False, plan=""):
+    async def fake_execute(goal, workspace, auto_approve=False, plan="", images=None):
         assert goal and workspace
         return "task_abc"
     with mock.patch.object(server.task_facade, "execute", fake_execute):
@@ -32,6 +32,17 @@ async def main():
     payload = json.loads(r["result"]["content"][0]["text"])
     assert payload["task_id"] == "task_abc" and payload["status"] == "running", r
     assert r["result"]["isError"] is False
+
+    # 4b) images 전달 → facade가 images를 그대로 받음
+    async def fake_execute_img(goal, workspace, auto_approve=False, plan="", images=None):
+        assert images == ["/tmp/shot.png"], images
+        return "task_img"
+    with mock.patch.object(server.task_facade, "execute", fake_execute_img):
+        r = await server.handle({"jsonrpc": "2.0", "id": 8, "method": "tools/call",
+                                 "params": {"name": "forge_execute",
+                                            "arguments": {"goal": "스크린샷 보고 고쳐", "workspace": "/tmp/x",
+                                                          "images": ["/tmp/shot.png"]}}})
+    assert json.loads(r["result"]["content"][0]["text"])["task_id"] == "task_img", r
 
     # 5) 필수 인자 누락 → isError
     r = await server.handle({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
