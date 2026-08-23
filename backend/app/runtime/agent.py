@@ -17,6 +17,8 @@ from .. import errors as error_log
 from .. import eventlog
 from .. import skills as skills_lib
 from ..db import store
+from .. import metrics as metrics_calc
+from . import refine
 from ..llm.factory import create_adapter
 from ..orchestrator.model_router import ModelRouter
 from ..tools.registry import APPROVAL_REQUIRED, CHAT_TOOLS, TOOL_SCHEMAS, execute_tool
@@ -1119,6 +1121,58 @@ class AgentRuntime:
         except Exception as err:
             error_log.record("autocommit", str(err), "")
 
+    async def _reflect(self, session_id: str, ws: str, status: str, send: EventSink) -> None:
+        """run이 끝나면 실행 근거를 모아 개선 후보(RefinementCandidate)를 만든다.
+
+        여기서 **아무것도 적용하지 않는다** — 후보를 저장하고 사용자에게 보여줄 뿐이다.
+        근거는 eventlog의 결정적 사실(검증 실패 리포트)뿐이고, 서로 다른 run에서
+        같은 실패가 반복될 때만 후보가 된다(1회 관측으로 학습 금지).
+        학습은 실행 신뢰성보다 우선순위가 낮다 — 여기서 나는 예외가 run을 깨지 않는다.
+        """
+        if not session_id:
+            return
+        try:
+            events = eventlog.tail(session_id, limit=600)
+            failures = refine.scan_failures(events)
+            # 이번 run은 아직 done을 보내기 전이다 → 지금까지의 done 수가 이번 run 번호.
+            current = f"{session_id}#{sum(1 for e in events if e.get('type') == 'done')}"
+            mine = [f for f in failures if f["run"] == current]
+            if not mine:
+                return
+            runs = await store.session_agent_runs(session_id)
+            cost, _priced, _total = metrics_calc.sum_cost(runs)
+            evidence = {
+                "final_status": status,
+                # 검증이 한 번 실패한 뒤 완료됐다면 수리(repair)가 실제로 동작한 것.
+                "repair_used": status in ("completed", "completed_unverified"),
+                "succeeded": status == "completed",
+                "session_cost_usd": cost,
+                "verify_failures_this_run": len(mine),
+            }
+            target = refine.target_for(mine[-1]["report"])
+            before = ""
+            skill_path = Path(ws) / ".forge" / "skills" / f"{target}.md"
+            if skill_path.is_file():
+                before = skill_path.read_text(encoding="utf-8")
+            candidate = refine.propose(current, failures, before=before, evidence=evidence)
+            if not candidate:
+                return
+            saved = await store.save_refinement(session_id, candidate)
+            if not saved:  # 같은 실패 패턴의 후보가 이미 있다(중복 제안 금지).
+                return
+            await send("refinement_candidate", {
+                "id": saved["id"],
+                "type": saved["type"],
+                "scope": saved["scope"],
+                "target": saved["target"],
+                "failure_pattern": saved["failure_pattern"],
+                "expected_effect": saved["expected_effect"],
+                "evidence_runs": saved["evidence_runs"],
+                "evidence": saved["evidence"],
+            })
+        except Exception as err:  # 학습 실패가 run 결과를 바꾸면 안 된다.
+            error_log.record("reflect", str(err))
+
     async def _verify(self, ws: str, send: EventSink) -> tuple[str, str]:
         """3상태 검증 — 프로세스가 test/build를 직접 실행. 반환 (state, report),
         state ∈ {"passed","failed","unavailable"}.
@@ -1280,6 +1334,8 @@ class AgentRuntime:
             # done 이벤트를 보내면서 세션 final_status를 영속화(성공 정의·집계 기준).
             if session_id:
                 await store.set_session_final_status(session_id, status)
+            # 학습 후보 수집(적용 없음) — done보다 먼저 보내 같은 스트림에 실린다.
+            await self._reflect(session_id, ws, status, send)
             data = {"status": status}
             if content:
                 data["content"] = content

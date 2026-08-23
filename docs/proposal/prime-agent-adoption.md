@@ -627,3 +627,38 @@ FORGE는 여기에 더 강한 Verification/Repair/Recovery 경계를 결합한�
 > **Efficient Model + Continually Improving Harness + Deterministic Verification + Repair/Recovery = Reliable Autonomous Development**
 
 이 조합을 FORGE의 장기 경쟁력으로 삼는다.
+
+---
+
+# 구현 상태 — A의 P0 커널 (2026-08-23)
+
+**구현됨(적용은 아직 없음).** 실행 경험을 evidence로 모아 개선 후보를 만들고 보여주는 뼈대까지다.
+승인해도 파일은 바뀌지 않는다 — 실제 적용(applier)은 다음 단계다.
+
+```text
+run 종료(finish)
+ ↓ _reflect  (backend/app/runtime/agent.py)
+eventlog의 verify_failed → 실패 서명 정규화 (refine.failure_signature)
+ ↓ 서로 다른 run 2회 이상 반복?  (refine.MIN_EVIDENCE_RUNS)
+RefinementCandidate 저장 (refinements 테이블, before/after 포함)
+ ↓ refinement_candidate 이벤트
+UI 카드 → [승인] [무시] → [되돌리기]
+```
+
+- **근거**: `evidence_runs`(반복된 run 목록) + `evidence`(final_status·repair_used·succeeded·session_cost_usd).
+  전역 `cost_per_success`는 기존 `/api/metrics/summary`가 이미 제공한다(중복 계산 안 함).
+- **1회 학습 금지**: 서로 다른 run에서 같은 서명이 2회 이상 관측돼야 후보가 된다. 한 run 안의
+  최초 실패 + 수리 후 실패는 1회로 센다(done 이벤트로 run을 나눈다).
+- **scope**: 항상 `project`. Learned/Global 자동 승격 없음(전역 오염 방지).
+- **Base Prompt 불변**: 후보 대상은 Project Skill 파일뿐. 프롬프트 자기수정 경로 없음.
+- **rollback**: `before_text`/`after_text`를 함께 저장하고, 결정은 `pending↔approved|ignored`로 되돌린다.
+- **중복 제안 금지**: 같은 `failure_pattern`의 후보는 한 번만 만든다(무시한 후보를 되살리지 않는다).
+- **LLM 없음**: 후보 생성은 전부 결정적 규칙이다. LLM-as-judge 게이트 없음.
+
+관련 파일: `backend/app/runtime/refine.py`(순수 로직) · `agent.py::_reflect` ·
+`app/db/models.py::Refinement` · `store.save_refinement/list_refinements/decide_refinement` ·
+`GET /api/rooms/{id}/refinements` · `POST /api/refinements/{id}/decide` ·
+테스트 `backend/test_refinement.py`.
+
+다음(미구현): 승인된 후보를 실제 skill 파일로 적용하는 applier + 적용 전후 벤치 비교,
+supplement 타입(`type="supplement"`) 후보 생성.

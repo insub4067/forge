@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, select
 
-from .models import AgentRun, Checkpoint, Message, PushDevice, ScheduledJob, Session, Task, VisionAnalysis
+from .models import (AgentRun, Checkpoint, Message, PushDevice, Refinement, ScheduledJob,
+                     Session, Task, VisionAnalysis)
 from .session import async_session
 
 
@@ -702,3 +703,88 @@ async def due_jobs(now_utc) -> list[dict]:
             )
         )
         return [_job_dict(j) for j in result.scalars()]
+
+
+# ── Refinement(개선 후보) — 근거 축적·승인·rollback. 승인해도 자동 적용은 하지 않는다. ──
+
+_DECISIONS = {"approve": "approved", "ignore": "ignored", "rollback": "pending"}
+
+
+def _refinement_dict(r: Refinement) -> dict:
+    return {
+        "id": r.id,
+        "session_id": r.session_id,
+        "type": r.type,
+        "scope": r.scope,
+        "target": r.target,
+        "proposed_change": r.proposed_change,
+        "before_text": r.before_text,
+        "after_text": r.after_text,
+        "evidence_runs": json.loads(r.evidence_runs or "[]"),
+        "evidence": json.loads(r.evidence_json or "{}"),
+        "failure_pattern": r.failure_pattern,
+        "expected_effect": r.expected_effect,
+        "status": r.status,
+        "created_at": r.created_at.isoformat() if r.created_at else "",
+        "decided_at": r.decided_at.isoformat() if r.decided_at else "",
+    }
+
+
+async def save_refinement(session_id: str, candidate: dict) -> dict | None:
+    """후보 1건 저장. 같은 failure_pattern이 이미 있으면 저장하지 않는다(None).
+
+    같은 실패가 반복될 때마다 같은 후보를 다시 띄우면 알림 소음이 된다.
+    사용자가 무시한 후보를 되살리지도 않는다(무시는 결정이다).
+    """
+    pattern = candidate.get("failure_pattern", "")
+    async with async_session() as s:
+        if pattern:
+            dup = (await s.execute(
+                select(Refinement).where(Refinement.failure_pattern == pattern)
+            )).scalars().first()
+            if dup:
+                return None
+        row = Refinement(
+            session_id=session_id,
+            type=candidate.get("type", "skill"),
+            scope=candidate.get("scope", "project"),
+            target=candidate.get("target", ""),
+            proposed_change=candidate.get("proposed_change", ""),
+            before_text=candidate.get("before_text", ""),
+            after_text=candidate.get("after_text", ""),
+            evidence_runs=json.dumps(candidate.get("evidence_runs", []), ensure_ascii=False),
+            evidence_json=json.dumps(candidate.get("evidence", {}), ensure_ascii=False),
+            failure_pattern=pattern,
+            expected_effect=candidate.get("expected_effect", ""),
+        )
+        s.add(row)
+        await s.commit()
+        await s.refresh(row)
+        return _refinement_dict(row)
+
+
+async def list_refinements(session_id: str = "", limit: int = 10) -> list[dict]:
+    """최근 후보(대기 중 + 최근 결정분). 결정된 것도 보여야 rollback을 누를 수 있다."""
+    q = select(Refinement).order_by(Refinement.id.desc()).limit(limit)
+    if session_id:
+        q = select(Refinement).where(Refinement.session_id == session_id) \
+            .order_by(Refinement.id.desc()).limit(limit)
+    async with async_session() as s:
+        rows = (await s.execute(q)).scalars().all()
+    return [_refinement_dict(r) for r in rows]
+
+
+async def decide_refinement(refinement_id: int, decision: str) -> dict | None:
+    """승인/무시/되돌리기. 승인은 '기록'일 뿐 파일을 바꾸지 않는다(적용은 다음 단계)."""
+    status = _DECISIONS.get(decision)
+    if not status:
+        return None
+    async with async_session() as s:
+        row = await s.get(Refinement, refinement_id)
+        if not row:
+            return None
+        row.status = status
+        row.decided_at = None if status == "pending" else datetime.utcnow()
+        await s.commit()
+        await s.refresh(row)
+        return _refinement_dict(row)

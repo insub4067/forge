@@ -829,7 +829,8 @@ function fileKind(e) {
 
 function toggleHidden() {
   showHidden.value = !showHidden.value
-  navigateFiles(filePath.value)
+  if (showWorkspacePicker.value) navigateFs(fsPath.value)
+  else navigateFiles(filePath.value)
 }
 
 // 파일 길게 누르면 다운로드(iOS는 공유시트로 '파일에 저장'). 폴더는 제외.
@@ -1085,6 +1086,7 @@ async function selectRoom(id, isNew = false) {
   showRooms.value = false
   await loadMessages(isNew)
   await loadTasks()
+  await loadRefinements()
   checkRunning()
 }
 
@@ -1112,6 +1114,32 @@ async function jumpToMessage(r) {
       setTimeout(() => el.classList.remove('msg-highlight'), 2000)
     }
   }, 160)
+}
+
+// 학습 후보(RefinementCandidate) — 실행 근거로 만들어진 개선안. 승인해도 자동 적용은 없다.
+const refinements = ref([])
+
+async function loadRefinements() {
+  const id = currentRoomId.value
+  if (!id) {
+    refinements.value = []
+    return
+  }
+  try {
+    const res = await fetch(`/api/rooms/${id}/refinements`)
+    if (res.ok) refinements.value = (await res.json()).refinements || []
+  } catch {}
+}
+
+async function decideRefinement(r, decision) {
+  try {
+    await fetch(`/api/refinements/${r.id}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    })
+    await loadRefinements()
+  } catch {}
 }
 
 async function loadTasks() {
@@ -1427,7 +1455,9 @@ async function openWorkspacePicker(roomId) {
 
 async function navigateFs(path) {
   try {
-    const res = await fetch(`/api/fs/list?path=${encodeURIComponent(path || '')}`)
+    const res = await fetch(
+      `/api/fs/list?path=${encodeURIComponent(path || '')}&show_hidden=${showHidden.value}`
+    )
     if (res.ok) {
       const data = await res.json()
       fsPath.value = data.path
@@ -1730,6 +1760,9 @@ function handleEvent(evt, assistant) {
       break
     case 'context_usage':
       assistant.context = d
+      break
+    case 'refinement_candidate':
+      loadRefinements()
       break
     case 'done':
       assistant.phases.forEach((p) => {
@@ -2444,6 +2477,28 @@ document.addEventListener('visibilitychange', () => {
 
             <div v-if="m.doneMessage" class="done-msg">{{ m.doneMessage }}</div>
 
+            <div
+              v-for="r in (i === messages.length - 1 ? refinements : [])"
+              :key="r.id"
+              class="refine"
+              :class="{ decided: r.status !== 'pending' }"
+            >
+              <div class="refine-head">이번 작업에서 학습 — {{ r.type }} 후보 ({{ r.scope }})</div>
+              <div class="refine-target">{{ r.target }}</div>
+              <div class="refine-ev">근거 · 서로 다른 run {{ r.evidence_runs.length }}회 반복 실패<span
+                v-if="r.evidence?.session_cost_usd != null"> · 이번 세션 비용 ${{ r.evidence.session_cost_usd }}</span></div>
+              <pre class="refine-body">{{ r.failure_pattern }}</pre>
+              <div class="refine-ev">기대 효과 · {{ r.expected_effect }}</div>
+              <div class="refine-btns" v-if="r.status === 'pending'">
+                <button class="ok" @click="decideRefinement(r, 'approve')">승인</button>
+                <button class="no" @click="decideRefinement(r, 'ignore')">무시</button>
+              </div>
+              <div class="refine-btns" v-else>
+                <span class="refine-status">{{ r.status === 'approved' ? '승인됨(적용은 수동)' : '무시함' }}</span>
+                <button class="no" @click="decideRefinement(r, 'rollback')">되돌리기</button>
+              </div>
+            </div>
+
             <div v-if="m.context && !isLiveTurn(i)" class="context">
               context {{ m.context.prompt_tokens + m.context.completion_tokens }} tokens<span
                 v-if="m.context.cache_hit_ratio != null"> · cache {{ Math.round(m.context.cache_hit_ratio * 100) }}%</span>
@@ -3084,14 +3139,21 @@ document.addEventListener('visibilitychange', () => {
       <div class="fs-head">
         <button @click="showWorkspacePicker = false">취소</button>
         <span class="fs-title">{{ fsPath }}</span>
+        <button class="fs-hidden-toggle" :class="{ active: showHidden }" @click="toggleHidden">
+          <svg v-if="showHidden" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+          <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19M1 1l22 22"/></svg>
+          숨김
+        </button>
         <button class="fs-done" @click="pickCurrentPath">선택</button>
       </div>
         <div class="fs-list">
           <button v-if="fsParent" class="fs-item parent" @click="navigateFs(fsParent)">.. 상위 폴더</button>
           <button
-            v-for="e in fsEntries.filter((x) => x.is_dir)"
+            v-for="e in fsEntries"
             :key="e.path"
-            class="fs-item dir"
+            class="fs-item"
+            :class="e.is_dir ? 'dir' : 'file'"
+            :disabled="!e.is_dir"
             @click="navigateFs(e.path)"
           >
             {{ e.name }}

@@ -27,6 +27,7 @@ Proposal 채택 여부도 기능 수나 token 절감보다 success/verification 
 - `home-camera-monitor.md` — **JPEG polling PoC 구현**. WebRTC/Condition 연동 미구현.
 - `scheduled-condition-jobs.md` — **Scheduled 기반 구현 중**. durable semantics/Condition/Deferred 고도화 필요.
 - `forge-mcp-agent-runtime.md` — MCP server 관련 기반은 존재하지만 proposal 전체 autonomous runtime 계약은 별도 평가 필요.
+- `prime-agent-adoption.md` — **A(Continual Harness Refinement) P0 커널 구현됨**(근거 수집·후보 생성·저장/rollback·승인 UX까지. 자동 적용 없음). B(Restricted Tool Script)는 벤치 결과 기각.
 - `tauri-desktop-host.md` — proposal.
 - `web-search-tools.md` — proposal/보류. 품질 개선 효과가 benchmark로 확인될 때 채택.
 - `vision-agent.md` — Vision 기능 일부 구현.

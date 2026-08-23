@@ -136,3 +136,29 @@ class ScheduledJob(Base):
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_result: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class Refinement(Base):
+    """RefinementCandidate — 실행 근거에서 뽑은 작은 개선 후보(자동 적용 안 함).
+
+    승인 전에는 아무것도 바뀌지 않는다. before_text/after_text를 함께 저장해
+    나중에 적용하더라도 rollback이 가능하게 한다(prompt drift 방지).
+    """
+    __tablename__ = "refinements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String, default="")
+    type: Mapped[str] = mapped_column(String, default="skill")        # skill | supplement
+    scope: Mapped[str] = mapped_column(String, default="project")     # project | global
+    target: Mapped[str] = mapped_column(String, default="")           # skill 이름 등 적용 대상
+    proposed_change: Mapped[str] = mapped_column(Text, default="")
+    before_text: Mapped[str] = mapped_column(Text, default="")
+    after_text: Mapped[str] = mapped_column(Text, default="")
+    evidence_runs: Mapped[str] = mapped_column(Text, default="[]")    # JSON list — 근거 run
+    evidence_json: Mapped[str] = mapped_column(Text, default="{}")    # 검증·수리·비용 근거
+    failure_pattern: Mapped[str] = mapped_column(String, default="")
+    expected_effect: Mapped[str] = mapped_column(String, default="")
+    # pending → approved | ignored, rollback은 다시 pending으로 되돌린다.
+    status: Mapped[str] = mapped_column(String, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

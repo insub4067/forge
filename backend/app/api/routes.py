@@ -839,6 +839,21 @@ async def delete_skill(session_id: str, name: str, scope: str = "project"):
     return {"deleted": False}
 
 
+@router.get("/rooms/{session_id}/refinements")
+async def room_refinements(session_id: str):
+    """이 방의 개선 후보 — 대기 중 + 최근 결정분(rollback 가능하게 함께 반환)."""
+    return {"refinements": await store.list_refinements(session_id)}
+
+
+@router.post("/refinements/{refinement_id}/decide")
+async def decide_refinement(refinement_id: int, body: dict):
+    """승인/무시/되돌리기. 승인은 기록일 뿐 파일을 자동으로 바꾸지 않는다."""
+    row = await store.decide_refinement(refinement_id, str(body.get("decision", "")))
+    if not row:
+        return {"ok": False}
+    return {"ok": True, "refinement": row}
+
+
 @router.get("/rooms/{session_id}/runs")
 async def room_runs(session_id: str):
     return await store.session_agent_runs(session_id)

@@ -3398,3 +3398,67 @@ button {
 .sheet-item-label { font-size: 16px; font-weight: 600; color: var(--text); }
 .sheet-item-check { color: var(--accent); font-weight: 700; }
 .sheet-item-desc { font-size: 13px; color: var(--muted); }
+
+/* 워크스페이스 피커: 폴더만 선택 가능 — 파일은 확인용으로만 흐리게 표시한다. */
+.fs-item.file[disabled] {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* 학습 후보(RefinementCandidate) — 승인 전에는 아무것도 적용되지 않는다. */
+.refine {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+  padding: 12px;
+}
+.refine.decided { opacity: 0.6; }
+.refine-head {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.refine-target {
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+  margin-bottom: 6px;
+  word-break: break-all;
+}
+.refine-ev {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.refine-body {
+  max-height: 160px;
+  overflow: auto;
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0 0 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+.refine-btns {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.refine-btns button {
+  flex: 1;
+  padding: 8px 0;
+  border-radius: 8px;
+  border: none;
+  font-size: 14px;
+  font-weight: 600;
+}
+.refine-btns .ok { background: #34d399; color: #06231a; }
+.refine-btns .no { background: var(--panel); color: var(--text); }
+.refine-status { flex: 1; font-size: 12px; color: var(--muted); }
