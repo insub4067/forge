@@ -9,7 +9,13 @@ const props = defineProps({
 })
 const emit = defineEmits(['close'])
 
-const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
+// "/" 포함 모델은 OpenRouter로 라우팅된다(멀티프로바이더 실험). 인메모리 정책이라 재시작 시 초기화.
+const AVAILABLE_MODELS = [
+  'deepseek-v4-pro',
+  'deepseek-v4-flash',
+  'deepseek-v4-flash-vision-exp',
+  'inclusionai/ling-3.0-flash',
+]
 const version = __APP_VERSION__
 
 const adminStats = ref(null)
