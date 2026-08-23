@@ -158,6 +158,16 @@ const swipedRoomId = ref(null)
 const swipedJobId = ref(null)
 const pickerRoomId = ref(null)
 const roomMenuId = ref(null)
+const roomMenuPos = ref({ top: 0, left: 0 })
+function openRoomMenu(id, e) {
+  if (roomMenuId.value === id) { roomMenuId.value = null; return }
+  const r = e.currentTarget.getBoundingClientRect()
+  const w = 170
+  const left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))
+  const top = Math.min(r.bottom + 4, window.innerHeight - 160)
+  roomMenuPos.value = { top, left }
+  roomMenuId.value = id
+}
 const showGit = ref(false)
 const gitCurrent = ref('')
 const gitBranches = ref([])
@@ -1991,7 +2001,7 @@ document.addEventListener('visibilitychange', () => {
                   <div class="room-path">{{ r.workspace_path || '워크스페이스 설정' }}</div>
                 </div>
                 <span class="room-pct">Context {{ ctxPct(r) }}%</span>
-                <button class="room-more" @click.stop="roomMenuId = roomMenuId === r.id ? null : r.id" aria-label="메뉴">
+                <button class="room-more" @click.stop="openRoomMenu(r.id, $event)" aria-label="메뉴">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
                 </button>
               </div>
@@ -2132,7 +2142,7 @@ document.addEventListener('visibilitychange', () => {
     </div>
 
     <div v-if="roomMenuId" class="menu-overlay" @click="roomMenuId = null">
-      <div class="menu-panel" @click.stop>
+      <div class="menu-panel" @click.stop :style="{ top: roomMenuPos.top + 'px', left: roomMenuPos.left + 'px', right: 'auto' }">
         <div class="menu-item" @click="renameRoom(roomMenuId); roomMenuId = null">이름 변경</div>
         <div v-if="menuRoom() && menuRoom().count === 0" class="menu-item" @click="openWorkspacePicker(roomMenuId); roomMenuId = null">워크스페이스 변경</div>
         <div class="menu-item danger" @click="deleteRoom(roomMenuId); roomMenuId = null">삭제</div>
