@@ -59,6 +59,10 @@ def make_rt(verify_states, dev_status="done", changed=True):
         return None
     rt._mark_testing = fake_mark_testing
 
+    # 테스트가 실제 eventlog/DB를 오염시키지 않게 — 이걸 빼먹어 테스트 run이 실제
+    # 개선 후보(refinements)를 만들고 events-*.jsonl에 가짜 run을 쌓았다.
+    A.eventlog.record = lambda *a, **k: None
+    rt._reflect = lambda *a, **k: _noop()
     A.store.save_agent_run = lambda *a, **k: _noop()
     A.store.update_context_usage = lambda *a, **k: _noop()
     A.store.ensure_session = lambda *a, **k: _noop()

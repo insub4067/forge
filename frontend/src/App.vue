@@ -2,35 +2,13 @@
 import { ref, reactive, nextTick, onMounted, watch, computed } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/github-dark.css'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import PdfViewer from './components/PdfViewer.vue'
+import FileViewer from './components/FileViewer.vue'
 import { balance as adminBalance, loadBalance } from './store'
 import '@xterm/xterm/css/xterm.css'
-
-const _EXT_LANG = {
-  js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
-  ts: 'typescript', tsx: 'typescript', vue: 'xml', html: 'xml', xml: 'xml',
-  py: 'python', rb: 'ruby', go: 'go', rs: 'rust', java: 'java', kt: 'kotlin',
-  c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', cs: 'csharp', php: 'php', swift: 'swift',
-  css: 'css', scss: 'scss', json: 'json', yml: 'yaml', yaml: 'yaml', toml: 'ini',
-  sh: 'bash', bash: 'bash', zsh: 'bash', sql: 'sql', md: 'markdown', dockerfile: 'dockerfile',
-}
-// 소스코드를 IDE처럼 문법 하이라이팅. 실패하면 이스케이프만.
-const highlightedContent = computed(() => {
-  const code = fileContent.value || ''
-  const ext = (viewingFile.value.split('.').pop() || '').toLowerCase()
-  const lang = _EXT_LANG[ext]
-  try {
-    if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value
-    return hljs.highlightAuto(code).value
-  } catch {
-    return code.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
-  }
-})
-const fileLineCount = computed(() => (fileContent.value ? fileContent.value.split('\n').length : 0))
 
 // 단일 줄바꿈도 <br>로 — 답변 줄바꿈을 적극 반영
 marked.setOptions({ breaks: true, gfm: true })
@@ -206,10 +184,7 @@ const showHidden = ref(false)
 const filePath = ref('')
 const fileParent = ref(null)
 const fileEntries = ref([])
-const fileContent = ref('')
 const viewingFile = ref('')
-const viewerKind = ref('text') // text | image | video | audio | pdf
-const mediaUrl = ref('')
 const showMenu = ref(false)
 const showAdmin = ref(false)
 const showPush = ref(false)
@@ -828,7 +803,6 @@ async function navigateFiles(path) {
       fileParent.value = data.parent
       fileEntries.value = data.entries
       viewingFile.value = ''
-      fileContent.value = ''
     }
   } catch {}
 }
@@ -891,35 +865,9 @@ async function downloadFile(e) {
   }
 }
 
-const _MEDIA = {
-  image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'],
-  video: ['mp4', 'webm', 'mov', 'm4v'],
-  audio: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'],
-  pdf: ['pdf'],
-}
-function _mediaKind(path) {
-  const ext = (path.split('.').pop() || '').toLowerCase()
-  for (const [kind, exts] of Object.entries(_MEDIA)) if (exts.includes(ext)) return kind
-  return 'text'
-}
-async function openFile(path) {
-  const kind = _mediaKind(path)
-  viewerKind.value = kind
+// 파일 열기 — 종류 판별·읽기·렌더는 FileViewer 컴포넌트가 담당
+function openFile(path) {
   viewingFile.value = path
-  if (kind !== 'text') {
-    // 미디어는 원본 URL로 직접 재생/표시(텍스트로 읽지 않음, PDF는 PdfViewer가 렌더)
-    mediaUrl.value = `/api/fs/raw?path=${encodeURIComponent(path)}&session_id=${currentRoomId.value}`
-    fileContent.value = ''
-    return
-  }
-  try {
-    const res = await fetch(`/api/fs/read?path=${encodeURIComponent(path)}&session_id=${currentRoomId.value}`)
-    if (res.ok) {
-      const data = await res.json()
-      viewingFile.value = data.path
-      fileContent.value = data.content
-    }
-  } catch {}
 }
 
 function openFiles() {
@@ -3091,7 +3039,7 @@ document.addEventListener('visibilitychange', () => {
           <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19M1 1l22 22"/></svg>
           숨김
         </button>
-        <button v-if="viewingFile" @click="viewingFile = ''; fileContent = ''; viewerKind = 'text'; mediaUrl = ''">목록</button>
+        <button v-if="viewingFile" @click="viewingFile = ''">목록</button>
       </div>
       <div v-if="!viewingFile" class="fs-list">
         <button v-if="fileParent" class="fs-item parent" @click="navigateFiles(fileParent)">
