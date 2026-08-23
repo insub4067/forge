@@ -536,14 +536,15 @@ async function jumpToMessage(r, q = '') {
 // 상태는 백엔드 task_update가 준 그대로 쓴다.
 const taskBar = computed(() => {
   const list = tasks.value || []
-  if (!list.length || !(busy.value || sessionRunning.value)) return null
+  if (!list.length) return null  // 아이템 0이면 닫힘 · 1개 이상이면 실행 여부와 무관하게 열림
   const cur =
     list.find((t) => t.status === 'working') ||
     list.find((t) => t.status === 'testing') ||
     list.find((t) => t.status === 'todo')
+  const done = list.filter((t) => t.status === 'done').length
   return {
-    title: cur ? cur.title : '마무리 중',
-    done: list.filter((t) => t.status === 'done').length,
+    title: cur ? cur.title : (done === list.length ? '완료' : '마무리 중'),
+    done,
     total: list.length,
   }
 })
@@ -768,8 +769,8 @@ function onChatScroll() {
   isAtBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
 }
 
-function newUser(text, images) {
-  messages.value.push({ role: 'user', content: text, images: images && images.length ? images : null })
+function newUser(text, images, queued = false) {
+  messages.value.push({ role: 'user', content: text, images: images && images.length ? images : null, queued })
 }
 
 function newAssistant() {
@@ -1048,8 +1049,8 @@ async function steerDuringRun(text) {
     } catch {}
     pendingSend.value = text
   } else {
-    // 큐 대기(기본) — 실행 중 에이전트에 주입, 다음 스텝에서 반영
-    newUser(text)
+    // 큐 대기(기본) — 실행 중 에이전트에 주입, 다음 스텝에서 반영. 대기큐 배지로 표시.
+    newUser(text, null, true)
     scrollBottom()
     try {
       await fetch(`/api/sessions/${id}/inject`, {
@@ -1330,6 +1331,9 @@ document.addEventListener('visibilitychange', () => {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
         </button>
       </div>
+    <div v-if="sessionRunning && !busy && (!isAtBottom || (agentStatus && agentStatus.waiting_for))" class="running-banner" :class="{ waiting: agentStatus && agentStatus.waiting_for }">
+      <span class="running-dot"></span>{{ runningBannerText() }}
+    </div>
     </header>
 
     <MenuPanel
@@ -1366,9 +1370,6 @@ document.addEventListener('visibilitychange', () => {
       @toggle-pin="togglePin"
     />
 
-    <div v-if="sessionRunning && !busy && (!isAtBottom || (agentStatus && agentStatus.waiting_for))" class="running-banner" :class="{ waiting: agentStatus && agentStatus.waiting_for }">
-      <span class="running-dot"></span>{{ runningBannerText() }}
-    </div>
 
     <main ref="chatEl" @scroll.passive="onChatScroll" @touchstart.passive="onMainTouchStart" @touchend.passive="onMainTouchEnd">
       <div v-if="loadingMessages" class="msg-skeleton">
@@ -1395,12 +1396,19 @@ document.addEventListener('visibilitychange', () => {
         <div class="bubble">
           <template v-if="m.role === 'user'">
             <div v-if="processNote(m.content)" class="process-note">⚙ {{ processNote(m.content) }}</div>
+            <div v-else-if="m.queued" class="queue-badge">
+              <span class="queue-dot"></span>대기큐<span class="queue-text">{{ m.content }}</span>
+            </div>
             <template v-else>
               <div v-if="m.images && m.images.length" class="user-images">
                 <img v-for="(img, ii) in m.images" :key="ii" :src="img" class="user-image" @click="openViewer(m.images, ii)" alt="첨부 이미지" />
               </div>
               <div v-if="m.content && m.content !== '[이미지]'" class="user-text">{{ m.content }}</div>
             </template>
+            <div v-if="(busy || sessionRunning) && i === messages.length - 1" class="typing">
+              <span class="typing-label">{{ busy ? '작성 중' : liveActivityText() }}</span>
+              <span class="typing-dots"><i></i><i></i><i></i></span>
+            </div>
           </template>
 
           <template v-if="m.role === 'assistant'">

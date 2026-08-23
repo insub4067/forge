@@ -3599,3 +3599,44 @@ button {
   font-size: 15px;
   font-weight: 700;
 }
+
+/* 실행 배너 — 헤더 아래 오버레이(레이아웃 미점유 → 나타나고 사라져도 스크롤 안 튐) */
+.running-banner {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+/* 대기큐 배지 — 작업 중 큐에 넣은 사용자 메시지(일반 말풍선과 구분) */
+.queue-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  margin-left: auto;
+  padding: 7px 12px;
+  border-radius: 14px;
+  border: 1px dashed var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.queue-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.queue-text {
+  font-weight: 400;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
