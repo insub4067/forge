@@ -146,6 +146,7 @@ onMounted(async () => {
         <div class="admin-stat-title">효율 계측</div>
         <div class="metric-grid">
           <div class="metric-cell"><span class="metric-num">{{ Math.round((sessionMetrics.cache_hit_ratio || 0) * 100) }}%</span><span class="metric-lbl">cache 적중</span></div>
+          <div v-if="sessionMetrics.tool_raw_tokens" class="metric-cell"><span class="metric-num">{{ Math.round((1 - sessionMetrics.tool_visible_tokens / sessionMetrics.tool_raw_tokens) * 100) }}%</span><span class="metric-lbl">tool 출력 절감</span></div>
           <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_model_calls || 0 }}</span><span class="metric-lbl">model 호출</span></div>
           <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.total_tool_calls || 0 }}</span><span class="metric-lbl">tool 호출</span></div>
           <div class="metric-cell"><span class="metric-num">{{ sessionMetrics.pro_calls || 0 }}</span><span class="metric-lbl">Pro 호출</span></div>

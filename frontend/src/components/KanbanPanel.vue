@@ -1,7 +1,7 @@
 <script setup>
 // 칸반 패널 — todo/working/testing/done 4단계 작업 보드.
 // App.vue의 showKanban 관련 상태·함수·마크업을 이 컴포넌트로 이관.
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
 const props = defineProps({
   tasks: { type: Array, default: () => [] },
@@ -25,6 +25,13 @@ function normStatus(s) {
   if (s === 'review' || s === 'verifying') return 'testing'
   return s // todo/working/testing/done는 그대로
 }
+
+// 진입하자마자 아이템이 있는 섹션은 기본 펼침(빈 섹션만 접힘). tasks가 채워질 때 반영.
+watch(() => props.tasks, (list) => {
+  for (const col of kanbanCols) {
+    kanbanOpen.value[col.key] = (list || []).some((x) => normStatus(x.status) === col.key)
+  }
+}, { immediate: true })
 
 function toggleKanban(key) {
   kanbanOpen.value[key] = !kanbanOpen.value[key]

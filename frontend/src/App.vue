@@ -995,6 +995,9 @@ function handleEvent(evt, assistant) {
     case 'refinement_candidate':
       loadRefinements()
       break
+    case 'mode_changed':
+      loadRooms()  // 채팅→작업 자동 전환 시 헤더 모드 배지 갱신
+      break
     case 'done':
       assistant.verifyPhase = ''
       assistant.phases.forEach((p) => {

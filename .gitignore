@@ -195,3 +195,6 @@ backend/logs/
 # 환경변수 템플릿은 커밋 허용
 !.env.example
 backend/vapid_private.pem
+
+# tool_store 경로 버그 방어(정상 경로는 backend/logs)
+backend/app/logs/

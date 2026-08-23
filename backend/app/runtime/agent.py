@@ -1158,6 +1158,9 @@ class AgentRuntime:
                 # bash는 명령 종류별 압축을 먼저 시도(성공 명확 시 강하게, 실패는 원본 보존).
                 _ca = _compress_command_output(args.get("command", ""), result) if name == "bash" else None
                 _content = _ca if _ca is not None else _prune_tool_result(result)
+                # RTK식 gain — 도구 결과 압축 전/후 추정 토큰 누적(절감량 측정).
+                route["tool_raw"] = route.get("tool_raw", 0) + _est_tokens(result)
+                route["tool_visible"] = route.get("tool_visible", 0) + _est_tokens(_content)
                 all_messages.append(
                     {"role": "tool", "tool_call_id": tc["id"], "content": _content}
                 )
@@ -1549,6 +1552,8 @@ class AgentRuntime:
                 elapsed_ms,
                 skill_count,
                 skill_csv,
+                route.get("tool_raw", 0),
+                route.get("tool_visible", 0),
             )
 
         async def finish(status: str, content: str = "") -> None:
@@ -1585,6 +1590,21 @@ class AgentRuntime:
                 await send("compaction", {"covered": self._compaction[session_id]["covered"]})
         if _mode == "chat":
             route_kind = "chat"
+            # 채팅 방인데 요청이 코드 작업으로 판단되면 작업 모드 전환을 제안한다.
+            # 승인하면 이 방을 work로 바꾸고(다음부터 자동) 이번 요청도 작업 경로로 처리한다.
+            rk, tp, tc = await self._triage(all_messages)
+            await record("triage", tp, tc, {"model": self.router.triage_model, "model_calls": 1})
+            if rk == "code":
+                ws_ok = _room and _room.get("workspace_path") and _room["workspace_path"] not in ("/", os.path.expanduser("~"))
+                ans = await self._ask_user({
+                    "question": "이 요청은 코드 변경이 필요해 보입니다. 작업 모드로 전환할까요? (검증·커밋이 켜집니다)"
+                    if ws_ok else "코드 작업 같지만 이 방은 워크스페이스가 없어 작업 모드로 못 바꿉니다. 채팅으로 답할까요?",
+                    "options": ["작업 모드로 전환", "채팅 유지"] if ws_ok else ["채팅으로 답"],
+                }, send, session_id)
+                if ws_ok and ans and "전환" in ans:
+                    await store.update_room_mode(session_id, "work")
+                    await send("mode_changed", {"mode": "work"})
+                    route_kind = "code"
         elif _mode == "work":
             route_kind = "code"
         else:
