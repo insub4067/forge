@@ -17,6 +17,8 @@ def make_runtime(role_status="done", route_kind="code"):
                             tools=None, skills="", complexity="normal", escalate=False, has_image=False,
                             plan=""):
         calls.append((role, escalate))
+        if role == "developer":
+            state["files_changed"].append("app.py")  # 정상 구현 run(변경 있음)
         st = role_status(role, len(calls), escalate) if callable(role_status) else role_status
         return st, 0, 0, {"model": "m", "thinking": False, "reasoning_effort": ""}
 

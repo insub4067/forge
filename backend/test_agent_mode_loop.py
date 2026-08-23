@@ -24,6 +24,8 @@ def make_runtime(dev_status="done", review_status="done", review_text="PASS",
                             plan=""):
         has_plan = bool(plan)
         calls.append((role, escalate, has_plan))
+        if role == "developer":
+            state["files_changed"].append("app.py")  # 정상 구현 run(변경 있음)
         if role == "planner":
             st = planner_status(role, len(calls)) if callable(planner_status) else planner_status
             if st == "done":

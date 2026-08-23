@@ -22,18 +22,22 @@ async def _empty():
     return []
 
 
-def make_rt(verify_states, dev_status="done", changed=True):
+def make_rt(verify_states, dev_status="done", changed=True, change_from=1):
     """run()을 돌리되 _run_role/_verify/_autocommit/_triage를 목킹한다.
     verify_states: _verify가 호출될 때마다 순서대로 반환할 state 목록.
-    changed: 에이전트가 파일을 실제로 바꿨는지(False면 '변경 0건' 경로)."""
+    changed: 에이전트가 파일을 바꾸는지(False면 '변경 0건' 경로).
+    change_from: developer 몇 번째 호출부터 파일을 바꾸는지(2면 첫 턴엔 선언만 하고 멈춘 상황)."""
     rt = A.AgentRuntime()
-    committed = {"count": 0, "paths": None}
+    committed = {"count": 0, "paths": None, "dev_calls": 0}
     vi = {"i": 0}
 
     async def fake_run_role(role, all_messages, *a, **k):
         all_messages.append({"role": "assistant", "content": "작업"})
-        if changed:  # state는 6번째 위치 인자 — write_file이 남기는 흔적을 흉내낸다
-            a[3]["files_changed"].append("app.py")
+        if role == "developer":
+            committed["dev_calls"] += 1
+            # state는 6번째 위치 인자 — write_file이 남기는 흔적을 흉내낸다
+            if changed and committed["dev_calls"] >= change_from:
+                a[3]["files_changed"].append("app.py")
         return dev_status, 0, 0, {"model": "m", "model_calls": 1}
     rt._run_role = fake_run_role
 
@@ -121,6 +125,22 @@ async def main():
     assert await run_once(rt) == "completed"
     assert c["paths"] == ["app.py"], c["paths"]
     print("커밋 경로는 에이전트가 바꾼 파일뿐: OK")
+
+    # ── 이어붙이기: 선언만 하고 멈춘 턴을 프로세스가 한 번 밀어준다 ──
+    # ("제거하겠습니다"만 하고 도구를 안 불러 run이 끝나던 문제 — 사용자가 물어야 이어지던 것.)
+    rt, c = make_rt(["passed"], changed=True, change_from=2)
+    st = await run_once(rt)
+    assert st == "completed", st
+    assert c["dev_calls"] == 2, c["dev_calls"]      # 한 번 더 실행됐다
+    print("변경 0건으로 끝나려 하면 1회 이어붙임 → 완료: OK")
+
+    # 이어붙여도 안 바꾸면 상한 1회에서 멈추고 정직하게 끝낸다(무한 루프 없음)
+    rt, c = make_rt(["passed"], changed=False)
+    st = await run_once(rt)
+    assert st == "completed_unverified", st
+    assert c["dev_calls"] == 2, c["dev_calls"]
+    assert c["count"] == 0
+    print("이어붙임 상한 1회 + 그래도 변경 0 → completed_unverified: OK")
 
     # ── 칸반 invariant: 모델은 done/testing을 설정 못 한다 ──
     assert A._clamp_task_status("done") == "working", "모델 done → working로 강등"

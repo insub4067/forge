@@ -1419,6 +1419,7 @@ class AgentRuntime:
                 await record("developer", p, c, route)
             return status
 
+        plan = ""
         if use_multi:
             # 2a. Planner — 계획 수립(최근 맥락 + 읽기 전용 도구만, flash).
             #     전체 컨텍스트를 재전송하지 않아 과거 planner 비용 문제가 재발하지 않는다.
@@ -1462,6 +1463,25 @@ class AgentRuntime:
         if status != "done":
             await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
             return all_messages
+
+        # ── 이어붙이기 — 모델이 "하겠습니다"만 하고 턴을 끝내는 것을 프로세스가 한 번 밀어준다 ──
+        # 루프는 tool_call이 없으면 즉시 끝난다. 그래서 모델이 선언만 하고 멈추면 run이 종료되고,
+        # 사용자가 "끝난 거야?"라고 물어야 새 run으로 이어지던 문제(실측 19건 중 7건).
+        # triage가 코드 작업으로 보낸 run인데 파일이 하나도 안 바뀌었으면 한 번만 더 실행한다.
+        # 상한 1회 — 무한 루프도 비용 폭주도 없고, 그래도 안 바뀌면 아래에서 정직하게 끝난다.
+        if not state["files_changed"]:
+            await send("continue_nudge", {"reason": "no_change"})
+            # 문구 주의: "실행하라"만 강조하면 사용자가 "바꾸지 마"라고 한 요청에도 모델이
+            # 편집을 정당화한다(실측). 사용자 지시가 프로세스 재촉보다 우선임을 명시한다.
+            all_messages.append({"role": "user", "content":
+                "[프로세스 확인] 아직 파일을 하나도 바꾸지 않았다. "
+                "사용자가 코드 변경을 요청한 경우에만, 설명에서 멈추지 말고 지금 실행해 끝내라. "
+                "조사·설명·확인 요청이거나 사용자가 변경하지 말라고 했다면 아무것도 바꾸지 말고 "
+                "한 줄로만 답하라."})
+            status = await _run_developer(plan)
+            if status != "done":
+                await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
+                return all_messages
 
         # 변경 0건 — build/test가 통과해도 그건 이번 run이 검증된 게 아니라 아무것도 안 한 것이다.
         # "작업 완료 — 검증 통과"로 보고하면 모델이 하겠다고만 하고 끝낸 run이 성공으로 둔갑한다.

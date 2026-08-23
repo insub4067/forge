@@ -147,19 +147,15 @@ def flags(run: dict) -> list[str]:
 
 
 def report(runs: list[dict], only_flagged: bool, verbose: bool, limit: int) -> None:
-    shown = 0
     counts = collections.Counter()
     flagged = collections.Counter()
-    for r in runs:
-        f = flags(r)
+    for r in runs:                       # 집계는 전체로, 출력만 최근 것으로 자른다
         counts[r["status"]] += 1
-        for x in f:
+        for x in flags(r):
             flagged[x.split("대기")[0] or "대기"] += 1
-        if only_flagged and not f:
-            continue
-        if shown >= limit:
-            continue
-        shown += 1
+    view = [r for r in runs if flags(r)] if only_flagged else runs
+    for r in view[-limit:]:
+        f = flags(r)
         roles = "→".join(r["roles"]) or "-"
         tools = collections.Counter(r["tools"])
         tool_s = " ".join(f"{k}×{v}" for k, v in tools.most_common(4)) or "-"
