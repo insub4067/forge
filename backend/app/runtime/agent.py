@@ -20,6 +20,7 @@ from .. import skills as skills_lib
 from ..db import store
 from .. import metrics as metrics_calc
 from . import refine
+from . import tool_store
 from ..llm.factory import create_adapter
 from ..orchestrator.model_router import ModelRouter
 from ..tools.registry import APPROVAL_REQUIRED, CHAT_TOOLS, TOOL_SCHEMAS, execute_tool
@@ -123,11 +124,13 @@ BASE_PROMPT = """당신은 FORGE 에이전틱 코딩 에이전트의 일부입�
 - save_skill의 scope는 기본 project다. 프로젝트 특화 절차(그 저장소의 규약·빌드·구조)는 project로, 특정 파일명·경로·도메인에 묶이지 않고 여러 코드베이스에서 재사용 가능한 명백히 범용적인 절차만 global로 저장한다. 판단이 애매하면 project. 단순 메모나 일회성 해결은 Skill로 저장하지 않는다."""
 
 
-def _prune_tool_result(text: str, head: int = 2500, tail: int = 1200) -> str:
+def _prune_tool_result(text: str, head: int = 1400, tail: int = 900) -> str:
     """모델에 보낼 도구 결과를 축약한다(model-free pruning).
 
     긴 read_file/bash/grep 결과가 매 스텝 컨텍스트에 누적돼 폭증하는 것을 막는다.
     앞·뒤를 보존하고 가운데를 생략하되, 오류/경고 라인은 함께 남긴다.
+    축약 시 원본은 tool_store에 저장하고 result_id를 안내한다 — 모델이 더 필요하면
+    read_tool_result로 원본을 조회할 수 있어, 공격적으로 줄여도 정보 손실이 복구 가능하다.
     UI 표시는 원본을 쓰고, 이 축약본은 모델 컨텍스트(all_messages)에만 쓴다.
     """
     if len(text) <= head + tail + 300:
@@ -136,7 +139,12 @@ def _prune_tool_result(text: str, head: int = 2500, tail: int = 1200) -> str:
         ln for ln in text.splitlines()
         if any(k in ln.lower() for k in ("error", "오류", "fail", "warning", "traceback", "exception"))
     ]
-    body = text[:head] + f"\n\n... {len(text) - head - tail}자 생략 ...\n\n" + text[-tail:]
+    try:
+        rid = tool_store.save(text)
+        ref = f" (전체 {len(text)}자 저장됨 · 더 필요하면 read_tool_result('{rid}'))"
+    except Exception:
+        ref = ""
+    body = text[:head] + f"\n\n... {len(text) - head - tail}자 생략{ref} ...\n\n" + text[-tail:]
     if error_lines:
         body += "\n\n[주요 오류/경고 라인]\n" + "\n".join(error_lines[:20])
     return body

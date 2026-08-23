@@ -173,6 +173,22 @@ TOOL_SCHEMAS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_tool_result",
+            "description": "축약된 도구 결과의 원본 일부를 다시 가져온다. 큰 결과는 축약본+result_id로만 컨텍스트에 남으므로, 더 필요할 때만 이 도구로 원본을 조회한다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "result_id": {"type": "string", "description": "축약본에 표시된 result_id (예: tr_ab12cd34ef)"},
+                    "offset": {"type": "integer", "description": "원본에서 읽기 시작할 문자 위치(기본 0)"},
+                    "limit": {"type": "integer", "description": "가져올 문자 수(기본 4000, 최대 20000)"},
+                },
+                "required": ["result_id"],
+            },
+        },
+    },
 ]
 
 # chat 에이전트는 읽기·질문만 — 코드 수정/실행 도구는 제외한다.
@@ -258,6 +274,11 @@ def _make_diff(old_text: str, new_text: str, path: str) -> str:
 
 
 async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]:
+    if name == "read_tool_result":
+        from ..runtime import tool_store
+        return tool_store.load(str(args.get("result_id", "")),
+                               int(args.get("offset", 0) or 0),
+                               int(args.get("limit", 4000) or 4000)), ""
     if name == "read_file":
         p = _resolve(workspace, str(args["path"]))
         text = p.read_text(encoding="utf-8", errors="replace")
