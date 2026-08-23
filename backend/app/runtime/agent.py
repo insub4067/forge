@@ -151,6 +151,8 @@ def _select_skills(workspace: str, query: str) -> str:
     curated+learned(global) + project 3계층을 병합해 대상으로 삼는다(같은 이름은
     project 우선). 점수가 같으면 project skill을 먼저 넣는다(명시적 local 우선).
     관련 skill이 없으면 빈 문자열(아무것도 삽입하지 않음)."""
+    if settings.skills_off:  # 실험용: skill 주입 전면 비활성(A/B 측정)
+        return ""
     terms = set(_skill_terms(query))
     if not terms:
         return ""
@@ -1071,7 +1073,7 @@ class AgentRuntime:
         # 1. Planner — COMPLEX 작업에서만 실행한다. SIMPLE(한두 단계 수정)은 coder가
         #    바로 실행해 planner의 과탐색·컨텍스트 재전송(토큰 폭주)을 없앤다.
         #    빈 task여도 아래 reviewer가 1회 검토 후 완료하므로 흐름은 안전하다.
-        if complexity == "high":
+        if complexity == "high" and not settings.planner_off:
             status, p, c, route = await self._run_role(
                 "planner", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory,
                 skills=skills, complexity=complexity,

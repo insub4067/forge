@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     auth_token: str = ""
     # planner를 COMPLEX 작업에서도 pro로 승격하지 않고 flash 유지(비용 실험용). 기본 False.
     planner_flash: bool = False
+    # planner를 COMPLEX에서도 아예 건너뛴다(planner 필요성 실험용). 기본 False.
+    planner_off: bool = False
+    # skill 주입 전면 비활성(skill 효과 A/B 실험용). 기본 False.
+    skills_off: bool = False
     # Web Push (VAPID). public_key는 브라우저 구독용(비밀 아님). private key는 PEM 파일 경로.
     vapid_public_key: str = "BEdgt7HlWXy3-F1M2MKCkcBrOuW0uWoUvg58WzYFA7z1GBVu9IRGy15NlRP-A1cWINwTO4x4n0HMOmgiukK3HCQ"
     vapid_private_key_path: str = str(BASE_DIR / "vapid_private.pem")
