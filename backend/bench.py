@@ -205,11 +205,18 @@ def main():
     ap.add_argument("--keep", action="store_true", help="bench 세션을 DB에 보존(기본은 정리)")
     ap.add_argument("--task", default="", help="특정 task만(쉼표 구분)")
     ap.add_argument("--complex", action="store_true", help="COMPLEX task만 실행")
+    ap.add_argument("--json", default="", help="집계 결과를 이 경로에 JSON으로 저장(compare.py용)")
     args = ap.parse_args()
     if args.run:
         only = {c.strip().upper() for c in args.task.split(",") if c.strip()} or None
         agg = asyncio.run(_run_all(args.repeat, args.keep, only, args.complex))
-        _print_report(agg, _variant_label())
+        variant = _variant_label()
+        _print_report(agg, variant)
+        if args.json:
+            import json
+            agg["variant"] = variant
+            Path(args.json).write_text(json.dumps(agg, indent=2), encoding="utf-8")
+            print(f"→ 저장: {args.json}")
     else:
         _self_test()
 

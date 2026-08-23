@@ -534,9 +534,12 @@ class AgentRuntime:
             self._auto_approve_sessions.discard(session_id)
 
     def resolve_pending_approvals(self, session_id: str = "") -> int:
-        """대기 중인 승인 요청을 모두 승인 처리한다(자동 승인 켤 때)."""
+        """해당 세션의 대기 승인만 승인 처리한다(자동 승인 켤 때).
+        session_id로 필터하지 않으면 한 세션의 auto-approve가 다른 세션의 pending까지 승인한다."""
         count = 0
         for approval_id, fut in list(self.pending_approvals.items()):
+            if session_id and self._pending_meta.get(approval_id, {}).get("session_id") != session_id:
+                continue
             if not fut.done():
                 fut.set_result("approve")
                 count += 1

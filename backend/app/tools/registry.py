@@ -180,7 +180,8 @@ CHAT_TOOLS = [
     if t["function"]["name"] in {"read_file", "list_dir", "grep", "ask_user"}
 ]
 
-APPROVAL_REQUIRED = {"write_file", "edit_file", "bash", "save_skill"}
+# build_frontend는 host에서 npm run build를 직접 실행(Docker 우회) — 승인 필요.
+APPROVAL_REQUIRED = {"write_file", "edit_file", "bash", "save_skill", "build_frontend"}
 BLOCKED_COMMANDS = ["rm -rf", "git push", "sudo ", "chmod 777"]
 
 
@@ -330,5 +331,6 @@ async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]
                 raise PermissionError(f"차단된 명령입니다: {blocked}")
         from ..sandbox.executor import DockerSandbox
 
-        return await DockerSandbox().run(command, write=True), ""
+        # workspace를 명시 전달 — 미전달 시 전역 settings.workspace로 실행돼 방 경계를 벗어난다.
+        return await DockerSandbox(workspace=workspace).run(command, write=True), ""
     raise ValueError(f"알 수 없는 도구: {name}")
