@@ -10,8 +10,9 @@ TOOL_SCHEMAS: list[dict] = [
             "name": "read_file",
             "description": (
                 "Read a file's contents. Returns the file text with line numbers. "
-                "For large files, prefer find_symbol(path, name) for a specific function/class, "
-                "or offset/limit for a line range — reading the whole file wastes tokens."
+                "Reading a large file whole returns only a SYMBOL MAP (definition lines), "
+                "not the full text — then call find_symbol(path, name) for the function/class "
+                "you need, or offset/limit for a specific line range."
             ),
             "parameters": {
                 "type": "object",
@@ -289,6 +290,40 @@ def _make_diff(old_text: str, new_text: str, path: str) -> str:
     return "".join(diff)
 
 
+READ_FILE_OUTLINE_THRESHOLD = 400  # 이 줄수를 넘는 파일을 통째로 읽으면 심볼 지도로 대체
+
+_SYM_DEF = re.compile(
+    r"^\s*(?:async\s+)?(?:export\s+(?:default\s+)?)?"
+    r"(?:def|class|function|interface|type|struct|enum|fn)\s+([A-Za-z_$][\w$]*)"
+)
+_SYM_ASSIGN = re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*[=:]")
+
+
+def _symbol_outline(text: str, name: str, max_syms: int = 200) -> str | None:
+    """큰 파일용 '심볼 지도' — 정의 줄(줄번호+시그니처)만 추려 반환한다. 모델이 이걸 보고
+    find_symbol(path, '이름')으로 필요한 심볼만 읽게 유도한다. 심볼이 없으면(코드 아님) None."""
+    lines = text.splitlines()
+    syms: list[str] = []
+    for i, ln in enumerate(lines):
+        m = _SYM_DEF.search(ln) or _SYM_ASSIGN.search(ln)
+        if not m:
+            continue
+        sig = ln.strip()
+        if len(sig) > 90:
+            sig = sig[:90] + "…"
+        syms.append(f"{i + 1}\t{sig}")
+        if len(syms) >= max_syms:
+            syms.append("… (심볼 더 있음)")
+            break
+    if not syms:
+        return None
+    return (
+        f"파일이 큽니다: {name} ({len(lines)}줄). 전체 대신 심볼 지도를 보여줍니다.\n"
+        f"필요한 함수/클래스는 find_symbol(path, '이름')으로, 임의 줄 범위는 "
+        f"read_file(path, offset, limit)로 읽으세요.\n\n심볼:\n" + "\n".join(syms)
+    )
+
+
 def _find_symbol_range(text: str, symbol: str, max_lines: int = 200) -> str:
     """파일 텍스트에서 심볼 정의를 찾아 그 범위(줄번호 포함)만 반환한다. tree-sitter 없이
     정규식 + 들여쓰기/최상위 경계로 근사한다(python·js 등 범용). 못 찾으면 안내."""
@@ -345,6 +380,12 @@ async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]
             picked = lines[start:end]
             body = "\n".join(f"{start + i + 1}\t{ln}" for i, ln in enumerate(picked))
             return body, ""
+        # 큰 파일을 통째로 읽으면 전체 대신 심볼 지도를 준다 — find_symbol 사용을 유도하고
+        # 토큰을 아낀다. 코드가 아니라 심볼이 없으면(None) 기존대로 전체 반환.
+        if text.count("\n") + 1 > READ_FILE_OUTLINE_THRESHOLD:
+            outline = _symbol_outline(text, Path(str(args["path"])).name)
+            if outline:
+                return outline, ""
         return text, ""
     if name == "list_dir":
         p = _resolve(workspace, str(args["path"]))
