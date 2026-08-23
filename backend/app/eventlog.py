@@ -44,8 +44,13 @@ def record(session_id: str, seq: int, event_type: str, data: dict) -> None:
         pass
 
 
-def tail(session_id: str = "", limit: int = 200) -> list[dict]:
-    """최근 이벤트를 반환한다(추적 조회용). session_id로 필터 가능."""
+def tail(session_id: str = "", limit: int = 200, since: int = 0) -> list[dict]:
+    """최근 이벤트를 반환한다(추적 조회용). session_id로 필터 가능.
+
+    since > 0 이면 seq > since 인 이벤트만 오래된 순으로 반환한다.
+    로그는 append-only라 세션별 seq가 단조 증가하므로(agent.py가 세션별 카운터 유지),
+    역방향 순회 중 첫 seq <= since 행에서 즉시 멈춘다 — 그보다 오래된 행은 전부 제외 대상.
+    """
     if not LOG_DIR.is_dir():
         return []
     files = sorted(LOG_DIR.glob("events-*.jsonl"))
@@ -59,6 +64,8 @@ def tail(session_id: str = "", limit: int = 200) -> list[dict]:
                     continue
                 if session_id and row.get("session_id") != session_id:
                     continue
+                if since and row.get("seq", 0) <= since:
+                    return list(reversed(rows))
                 rows.append(row)
                 if len(rows) >= limit:
                     return list(reversed(rows))

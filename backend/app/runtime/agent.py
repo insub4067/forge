@@ -295,6 +295,9 @@ class AgentRuntime:
         self._cancel_sessions: set[str] = set()
         self._injections: dict[str, list[str]] = {}
         self._running_sessions: set[str] = set()
+        # 세션별 마지막 이벤트 seq — run마다 0부터 시작하면 폴링 since가 깨지므로
+        # 세션 단위로 단조 증가시켜 eventlog.tail(since)의 전제를 보장한다.
+        self._last_seq: dict[str, int] = {}
         # reasoning_content 400을 한 번 겪은 세션 — 이후 호출은 미리 reasoning을 벗긴다.
         self._strip_reasoning_sessions: set[str] = set()
         self._auto_approve_sessions: set[str] = set()
@@ -1025,11 +1028,18 @@ class AgentRuntime:
         workspace: str | None = None,
     ) -> list[dict]:
         ws = workspace or settings.workspace
-        seq = 0
+        # 재시작 내성: _last_seq는 in-memory라 서버 재시작 시 비어 있다. 세션의 seq를 처음
+        # 쓸 때 eventlog에서 그 세션의 마지막 seq를 읽어 seed — 이미 로그에 쌓인 높은 seq와
+        # 충돌해 폴링 dedup이 깨지는 것을 막는다.
+        if session_id not in self._last_seq:
+            _prev = eventlog.tail(session_id, limit=1)
+            self._last_seq[session_id] = _prev[0]["seq"] if _prev else 0
+        seq = self._last_seq[session_id]
 
         async def send(event_type: str, data: dict[str, Any]) -> None:
             nonlocal seq
             seq += 1
+            self._last_seq[session_id] = seq
             # 라이브 상태 갱신(스트림이 끊겨도 /status로 지금 뭘 하는지 조회 가능) + durable 이벤트 로그.
             fields: dict[str, Any] = {"last_event": event_type}
             if event_type == "role_start":

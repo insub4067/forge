@@ -150,6 +150,16 @@ async def chat(req: Request):
     message = str(body.get("message", ""))
     runtime.set_auto_approve(session_id, bool(body.get("auto_approve", False)))
     runtime.set_model_tier(session_id, str(body.get("model_tier", "auto")))
+    # 폴링 시작점: 이번 run 이전까지 기록된 마지막 seq. run마다 seq를 새로 세지 않고
+    # 세션 단위로 단조 증가시키므로, 이 값부터 새 이벤트를 안전하게 이어 받는다.
+    from .. import eventlog
+    _prev = eventlog.tail(session_id, limit=1)
+    _base_seq = _prev[0]["seq"] if _prev else 0
+    _sse_headers = {
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+        "X-Last-Seq": str(_base_seq),
+    }
 
     # 이미 실행 중인 세션이면 새 run을 띄우지 않고 기존 run에 주입한다 —
     # 같은 세션에 run이 겹쳐 돌며 상태를 밟아 멈추는 것을 방지(동시 run 레이스).
@@ -164,7 +174,7 @@ async def chat(req: Request):
                        "status": "queued",
                        "content": "이미 실행 중인 작업에 메시지를 추가했습니다."}}, ensure_ascii=False)}
 
-        return EventSourceResponse(queued_gen(), headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+        return EventSourceResponse(queued_gen(), headers=_sse_headers)
 
     room = await store.get_room(session_id)
     workspace_path = room["workspace_path"] if room else None
@@ -227,7 +237,7 @@ async def chat(req: Request):
                 "data": json.dumps(evt, ensure_ascii=False),
             }
 
-    return EventSourceResponse(gen(), headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+    return EventSourceResponse(gen(), headers=_sse_headers)
 
 
 @router.post("/rooms")
@@ -324,6 +334,19 @@ async def session_status(session_id: str):
     """에이전트 라이브 상태 — 스트림이 끊겨도 언제나 조회 가능.
     running / role / last_event / idle_seconds / waiting_for(승인·질문) / pending."""
     return runtime.get_status(session_id)
+
+
+@router.get("/sessions/{session_id}/events")
+async def session_events(session_id: str, since: int = 0):
+    """seq > since 인 이벤트만 반환 — 폴링으로 SSE를 보완(프록시 버퍼링 내성).
+
+    SSE와 eventlog는 같은 seq를 쓰므로, 폴링 응답을 seq로 dedup하면 중복 없이
+    진행 상황을 이어 그릴 수 있다."""
+    from .. import eventlog
+    events = eventlog.tail(session_id, limit=1000, since=since)
+    return {"events": [
+        {"seq": e["seq"], "type": e["type"], "data": e["data"]} for e in events
+    ]}
 
 
 @router.get("/admin/action-log")

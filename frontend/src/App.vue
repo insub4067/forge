@@ -295,6 +295,7 @@ const kanbanOpen = ref({
 let touchStartX = 0
 let touchStartY = 0
 let runningPoll = null
+let eventPollTimer = null
 
 // 앱을 껐다 켰을 때 서버에서 세션이 아직 실행 중인지 확인 → 완료 시 자동 갱신
 // 스트림이 끊겨도 에이전트 상태를 언제나 조회한다(running/role/대기/idle).
@@ -1628,6 +1629,12 @@ function diffClass(line) {
   return ''
 }
 function handleEvent(evt, assistant) {
+  // seq dedup: SSE와 폴링이 같은 seq를 쓰므로, 이미 적용한 seq 이하는 무시한다.
+  // text_delta는 content를 누적하므로 중복 적용 시 텍스트가 두 배가 된다.
+  if (evt.seq != null) {
+    if (evt.seq <= (assistant.lastSeq || 0)) return
+    assistant.lastSeq = evt.seq
+  }
   const d = evt.data || {}
   switch (evt.type) {
     case 'role_start':
@@ -1708,6 +1715,35 @@ function handleEvent(evt, assistant) {
       break
   }
   maybeScrollBottom()
+}
+
+// 실행 중 진행을 eventlog 폴링으로 렌더 — Cloudflare가 SSE를 버퍼링해 폰에서
+// '실행 중'만 보이던 문제 해결. SSE와 폴링은 같은 seq를 쓰므로 handleEvent의
+// seq dedup이 중복을 막는다(데스크톱은 매번 '새 이벤트 없음' → 무동작).
+function startEventPolling(assistant) {
+  if (eventPollTimer) return
+  eventPollTimer = setInterval(async () => {
+    const id = currentRoomId.value
+    if (!id) return stopEventPolling()
+    // run이 끝났으면(SSE done 또는 서버 idle) 멈춘다.
+    if (!busy.value && !sessionRunning.value) return stopEventPolling()
+    try {
+      const res = await fetch(`/api/sessions/${id}/events?since=${assistant.lastSeq || 0}`)
+      if (!res.ok) return
+      const { events } = await res.json()
+      for (const evt of events) {
+        handleEvent({ seq: evt.seq, type: evt.type, data: evt.data }, assistant)
+        if (evt.type === 'done') { stopEventPolling(); break }
+      }
+    } catch {}
+  }, 1000)
+}
+
+function stopEventPolling() {
+  if (eventPollTimer) {
+    clearInterval(eventPollTimer)
+    eventPollTimer = null
+  }
 }
 
 async function steerDuringRun(text) {
@@ -1802,7 +1838,11 @@ async function send() {
     })
     console.log('[forge] 응답:', res.status, res.headers.get('content-type'))
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
+    // 폴링·SSE 시작점: 이번 run 직전까지의 마지막 seq. 이 값부터 새 이벤트를 이어받는다.
+    assistant.lastSeq = Number(res.headers.get('X-Last-Seq')) || 0
     debug.value = '연결됨'
+    // SSE와 함께 폴러 시작 — 폰(SSE 버퍼링)은 폴러가 진행을 채우고, 데스크톱은 무동작.
+    startEventPolling(assistant)
 
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
@@ -1835,9 +1875,9 @@ async function send() {
           try {
             const evt = JSON.parse(data)
             gotEvents = true
-            if (evt.type === 'done') sawDone = true
+            if (evt.type === 'done') { sawDone = true; stopEventPolling() }
             if (eventCount <= 5) console.log('[forge] 이벤트', eventCount, ':', evt.type)
-            handleEvent({ type: evt.type, data: evt.data }, assistant)
+            handleEvent({ seq: evt.seq, type: evt.type, data: evt.data }, assistant)
             debug.value = `이벤트 ${eventCount} · ${evt.type}`
           } catch (e) {
             console.log('[forge] 파싱 실패:', e, data.slice(0, 80))
@@ -1851,6 +1891,7 @@ async function send() {
     debug.value = '오류: ' + (err.message || err)
   } finally {
     busy.value = false
+    stopEventPolling()
     scrollBottom()
     // 스트림이 done 없이 끊겼을 수도 있으므로 서버 상태를 확인 → 아직 돌면 폴링 시작.
     // (모바일에서 스트림이 조용히 끊기면 sessionRunning이 false로 남아 '끝난 것처럼' 보이던 문제)
