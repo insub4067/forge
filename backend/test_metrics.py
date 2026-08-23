@@ -82,12 +82,20 @@ async def test_db_aggregation():
         # 3. Flash planner 기록 / 9. skill 기록
         assert ma["developer_calls"] == 2 and ma["pro_calls"] == 0
         assert ma["selected_skills"] == "a, b"
+        # 모델별 집계: 세션 a는 전부 flash 3회
+        assert ma["model_calls"].get("deepseek-v4-flash") == 3
+        assert ma["model_calls"].get("deepseek-v4-pro", 0) == 0
+        assert ma["model_tokens"]["deepseek-v4-flash"] == 2180
 
         # 2. failed 세션 집계 / Sr 승격(developer pro) / retry
         mb = await store.session_metrics(b)
         assert mb["final_status"] == "failed"
         assert mb["developer_calls"] == 2 and mb["pro_calls"] == 1
         assert mb["total_retries"] == 2
+        # 모델별 집계: 세션 b는 flash 1회 + pro 1회
+        assert mb["model_calls"]["deepseek-v4-flash"] == 1 and mb["model_calls"]["deepseek-v4-pro"] == 1
+        assert mb["model_tokens"]["deepseek-v4-flash"] == 900
+        assert mb["model_tokens"]["deepseek-v4-pro"] == 680
 
         # 비용: flash/pro 모두 가격표에 있으므로 priced == 전체
         runs_a = await store.session_agent_runs(a)

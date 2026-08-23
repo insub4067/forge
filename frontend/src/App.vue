@@ -571,6 +571,20 @@ function sessionRoleBreakdown() {
     .sort((a, b) => b.total - a.total)
 }
 
+function sessionModelBreakdown() {
+  const agg = {}
+  for (const r of sessionRuns.value) {
+    const k = r.model || 'unknown'
+    if (!agg[k]) agg[k] = { model: k, count: 0, prompt: 0, completion: 0 }
+    agg[k].count++
+    agg[k].prompt += r.prompt_tokens || 0
+    agg[k].completion += r.completion_tokens || 0
+  }
+  return Object.values(agg)
+    .map((a) => ({ ...a, total: a.prompt + a.completion }))
+    .sort((a, b) => b.total - a.total)
+}
+
 function refreshAdmin() {
   loadAdmin()
   loadBalance()
@@ -2763,6 +2777,19 @@ document.addEventListener('visibilitychange', () => {
           </div>
           <div v-if="!adminStats.roles.length" class="admin-sub">기록 없음</div>
         </div>
+        <div v-if="adminStats" class="admin-section">
+          <div class="admin-stat-title">모델별 토큰 소비 ({{ adminStats.days }}일)</div>
+          <div v-for="m in (adminStats.models || [])" :key="m.model" class="token-row">
+            <div class="token-row-head">
+              <span>{{ m.model }} <span class="run-count">×{{ m.count }}</span></span>
+              <span class="mono">{{ formatTokens(m.tokens) }} · {{ m.percent }}%</span>
+            </div>
+            <div class="token-bar">
+              <div class="token-bar-fill" :style="{ width: tokenBarPct(m.tokens) + '%' }"></div>
+            </div>
+          </div>
+          <div v-if="!(adminStats.models || []).length" class="admin-sub">기록 없음</div>
+        </div>
         <button v-if="adminStats" class="detail-link" @click="showAllRuns = true">
           세션별 실행 이력 {{ adminStats.rooms.length }}개 보기 →
         </button>
@@ -2862,6 +2889,15 @@ document.addEventListener('visibilitychange', () => {
           <div v-for="a in sessionRoleBreakdown()" :key="a.role" class="admin-row">
             <span>{{ a.role }} <span class="run-count">×{{ a.count }}</span></span>
             <span class="mono">{{ formatTokens(a.total) }}</span>
+          </div>
+          <div v-if="!sessionRuns.length" class="admin-sub">기록 없음</div>
+        </div>
+
+        <div class="admin-section">
+          <div class="admin-stat-title">모델별 사용량</div>
+          <div v-for="m in sessionModelBreakdown()" :key="m.model" class="admin-row">
+            <span>{{ m.model }} <span class="run-count">×{{ m.count }}</span></span>
+            <span class="mono">{{ formatTokens(m.total) }}</span>
           </div>
           <div v-if="!sessionRuns.length" class="admin-sub">기록 없음</div>
         </div>

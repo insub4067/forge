@@ -365,9 +365,14 @@ def _aggregate_runs(runs: list) -> dict:
     miss = sum(r.cache_miss_tokens for r in runs)
     role_tokens: dict[str, int] = {}
     role_calls: dict[str, int] = {}
+    model_tokens: dict[str, int] = {}
+    model_calls: dict[str, int] = {}
     for r in runs:
         role_tokens[r.role] = role_tokens.get(r.role, 0) + r.prompt_tokens + r.completion_tokens
         role_calls[r.role] = role_calls.get(r.role, 0) + 1
+        m = r.model or "unknown"
+        model_tokens[m] = model_tokens.get(m, 0) + r.prompt_tokens + r.completion_tokens
+        model_calls[m] = model_calls.get(m, 0) + 1
     return {
         "prompt_tokens": prompt,
         "completion_tokens": completion,
@@ -382,6 +387,8 @@ def _aggregate_runs(runs: list) -> dict:
         "pro_calls": sum(1 for r in runs if "pro" in (r.model or "").lower()),
         "role_tokens": role_tokens,
         "role_calls": role_calls,
+        "model_tokens": model_tokens,
+        "model_calls": model_calls,
     }
 
 
@@ -528,9 +535,14 @@ async def admin_stats(days: int = 7) -> dict:
 
         role_counts: dict[str, int] = {}
         role_tokens: dict[str, int] = {}
+        model_counts: dict[str, int] = {}
+        model_tokens: dict[str, int] = {}
         for r in runs:
             role_counts[r.role] = role_counts.get(r.role, 0) + 1
             role_tokens[r.role] = role_tokens.get(r.role, 0) + r.prompt_tokens + r.completion_tokens
+            m = r.model or "unknown"
+            model_counts[m] = model_counts.get(m, 0) + 1
+            model_tokens[m] = model_tokens.get(m, 0) + r.prompt_tokens + r.completion_tokens
 
         total_runs = len(runs)
         # 현재 아키텍처의 활성 역할만 노출한다(과거 planner/coder/reviewer/debugger 제외).
@@ -554,6 +566,18 @@ async def admin_stats(days: int = 7) -> dict:
             for sid, c in sorted(room_counts.items(), key=lambda x: -x[1])
         ]
 
+        # 모델별 집계 — flash/pro 등 LLM 모델 단위 토큰 소비 비교용.
+        models = [
+            {
+                "model": m,
+                "count": model_counts[m],
+                "tokens": model_tokens[m],
+                "percent": round(model_tokens[m] / (total_prompt + total_completion) * 100, 1)
+                if (total_prompt + total_completion) else 0,
+            }
+            for m in sorted(model_tokens, key=lambda x: -model_tokens[x])
+        ]
+
         return {
             "days": days,
             "total_runs": total_runs,
@@ -561,6 +585,7 @@ async def admin_stats(days: int = 7) -> dict:
             "total_prompt": total_prompt,
             "total_completion": total_completion,
             "roles": roles,
+            "models": models,
             "rooms": rooms,
         }
 
