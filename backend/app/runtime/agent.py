@@ -1000,7 +1000,7 @@ class AgentRuntime:
                     for _t in tasks:
                         _t["status"] = _clamp_task_status(_t.get("status", "todo"))
                     if session_id:
-                        await store.replace_tasks(session_id, tasks)
+                        tasks = await store.replace_tasks(session_id, tasks)
                     await send("task_update", {"tasks": tasks})
                     result = f"{len(tasks)}개 태스크를 등록했습니다."
                     await send("tool_result", {"name": name, "result": result})
@@ -1063,7 +1063,7 @@ class AgentRuntime:
                     t["status"] = "done"
                     changed = True
             if changed:
-                await store.replace_tasks(session_id, tasks)
+                tasks = await store.replace_tasks(session_id, tasks)
                 await send("task_update", {"tasks": tasks})
         except Exception as err:
             error_log.record("finalize_tasks", str(err), session_id)
@@ -1081,7 +1081,7 @@ class AgentRuntime:
                     t["status"] = "testing"
                     changed = True
             if changed:
-                await store.replace_tasks(session_id, tasks)
+                tasks = await store.replace_tasks(session_id, tasks)
                 await send("task_update", {"tasks": tasks})
         except Exception as err:
             error_log.record("mark_verifying", str(err), session_id)

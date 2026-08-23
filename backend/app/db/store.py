@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timedelta
 
@@ -272,19 +273,103 @@ async def save_checkpoint(session_id: str, step_no: int, git_sha: str) -> None:
         await s.commit()
 
 
-async def replace_tasks(session_id: str, tasks: list[dict]) -> None:
+def task_key(title: str) -> str:
+    """태스크 동일성 키. 모델이 같은 태스크의 제목에 괄호 주석을 덧붙이거나
+    구두점을 바꿔도 같은 태스크로 본다("A" ↔ "A (이미 구현·테스트 완료)")."""
+    t = re.sub(r"[(\[（【].*?[)\]）】]", " ", title or "")
+    t = re.sub(r"[\s·,.:;\-—~/]+", " ", t).strip().lower()
+    return t
+
+
+def _match_task(existing: list[dict], key: str, used: set) -> dict | None:
+    """같은 키 우선, 없으면 접두 일치(6자 이상 — 짧은 제목의 오매칭 방지)."""
+    if not key:
+        return None
+    for e in existing:
+        if e.get("id") in used:
+            continue
+        ek = task_key(e.get("title", ""))
+        if ek == key:
+            return e
+    for e in existing:
+        if e.get("id") in used:
+            continue
+        ek = task_key(e.get("title", ""))
+        if len(key) >= 6 and len(ek) >= 6 and (ek.startswith(key) or key.startswith(ek)):
+            return e
+    return None
+
+
+def merge_tasks(existing: list[dict], incoming: list[dict]) -> list[dict]:
+    """태스크 신원을 유지한 병합(순수 함수 — DB 없이 검증 가능).
+
+    모델은 매번 전체 목록을 다시 보내고 제목도 조금씩 고쳐 쓴다. 제목을 신원으로
+    삼으면 같은 태스크가 새 태스크로 다시 생겨 목록이 중복된다. 그래서 키로 기존
+    태스크를 찾아 **id와 최초 제목을 유지**하고 상태/진행률만 갱신한다.
+    한 요청 안에 같은 키가 두 번 오면 첫 번째만 남긴다.
+    반환 항목의 id가 None이면 새로 만들 태스크, 아니면 기존 태스크 갱신.
+    """
+    out: list[dict] = []
+    used: set = set()
+    seen: set = set()
+    for t in incoming:
+        title = str(t.get("title", "")).strip()
+        if not title:
+            continue
+        key = task_key(title)
+        if key in seen:
+            continue
+        seen.add(key)
+        m = _match_task(existing, key, used)
+        prog = t.get("progress")
+        if m:
+            used.add(m.get("id"))
+            out.append({
+                "id": m.get("id"),
+                "title": m.get("title", title),   # 제목은 처음 것을 유지(표시 흔들림 방지)
+                "status": str(t.get("status", m.get("status", "todo"))),
+                "progress": int(prog if prog is not None else m.get("progress", 0) or 0),
+            })
+        else:
+            out.append({
+                "id": None,
+                "title": title,
+                "status": str(t.get("status", "todo")),
+                "progress": int(prog or 0),
+            })
+    return out
+
+
+async def replace_tasks(session_id: str, tasks: list[dict]) -> list[dict]:
+    """모델이 준 목록으로 태스크를 갱신하고, 신원이 유지된 최종 목록을 반환한다."""
     async with async_session() as s:
-        await s.execute(delete(Task).where(Task.session_id == session_id))
-        for t in tasks:
-            s.add(
-                Task(
-                    session_id=session_id,
-                    title=str(t.get("title", "")),
-                    status=str(t.get("status", "todo")),
-                    progress=int(t.get("progress", 0)),
-                )
-            )
+        rows = (await s.execute(
+            select(Task).where(Task.session_id == session_id).order_by(Task.id)
+        )).scalars().all()
+        by_id = {r.id: r for r in rows}
+        existing = [{"id": r.id, "title": r.title, "status": r.status,
+                     "progress": r.progress} for r in rows]
+        merged = merge_tasks(existing, tasks)
+        keep: set = set()
+        for m in merged:
+            row = by_id.get(m["id"]) if m["id"] is not None else None
+            if row is None:
+                row = Task(session_id=session_id, title=m["title"],
+                           status=m["status"], progress=m["progress"])
+                s.add(row)
+            else:
+                row.status = m["status"]
+                row.progress = m["progress"]
+                keep.add(row.id)
+        for r in rows:
+            if r.id not in keep:
+                await s.delete(r)
         await s.commit()
+        result = (await s.execute(
+            select(Task).where(Task.session_id == session_id).order_by(Task.id)
+        )).scalars().all()
+        return [{"id": r.id, "title": r.title, "status": r.status,
+                 "progress": r.progress} for r in result]
 
 
 async def list_tasks(session_id: str) -> list[dict]:

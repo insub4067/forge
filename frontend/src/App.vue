@@ -167,7 +167,6 @@ let camSeq = 0
 let camWarmup = 0
 const tasks = ref([])
 // 칸반 카드 상태 변경을 채팅에 알리기 위한 직전 상태 스냅샷(title→status).
-let lastTaskStatus = {}
 const showKanban = ref(false)
 const showWorkspacePicker = ref(false)
 const fsPath = ref('')
@@ -394,6 +393,26 @@ function runningBannerText() {
   if (role) return `${role} 진행 중${idle}`
   return 'Mac에서 작업 진행 중'
 }
+// 도구 이름 → 지금 무슨 일인지. 프론트가 상태를 만들어내지 않고, 백엔드가 보낸
+// 도구 이름·검증 이벤트만 사람 말로 옮긴다. 모르면 '작업 중'.
+const TOOL_WORK = {
+  read_file: '분석 중', list_dir: '분석 중', grep: '분석 중',
+  write_file: '구현 중', edit_file: '구현 중',
+  bash: '실행 중', build_frontend: '검증 중',
+  update_tasks: '작업 중', save_skill: '정리 중', ask_user: '답변 대기',
+}
+
+function typingLabel(m) {
+  if (!busy.value) return liveActivityText()
+  // 검증/복구는 프로세스가 보낸 이벤트로만 표시한다(추측 없음).
+  if (m.verifyPhase) return m.verifyPhase
+  const p = m.phases[m.phases.length - 1]
+  const t = p && p.tools.find((x) => x.status === 'running')
+  if (t) return TOOL_WORK[t.name] || '작업 중'
+  if (p && p.text) return '작성 중'
+  return '작업 중'
+}
+
 // 상세 화면 없이도 "지금 무엇을" 한 줄로. 스트림 끊겨도 폴링으로 갱신.
 function liveActivityText() {
   const s = agentStatus.value
@@ -1077,7 +1096,6 @@ async function loadMessages(isNew = false) {
 
 async function selectRoom(id, isNew = false) {
   stopRunningPoll()
-  lastTaskStatus = {}
   sessionRunning.value = false
   searchQuery.value = ''
   searchResults.value = []
@@ -1115,6 +1133,22 @@ async function jumpToMessage(r) {
     }
   }, 160)
 }
+
+// 지금 무슨 태스크를 하는지 한 줄 — 스크롤 위치와 무관하게 composer 위에 고정.
+// 상태는 백엔드 task_update가 준 그대로 쓴다.
+const taskBar = computed(() => {
+  const list = tasks.value || []
+  if (!list.length || !(busy.value || sessionRunning.value)) return null
+  const cur =
+    list.find((t) => t.status === 'working') ||
+    list.find((t) => t.status === 'testing') ||
+    list.find((t) => t.status === 'todo')
+  return {
+    title: cur ? cur.title : '마무리 중',
+    done: list.filter((t) => t.status === 'done').length,
+    total: list.length,
+  }
+})
 
 // 학습 후보(RefinementCandidate) — 실행 근거로 만들어진 개선안. 승인해도 자동 적용은 없다.
 const refinements = ref([])
@@ -1594,6 +1628,15 @@ function startPhase(m, role = '', model = '') {
   return p
 }
 
+// 도구 항목의 안정 key — 최근 N개만 보여줄 때 인덱스 key로는 DOM이 잘못 재사용된다.
+let toolSeq = 0
+// 기본 노출 개수. 실행 중인 도구는 항상 마지막이라 이 창에 들어온다.
+const ACTIVITY_LIMIT = 4
+
+function visibleTools(p) {
+  return p.showAll || p.tools.length <= ACTIVITY_LIMIT ? p.tools : p.tools.slice(-ACTIVITY_LIMIT)
+}
+
 function activePhase(m) {
   if (!m.phases.length) return startPhase(m)
   return m.phases[m.phases.length - 1]
@@ -1710,7 +1753,7 @@ function handleEvent(evt, assistant) {
       activePhase(assistant).text += d.content || ''
       break
     case 'tool_call':
-      activePhase(assistant).tools.push({ name: d.name, args: d.args, status: 'running', result: '', diff: '' })
+      activePhase(assistant).tools.push({ id: ++toolSeq, name: d.name, args: d.args, status: 'running', result: '', diff: '' })
       break
     case 'tool_result': {
       const p = activePhase(assistant)
@@ -1741,20 +1784,20 @@ function handleEvent(evt, assistant) {
     case 'task_update': {
       const newTasks = d.tasks || []
       const labels = { todo: '할 일', working: '진행', testing: '테스트', done: '완료', planning: '할 일', in_progress: '진행', 'in-progress': '진행', review: '테스트', verifying: '테스트', debug: '진행' }
+      // 태스크당 한 줄 — 상태가 바뀌어도 줄이 늘지 않는다(id가 신원, 제목은 백엔드가 고정).
+      // 재연결로 예전 이벤트가 재생돼도 같은 줄이 갱신될 뿐 중복되지 않는다.
       if (!assistant.taskNotes) assistant.taskNotes = []
       for (const t of newTasks) {
-        const prev = lastTaskStatus[t.title]
-        if (prev !== t.status) {
-          assistant.taskNotes.push({
-            title: t.title,
-            from: prev ? (labels[prev] || prev) : '',
-            to: labels[t.status] || t.status,
-            done: t.status === 'done',
-          })
+        const key = t.id != null ? `id:${t.id}` : `t:${t.title}`
+        let note = assistant.taskNotes.find((n) => n.key === key)
+        if (!note) {
+          note = { key, title: t.title, to: '', done: false }
+          assistant.taskNotes.push(note)
         }
+        note.title = t.title
+        note.to = labels[t.status] || t.status
+        note.done = t.status === 'done'
       }
-      lastTaskStatus = {}
-      for (const t of newTasks) lastTaskStatus[t.title] = t.status
       tasks.value = newTasks
       break
     }
@@ -1769,10 +1812,20 @@ function handleEvent(evt, assistant) {
     case 'context_usage':
       assistant.context = d
       break
+    case 'verify_start':
+      assistant.verifyPhase = '검증 중'
+      break
+    case 'verify_failed':
+      assistant.verifyPhase = '복구 중'
+      break
+    case 'verify_unavailable':
+      assistant.verifyPhase = ''
+      break
     case 'refinement_candidate':
       loadRefinements()
       break
     case 'done':
+      assistant.verifyPhase = ''
       assistant.phases.forEach((p) => {
         p.running = false
         p.collapsed = true
@@ -2434,9 +2487,15 @@ document.addEventListener('visibilitychange', () => {
                   <div class="thinking-body">{{ p.thinking }}</div>
                 </details>
 
+                <button
+                  v-if="!p.showAll && p.tools.length > ACTIVITY_LIMIT"
+                  class="activity-more"
+                  @click.stop="p.showAll = true"
+                >이전 활동 {{ p.tools.length - ACTIVITY_LIMIT }}개 보기</button>
+
                 <details
-                  v-for="(t, j) in p.tools"
-                  :key="j"
+                  v-for="t in visibleTools(p)"
+                  :key="t.id"
                   class="tool"
                   :class="t.status"
                   :open="t.status === 'running' || !!(t.diff && t.diff.length)"
@@ -2455,15 +2514,15 @@ document.addEventListener('visibilitychange', () => {
             </div>
 
             <div v-if="(busy || sessionRunning) && i === messages.length - 1" class="typing">
-              <span class="typing-label">{{ busy ? '작성 중' : liveActivityText() }}</span>
+              <span class="typing-label">{{ typingLabel(m) }}</span>
               <span class="typing-dots"><i></i><i></i><i></i></span>
             </div>
 
             <div v-if="m.taskNotes && m.taskNotes.length" class="task-notes">
-              <div v-for="(tn, ti) in m.taskNotes" :key="ti" class="task-note" :class="{ done: tn.done }">
+              <div v-for="tn in m.taskNotes" :key="tn.key" class="task-note" :class="{ done: tn.done }">
                 <span class="task-note-icon">{{ tn.done ? '✓' : '•' }}</span>
                 <span class="task-note-title">{{ tn.title }}</span>
-                <span class="task-note-status">{{ tn.from ? tn.from + ' → ' : '' }}{{ tn.to }}</span>
+                <span class="task-note-status">{{ tn.to }}</span>
               </div>
             </div>
 
@@ -2538,6 +2597,11 @@ document.addEventListener('visibilitychange', () => {
       <button v-if="!isAtBottom" class="jump-bottom" @click="jumpToBottom" aria-label="맨 아래로">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
       </button>
+      <div v-if="taskBar" class="task-bar" @click="showKanban = true; loadTasks()">
+        <span class="task-bar-dot"></span>
+        <span class="task-bar-title">{{ taskBar.title }}</span>
+        <span class="task-bar-count">{{ taskBar.done }}/{{ taskBar.total }}</span>
+      </div>
       <input ref="fileInput" type="file" multiple accept="image/*,.md,.txt,.log,.json,.csv,.yml,.yaml,.toml,.py,.js,.ts,.jsx,.tsx,.vue,.html,.css,.sh,.xml,.java,.go,.rs,.c,.cpp,.h,.sql,text/*" hidden @change="onFileChange" />
       <div class="composer">
     <div v-if="attachedText" class="file-chip">
@@ -2572,7 +2636,7 @@ document.addEventListener('visibilitychange', () => {
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
           </button>
           <div class="composer-chips">
-            <button class="mode-chip" @click="showModelPick = true" aria-label="모델 선택">
+            <button class="mode-chip ghost" @click="showModelPick = true" aria-label="모델 선택">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-4 12.7V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.3A7 7 0 0 0 12 2z"/><path d="M9 22h6"/></svg>
               {{ tierLabel() }}
             </button>
@@ -2580,7 +2644,7 @@ document.addEventListener('visibilitychange', () => {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
               {{ autoApprove ? '자동 승인' : '수동 승인' }}
             </button>
-            <button v-if="busy || sessionRunning" class="mode-chip small" @click="steerMode = steerMode === 'queue' ? 'switch' : 'queue'">
+            <button v-if="busy || sessionRunning" class="mode-chip small ghost" @click="steerMode = steerMode === 'queue' ? 'switch' : 'queue'">
               {{ steerMode === 'queue' ? '작업 대기' : '계획 수정' }}
             </button>
           </div>
