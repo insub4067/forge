@@ -27,27 +27,35 @@
 전체 추세: `GET /api/metrics/summary` — success_rate, avg_tokens_per_success,
 review_first_pass_rate, pro_escalation_rate, debugger_activation_rate, 병목 rule.
 
-## 기준 작업
+## R0 자동 하네스 (`backend/bench.py`)
 
-| 코드 | 유형 | 예시 프롬프트 |
+수동 표 대신 **격리 fixture + 결정적 checker**로 자동 측정한다. task는
+`backend/bench_tasks.py`에 21개(카테고리 21종, COMPLEX 5). 각 task는
+setup(fixture) → agent 실행 → check(테스트 실행·파일 내용·grep) → 집계 구조다.
+LLM에게 "잘했는가"를 묻지 않는다(결정적 판정만).
+
+```
+python bench.py --self-test          # task checker 전수 + 집계 검증(무비용)
+python bench.py --run --repeat 3     # 실제 실행(API 비용)
+python bench.py --run --complex      # COMPLEX만(planner 실험)
+python bench.py --run --task C,D     # 특정 task만
+```
+
+**품질 보증**: `test_bench_quality.py`가 정답 노출·카테고리 다양성·trivial 비중·중복·
+상태 오염을 검사한다. bench self-test는 모든 checker가 미수정 fixture에서 False(false
+positive 없음), 정답 적용 시 True(과도하게 엄격하지 않음)임을 전수 확인한다. stale
+`__pycache__`는 채점 전 제거해 오판을 막는다.
+
+### 실험 플래그 (env, 기본 off — 라이브 무변화)
+
+| 플래그 | 효과 | 용도 |
 |---|---|---|
-| A | 단순 파일 수정 | "README에 실행 방법 한 줄 추가" |
-| B | 단일 버그 수정 | "calc.py의 subtract가 덧셈을 한다 — 고쳐" |
-| C | 여러 파일 리팩터링 | "store의 세션 조회를 공통 헬퍼로 묶어" |
-| D | 테스트 실패 디버깅 | "test_review_loop 실패 원인 찾아 고쳐" |
-| E | UI 수정 | "빈 화면 문구 문구 바꾸고 여백 조정" |
-| F | 일반 질문 | "이 프로젝트 구조 요약해줘" (CHAT 경로) |
+| `FORGE_PLANNER_FLASH=1` | COMPLEX planner를 flash로 | 모델 비용 실험 |
+| `FORGE_PLANNER_OFF=1` | COMPLEX에서 planner 생략 | planner 필요성 실험 |
+| `FORGE_SKILLS_OFF=1` | skill 주입 비활성 | skill 효과 실험 |
 
-## 기록 표 (실행 후 채움)
-
-| 작업 | 성공 | model | prompt | output | cache% | elapsed(s) | Pro | Debugger | $ |
-|---|---|---|---|---|---|---|---|---|---|
-| A |  |  |  |  |  |  |  |  |  |
-| B |  |  |  |  |  |  |  |  |  |
-| C |  |  |  |  |  |  |  |  |  |
-| D |  |  |  |  |  |  |  |  |  |
-| E |  |  |  |  |  |  |  |  |  |
-| F |  |  |  |  |  |  |  |  |  |
+동일 조건에서 Pro/Flash/No-Planner, skills on/off를 A/B로 비교한다. **가장 중요한 gate는
+success_rate** — 비용이 낮아도 성공률이 의미 있게 하락하면 default를 바꾸지 않는다.
 
 ## 해석 지침
 
