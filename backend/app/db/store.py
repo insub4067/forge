@@ -95,6 +95,7 @@ async def get_room(session_id: str) -> dict | None:
             "workspace_path": sess.workspace_path,
             "workspace_locked": sess.workspace_locked,
             "mode": sess.mode,
+            "used_tokens": sess.used_tokens,
         }
 
 

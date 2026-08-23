@@ -1440,6 +1440,14 @@ class AgentRuntime:
         #    "chat"=항상 대화(읽기전용), "work"=항상 작업(검증·커밋), ""=triage 자동 분류.
         _room = await store.get_room(session_id) if session_id else None
         _mode = (_room or {}).get("mode", "") if _room else ""
+        # 선제 compaction — 재시작·긴 세션은 첫 model 호출이 예산을 넘겨 모델 한도에 걸린다.
+        # in-memory 요약은 재시작 시 유실되므로, 저장된 used_tokens(마지막 실측)로 미리 판단해
+        # 첫 호출 전에 오래된 대화를 요약해 둔다. 그래야 첫 대화부터 컨텍스트가 줄어든다.
+        if (session_id and _room
+                and _room.get("used_tokens", 0) > settings.logical_budget * CONTEXT_COMPACT_RATIO
+                and session_id not in self._compaction):
+            if await self._compact(all_messages, session_id):
+                await send("compaction", {"covered": self._compaction[session_id]["covered"]})
         if _mode == "chat":
             route_kind = "chat"
         elif _mode == "work":
