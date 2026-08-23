@@ -26,7 +26,12 @@ MAX_STEPS = 30
 # Developer는 설계+구현+자체검증+수정을 한 루프에서 하므로 step budget을 넉넉히.
 # (옛 구조의 planner+coder+reviewer+debugger 여러 호출을 한 컨텍스트로 합친 것)
 DEVELOPER_MAX_STEPS = 45
-_ROLE_MAX_STEPS = {"developer": DEVELOPER_MAX_STEPS}
+# Planner/Reviewer는 계획·검증 전담이라 step budget이 작아도 충분(비용·지연 억제).
+PLANNER_MAX_STEPS = 10
+REVIEWER_MAX_STEPS = 12
+_ROLE_MAX_STEPS = {"developer": DEVELOPER_MAX_STEPS,
+                   "planner": PLANNER_MAX_STEPS,
+                   "reviewer": REVIEWER_MAX_STEPS}
 # 막혀서 못 풀 때 pro로 승격해 재시도하는 최대 횟수(무한 루프·비용 폭주 방지).
 MAX_ESCALATIONS = 2
 MAX_REPEATED_CALLS = 3
@@ -36,6 +41,10 @@ CONTEXT_COMPACT_RATIO = 0.75
 COMPACT_KEEP_RECENT = 8
 # 부수효과·승인이 없는 읽기 전용 도구 — 한 응답에 여러 개면 병렬 실행 가능
 READ_ONLY_TOOLS = {"read_file", "list_dir", "grep"}
+# Planner용 도구 스키마(읽기 전용만) — 구현·실행 도구를 주지 않아 계획만 하게 강제한다.
+READ_ONLY_TOOL_SCHEMAS = [
+    t for t in TOOL_SCHEMAS if t["function"]["name"] in READ_ONLY_TOOLS
+]
 
 # Skill 선택 삽입 한도 — skill이 많아져도 system prompt가 폭증하지 않게 상위 N개만,
 # 총 문자 예산 안에서 삽입한다. 관련 skill이 없으면 아무것도 넣지 않는다.
@@ -191,8 +200,8 @@ def _stable_prefix_hash(role: str) -> str:
     return hashlib.sha256(_stable_prefix(role).encode("utf-8")).hexdigest()[:12]
 
 
-def _system_for(role: str, room_memory: str = "", skills: str = "") -> str:
-    # 안정 프리픽스(BASE+role)를 먼저, 동적 tail(memory→skills)을 뒤에 둔다.
+def _system_for(role: str, room_memory: str = "", skills: str = "", plan: str = "") -> str:
+    # 안정 프리픽스(BASE+role)를 먼저, 동적 tail(memory→skills→plan)을 뒤에 둔다.
     parts = [_stable_prefix(role)]
     global_mem = _load_global_memory()
     if global_mem:
@@ -204,7 +213,47 @@ def _system_for(role: str, room_memory: str = "", skills: str = "") -> str:
             "\n\n## 축적된 Skill (재사용 가능한 해결 절차)\n"
             "관련 작업이면 아래 절차를 우선 활용하라.\n" + skills
         )
+    if plan:
+        parts.append(
+            "\n\n## 외부 계획 (Planner가 수립 — 순서와 완료 조건을 따른다)\n" + plan
+        )
     return "".join(parts)
+
+
+def _planner_context(all_messages: list[dict], max_msgs: int = 8) -> list[dict]:
+    """Planner에게 주는 축소 컨텍스트 — 전체 재전송 비용을 피하려고 최근 메시지만 준다.
+    (과거 planner가 컨텍스트 전체를 재전송해 비용 73%를 차지했던 문제의 재발 방지)"""
+    return [*all_messages[-max_msgs:]]
+
+
+def _last_assistant_text(messages: list[dict]) -> str:
+    """마지막 assistant 텍스트(계획·리뷰 판정 추출용)."""
+    for m in reversed(messages):
+        if m.get("role") == "assistant":
+            content = m.get("content", "")
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+    return ""
+
+
+# auto 모드의 multi 전환 기준 — 요청 특성이 복잡 작업으로 보이면 Planner가 선행한다.
+_COMPLEX_KEYWORDS = (
+    "설계", "리팩토링", "리팩터링", "아키텍처", "마이그레이션", "전체",
+    "여러 모듈", "다중 모듈", "시스템 전반", "모노레포", "대규모",
+)
+
+
+def _estimate_complexity(goal: str, all_messages: list[dict]) -> str:
+    """simple | complex — 세션의 에이전트 모드가 auto일 때 single/multi를 가른다."""
+    text = goal or ""
+    if any(k in text for k in _COMPLEX_KEYWORDS):
+        return "complex"
+    if len(text) > 300:  # 상세한 요구사항 = 다단계 작업 가능성
+        return "complex"
+    user_msgs = [m for m in all_messages if m.get("role") == "user"]
+    if len(user_msgs) >= 5:  # 이미 여러 단계를 밟은 긴 작업
+        return "complex"
+    return "simple"
 
 
 class AgentRuntime:
@@ -222,6 +271,8 @@ class AgentRuntime:
         self._auto_approve_sessions: set[str] = set()
         # 세션별 모델 티어: auto(flash+막히면 pro) | pro(항상) | flash(승격 없음)
         self._model_tier: dict[str, str] = {}
+        # 세션별 에이전트 모드: auto(복잡도 기반 자동) | multi(경량 3역할) | single(올인원)
+        self._agent_mode: dict[str, str] = {}
         # 세션별 컨텍스트 압축 상태: {session_id: {"summary": str, "covered": int}}
         # summary가 all_messages[:covered]를 대체(모델 전송 시에만).
         self._compaction: dict[str, dict] = {}
@@ -537,6 +588,13 @@ class AgentRuntime:
     def set_model_tier(self, session_id: str, tier: str) -> None:
         self._model_tier[session_id] = tier if tier in ("auto", "pro", "flash") else "auto"
 
+    def set_agent_mode(self, session_id: str, mode: str) -> None:
+        """에이전트 모드: auto(복잡도 기반 자동 전환) | multi(Planner→Developer→Reviewer) | single(올인원)."""
+        self._agent_mode[session_id] = mode if mode in ("auto", "multi", "single") else "auto"
+
+    def get_agent_mode(self, session_id: str) -> str:
+        return self._agent_mode.get(session_id, "auto")
+
     def resolve_pending_approvals(self, session_id: str = "") -> int:
         """해당 세션의 대기 승인만 승인 처리한다(자동 승인 켤 때).
         session_id로 필터하지 않으면 한 세션의 auto-approve가 다른 세션의 pending까지 승인한다."""
@@ -649,6 +707,7 @@ class AgentRuntime:
         complexity: str = "normal",
         escalate: bool = False,
         has_image: bool = False,
+        plan: str = "",
     ) -> tuple:
         route = self.router.select_model(role, retry_count, complexity, escalate=escalate,
                                          has_image=has_image)
@@ -657,7 +716,7 @@ class AgentRuntime:
             "role": role, "model": route["model"], "thinking": route["thinking"],
             "prefix_hash": _stable_prefix_hash(role),
         })
-        system_msg = {"role": "system", "content": _system_for(role, room_memory, skills)}
+        system_msg = {"role": "system", "content": _system_for(role, room_memory, skills, plan)}
 
         total_prompt = 0
         total_completion = 0
@@ -1016,28 +1075,78 @@ class AgentRuntime:
                          "" if status == "done" else self._finish_message(status))
             return all_messages
 
-        # 1. Developer — 코드 작업 실행 역할. 설계(3줄)+구현+자체검증+수정을 한 컨텍스트에서.
-        #    모델 티어(사용자 선택): pro=항상 pro / flash=승격 없음 / auto=막히면 pro 승격.
+        # 1. 에이전트 모드 결정 — 사용자 명시(multi/single)가 최우선, auto는 복잡도 기반 자동.
+        mode = self.get_agent_mode(session_id)
+        complexity = _estimate_complexity(goal, all_messages)
+        use_multi = (mode == "multi") or (mode == "auto" and complexity == "complex")
+        await send("agent_mode", {
+            "mode": "multi" if use_multi else "single",
+            "agent_mode": mode,
+            "complexity": complexity,
+        })
+
+        # 모델 티어(사용자 선택): pro=항상 pro / flash=승격 없음 / auto=막히면 pro 승격.
         tier = self._model_tier.get(session_id, "auto")
         always_pro = tier == "pro" or settings.developer_pro
-        status, p, c, route = await self._run_role(
-            "developer", all_messages, send, session_id, ws, state, recent_calls,
-            step_base, room_memory, skills=skills, escalate=always_pro, has_image=has_image,
-        )
-        await record("developer", p, c, route)
 
-        # auto 티어만 막힘 시 pro로 승격해 상한 루프로 재시도. flash는 승격 없음, pro는 이미 pro.
-        #    (막힘=max_steps/repeated일 때만. 무한 루프·비용 폭주는 MAX_ESCALATIONS로 제한.)
-        escalations = 0
-        while (tier == "auto" and not always_pro
-               and status in ("max_steps", "repeated") and escalations < MAX_ESCALATIONS):
-            escalations += 1
-            step_base += DEVELOPER_MAX_STEPS
+        async def _run_developer(plan: str = ""):
+            """Developer 실행 + 막힘 시 pro 승격 상한 루프(MAX_ESCALATIONS로 캡).
+            multi 모드에서도 승격은 그대로 동작한다. plan이 있으면 system에 주입."""
+            nonlocal step_base
             status, p, c, route = await self._run_role(
                 "developer", all_messages, send, session_id, ws, state, recent_calls,
-                step_base, room_memory, skills=skills, escalate=True, has_image=has_image,
+                step_base, room_memory, skills=skills, escalate=always_pro,
+                has_image=has_image, plan=plan,
             )
             await record("developer", p, c, route)
+            escalations = 0
+            while (tier == "auto" and not always_pro
+                   and status in ("max_steps", "repeated") and escalations < MAX_ESCALATIONS):
+                escalations += 1
+                step_base += DEVELOPER_MAX_STEPS
+                status, p, c, route = await self._run_role(
+                    "developer", all_messages, send, session_id, ws, state, recent_calls,
+                    step_base, room_memory, skills=skills, escalate=True,
+                    has_image=has_image, plan=plan,
+                )
+                await record("developer", p, c, route)
+            return status
+
+        if use_multi:
+            # 2a. Planner — 계획 수립(최근 맥락 + 읽기 전용 도구만, flash).
+            #     전체 컨텍스트를 재전송하지 않아 과거 planner 비용 문제가 재발하지 않는다.
+            planner_msgs = _planner_context(all_messages)
+            p_status, p, c, route = await self._run_role(
+                "planner", planner_msgs, send, session_id, ws, state, recent_calls,
+                step_base, room_memory, tools=READ_ONLY_TOOL_SCHEMAS, skills=skills,
+            )
+            await record("planner", p, c, route)
+            step_base += PLANNER_MAX_STEPS
+            plan = _last_assistant_text(planner_msgs) if p_status == "done" else ""
+
+            if p_status == "done" and plan:
+                # 2b. Developer — 계획을 받아 실행(+승격 루프).
+                status = await _run_developer(plan)
+                if status == "done":
+                    # 2c. Reviewer — 독립 검증(flash). 문제 시 Developer가 1회 수정
+                    #     (리뷰↔수정 왕복 churn 방지 — 리뷰 루프는 최대 1회).
+                    r_status, p, c, route = await self._run_role(
+                        "reviewer", all_messages, send, session_id, ws, state, recent_calls,
+                        step_base, room_memory, skills=skills,
+                    )
+                    await record("reviewer", p, c, route)
+                    step_base += REVIEWER_MAX_STEPS
+                    review_pass = (r_status == "done"
+                                   and "PASS" in _last_assistant_text(all_messages).upper())
+                    if not review_pass:
+                        # 리뷰 피드백(FAIL 내용)이 컨텍스트에 남아 있어 Developer가 그대로 보고 수정.
+                        status = await _run_developer(plan)
+            else:
+                # Planner 실패 — 안전 폴백: 계획 없이 올인원 Developer로 처리.
+                status = await _run_developer("")
+        else:
+            # single — 기존 올인원 경로 그대로(변경 없음).
+            status = await _run_developer("")
 
         if status != "done":
             await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))

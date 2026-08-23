@@ -148,6 +148,7 @@ async def chat(req: Request):
     message = str(body.get("message", ""))
     runtime.set_auto_approve(session_id, bool(body.get("auto_approve", False)))
     runtime.set_model_tier(session_id, str(body.get("model_tier", "auto")))
+    runtime.set_agent_mode(session_id, str(body.get("agent_mode", "auto")))
 
     # 이미 실행 중인 세션이면 새 run을 띄우지 않고 기존 run에 주입한다 —
     # 같은 세션에 run이 겹쳐 돌며 상태를 밟아 멈추는 것을 방지(동시 run 레이스).
@@ -162,7 +163,7 @@ async def chat(req: Request):
                        "status": "queued",
                        "content": "이미 실행 중인 작업에 메시지를 추가했습니다."}}, ensure_ascii=False)}
 
-        return EventSourceResponse(queued_gen())
+        return EventSourceResponse(queued_gen(), headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
 
     room = await store.get_room(session_id)
     workspace_path = room["workspace_path"] if room else None
@@ -225,7 +226,7 @@ async def chat(req: Request):
                 "data": json.dumps(evt, ensure_ascii=False),
             }
 
-    return EventSourceResponse(gen())
+    return EventSourceResponse(gen(), headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
 
 
 @router.post("/rooms")

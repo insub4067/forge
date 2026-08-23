@@ -23,6 +23,18 @@ class ModelRouter:
                 "thinking": False,
                 "reasoning_effort": "low",
             },
+            # 멀티 모드 계획 전담 — 최근 맥락만 받아 계획을 세우므로 flash+think-medium으로 충분.
+            "planner": {
+                "model": settings.developer_model or settings.coder_model or "deepseek-v4-flash",
+                "thinking": True,
+                "reasoning_effort": "medium",
+            },
+            # 멀티 모드 독립 검증 — git diff·테스트로 확인만 하므로 flash+think-low.
+            "reviewer": {
+                "model": settings.chat_model or "deepseek-v4-flash",
+                "thinking": True,
+                "reasoning_effort": "low",
+            },
             "vision": {
                 "model": settings.vision_model or "deepseek-v4-flash-vision-exp",
                 "thinking": False,
