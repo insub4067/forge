@@ -10,6 +10,24 @@ FORGE는 단순 저비용 LLM wrapper가 아니다.
 
 Proposal 채택 여부도 기능 수나 token 절감보다 success/verification 효과를 먼저 본다.
 
+## 기각·보류 (재검토 트리거 전까지 다시 읽지 말 것)
+
+아래는 2026-08-24 전체 재검토에서 "지금 착수 안 함"으로 결론난 항목이다. 각 재검토 트리거가
+실제로 발생하기 전엔 본문을 다시 정독하지 않는다.
+
+**기각 (재검토 안 함)**
+- `tauri-desktop-host` — 현 "맥 직접 실행 + Cloudflare Access" 배포로 충분. Python backend 번들링 리스크가 크고 success-rate와 무관. 트리거: 다중 사용자 설치형 배포 수요.
+- `home-camera-monitor` — 코딩 하네스와 무관한 optional 모듈. 프라이버시/보안 표면만 넓힌다(현 JPEG polling PoC 유지). 트리거: 홈 모니터를 별도 제품으로 만들기로 결정.
+- `prime-agent` B(Restricted Tool Script) — 벤치 결과 기각(효과 없음). 코드 없음.
+- `claude-code-cleanroom`의 task 상태머신·coordinator/worker 부분 — 현 올인원 Developer + process verification 구조와 상충. (같은 문서의 permission/steering 아이디어 일부는 이미 반영.) 트리거: 다중 worker 병렬 실행 도입.
+
+**보류 (조건 충족 전 착수 금지)**
+- `low-cost-model-routing` (Ling 3.0 Flash·Qwen 등 포함) — DeepSeek flash가 이미 cache 95%로 거의 공짜(6.1M tok/$0.26 실측). 무료 티어는 레이트리밋·프라이버시(비공개 코드 학습)·tool-call 신뢰성 리스크. 트리거: **21-task R0 벤치에서 후보 모델이 동등 success_rate + CPS 우위를 실증**할 때만 어댑터 착수.
+- `web-search-tools` — 트리거: 벤치로 CPS 개선이 확인될 때.
+- `live-screen-preview` WebRTC 고도화 — 현 JPEG 폴링으로 목적 달성. 트리거: 지연이 실사용 병목으로 확인될 때.
+- `durable-worker-resume` D2(worker 프로세스 분리)·`forge-mcp-agent-runtime` remote transport/인증 — 단일 Mac 호스트 + stdio 배포에선 speculative. 트리거: 원격/분산 배포 또는 외부 위임 실수요.
+- `forge-runtime-hardening-roadmap` P1~P6(ExecutionBackend·event replay·benchmark 라우터·병렬 Developer) — 단일 호스트에선 과설계. 트리거: 원격 실행 대상 또는 병렬 실행 수요.
+
 ## Harness Adoption
 
 - `deepseek-harness-adoption.md` — context/pruning/recovery/event logging 등 다수 반영. 당시 Planner 중심 내용은 현재 올인원 Developer 구조와 다를 수 있음.
@@ -26,7 +44,7 @@ Proposal 채택 여부도 기능 수나 token 절감보다 success/verification 
 - `token-cost-reduction.md` — living research. 단, 비용 절감은 항상 success-rate gate 아래에 둔다.
 - `low-cost-model-routing.md` — **proposal/experimental**. Ling 3.0 Flash·Qwen3.7 Flash 등 저가 모델을 동일 Developer Harness에서 CPS 기준으로 평가하고 privacy-aware fallback/routing을 도입하는 제안. (Ox Alpha는 2026-08-23 코드에서 제거 — 문서 내 상태 노트 참고.)
 - `durable-worker-resume.md` — **핵심 Auto Resume 구현됨**. worker 완전 분리/권한 semantics는 추가 과제.
-- `recursive-self-improvement.md` — **부분 구현**. R0 deterministic benchmark + promotion gate 구현, candidate worktree orchestration 미구현.
+- `recursive-self-improvement.md` — **R0+R1 구현**. R0 deterministic benchmark + promotion gate + candidate worktree orchestration(`rsi_run.py`: worktree add→candidate-cmd→bench→gate→report, auto-merge 없음) 구현됨. R2(bottleneck→변경안 자동 제안)·R3(운영/감사 자동화) 미구현.
 - `remote-terminal.md` — **v1 구현됨**. proposal의 Docker-only가 아니라 현재 Mac host PTY.
 - `live-screen-preview.md` — **view-only 1차 구현**. WebRTC 고도화 미구현.
 - `home-camera-monitor.md` — **JPEG polling PoC 구현**. WebRTC/Condition 연동 미구현.
