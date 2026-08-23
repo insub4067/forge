@@ -36,6 +36,7 @@
 ## Product / Capability
 
 - [`global-workspace-skills.md`](global-workspace-skills.md) — Global+Workspace 2-tier skill: **G0/G1 구현됨**(병합·override·경계·save_skill scope·UI 배지, `~/.forge/skills` 인덱스 README). G3 telemetry·G4 promotion 미구현
+- [`durable-worker-resume.md`](durable-worker-resume.md) — Durable Worker/Resume: **설계 proposal**(role 경계 체크포인트→opt-in 재개→worker 분리). 외부 감사가 지적한 최대 reliability gap. 미구현
 - [`recursive-self-improvement.md`](recursive-self-improvement.md) — bounded RSI: **설계 proposal**(telemetry→worktree→고정benchmark→사전식 게이트→사람 승인). 미구현. 선결은 R0 결정적 benchmark 하네스
 - [`tauri-desktop-host.md`](tauri-desktop-host.md) — Desktop Host / sidecar: proposal
 - [`web-search-tools.md`](web-search-tools.md) — bounded web search/fetch: proposal (보류 권장 — 실측 병목 근거 없음, planner 63% 등이 우선)
