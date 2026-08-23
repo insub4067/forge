@@ -1,7 +1,7 @@
 <script setup>
 // 세션 상세 패널 — 컨텍스트·토큰·비용·에이전트/모델별 사용량·실행 이력.
 // App.vue의 showSessionDetail 관련 상태·함수·마크업을 이 컴포넌트로 이관.
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { balance as adminBalance, loadBalance } from '../store'
 
 const props = defineProps({
@@ -25,11 +25,18 @@ const toolUsage = ref([])  // 도구별 호출 횟수(어떤 툴 몇 번)
 const CTX_LABELS = { system_base_role: 'System·규칙', memory: '메모리', skills: 'Skills', history: '대화', tool_results: '도구 결과' }
 const showRunHistory = ref(false)
 const capturing = ref(false)
+// getDisplayMedia는 iOS Safari 등 모바일 브라우저에 없다 — 지원될 때만 버튼을 노출한다
+// (없는 데서 누르면 실패 alert만 떴다. 모바일은 기기 스크린샷을 쓴다).
+const canScreenshot = computed(() => !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia))
 
 // 전체화면 스크린샷 — 브라우저 내장 getDisplayMedia로 화면/창/탭을 캡처해 PNG로 저장.
 // 별도 의존성 없이 전체 화면(모니터)을 담는다. 사용자가 캡처 대상을 선택해야 한다.
 async function captureScreenshot() {
   if (capturing.value) return
+  if (!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)) {
+    alert('이 브라우저는 화면 캡처를 지원하지 않습니다. 기기 스크린샷 기능을 사용하세요.')
+    return
+  }
   capturing.value = true
   let stream = null
   try {
@@ -151,7 +158,7 @@ onMounted(async () => {
     <div class="kanban-head">
       <span class="kanban-title">{{ roomTitle }} · 사용량</span>
       <div class="kanban-head-actions">
-        <button :disabled="capturing" @click="captureScreenshot">{{ capturing ? '캡처 중…' : '스크린샷' }}</button>
+        <button v-if="canScreenshot" :disabled="capturing" @click="captureScreenshot">{{ capturing ? '캡처 중…' : '스크린샷' }}</button>
         <button @click="emit('close')">닫기</button>
       </div>
     </div>
