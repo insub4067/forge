@@ -454,11 +454,6 @@ async function loadMessages(isNew = false) {
   }
 }
 
-// 방 모드 — work(작업: 검증·커밋) / chat(대화: 읽기전용). triage 자동 분류를 대체한다.
-function roomModeLabel() {
-  return currentRoom()?.mode === 'chat' ? '채팅' : '작업'
-}
-
 // 타이틀 탭 → 방 설정 시트(이름·모드 변경). 방이 없으면 방 목록을 연다.
 const showRoomSettings = ref(false)
 const roomSettingsTitle = ref('')
@@ -542,10 +537,15 @@ const taskBar = computed(() => {
     list.find((t) => t.status === 'testing') ||
     list.find((t) => t.status === 'todo')
   const done = list.filter((t) => t.status === 'done').length
+  // 진행률은 '완료 수'가 아니라 '현재 위치'로 보여준다 — 0/3이 "아무것도 안 됨"으로
+  // 오해되지 않게, 현재 task가 있으면 (완료+1)/전체로 몇 번째인지 표현한다.
+  const pos = cur ? done + 1 : done
   return {
     title: cur ? cur.title : (done === list.length ? '완료' : '마무리 중'),
     done,
     total: list.length,
+    pos,
+    cur,
   }
 })
 
@@ -1325,12 +1325,12 @@ document.addEventListener('visibilitychange', () => {
       </button>
       <button class="room-btn" @click="openRoomSettings()">
         <span class="room-title-main">
-          <span class="status-dot" :class="busy ? 'working' : 'idle'"></span>
+          <span class="status-dot" :class="(busy || sessionRunning) ? 'working' : 'idle'"></span>
           {{ currentRoom()?.title || 'FORGE' }}
-          <span class="room-mode-badge" :class="{ chat: currentRoom()?.mode === 'chat' }">{{ roomModeLabel() }}</span>
+          <span v-if="currentRoom()?.mode === 'chat'" class="room-mode-badge chat">채팅</span>
         </span>
         <span class="room-sub">
-          <span v-if="busy || sessionRunning" class="status-live">실행 중</span><template v-if="busy || sessionRunning"> · </template>{{ shortPath(currentRoom()?.workspace_path) || 'Mobile Coding Agent' }}
+          <span v-if="busy" class="status-live">실행 중</span><template v-if="busy"> · </template>{{ shortPath(currentRoom()?.workspace_path) || 'Mobile Coding Agent' }}
         </span>
       </button>
       <div class="header-right">
@@ -1467,7 +1467,7 @@ document.addEventListener('visibilitychange', () => {
               </template>
             </div>
 
-            <div v-if="(busy || sessionRunning) && i === messages.length - 1" class="typing">
+            <div v-if="(busy || sessionRunning) && !taskBar && i === messages.length - 1" class="typing">
               <span class="typing-label">{{ typingLabel(m) }}</span>
               <span class="typing-dots"><i></i><i></i><i></i></span>
             </div>
@@ -1481,7 +1481,7 @@ document.addEventListener('visibilitychange', () => {
             </div>
 
             <div v-if="(m.state && (m.state.files_changed?.length || m.state.errors?.length)) || m.compacted" class="state-summary">
-              <span v-if="m.state?.files_changed?.length" class="state-chip">변경 {{ m.state.files_changed.length }}</span>
+              <span v-if="m.state?.files_changed?.length" class="state-chip">변경 파일 {{ m.state.files_changed.length }}</span>
               <span v-if="m.state?.errors?.length" class="state-chip err">오류 {{ m.state.errors.length }}</span>
               <span v-if="m.compacted" class="state-chip">컨텍스트 압축됨</span>
             </div>
@@ -1552,9 +1552,9 @@ document.addEventListener('visibilitychange', () => {
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
       </button>
       <div v-if="taskBar" class="task-bar" @click="showKanban = true; loadTasks()">
-        <span class="task-bar-dot"></span>
+        <span class="task-bar-dot" :class="{ running: busy || sessionRunning }"></span>
         <span class="task-bar-title">{{ taskBar.title }}</span>
-        <span class="task-bar-count">{{ taskBar.done }}/{{ taskBar.total }}</span>
+        <span class="task-bar-count">{{ taskBar.pos }}/{{ taskBar.total }}</span>
       </div>
       <input ref="fileInput" type="file" multiple accept="image/*,.md,.txt,.log,.json,.csv,.yml,.yaml,.toml,.py,.js,.ts,.jsx,.tsx,.vue,.html,.css,.sh,.xml,.java,.go,.rs,.c,.cpp,.h,.sql,text/*" hidden @change="onFileChange" />
       <div class="composer">

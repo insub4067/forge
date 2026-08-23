@@ -3508,8 +3508,11 @@ button {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--muted);
   flex-shrink: 0;
+}
+.task-bar-dot.running {
+  background: var(--accent);
   animation: taskPulse 1.6s ease-in-out infinite;
 }
 @keyframes taskPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
