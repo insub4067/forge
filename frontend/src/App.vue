@@ -12,6 +12,7 @@ import KanbanPanel from './components/KanbanPanel.vue'
 import MenuPanel from './components/MenuPanel.vue'
 import SessionDetailPanel from './components/SessionDetailPanel.vue'
 import FileBrowserPanel from './components/FileBrowserPanel.vue'
+import FsIcon from './components/FsIcon.vue'
 import { balance as adminBalance, loadBalance } from './store'
 
 // 단일 줄바꿈도 <br>로 — 답변 줄바꿈을 적극 반영
@@ -1752,7 +1753,10 @@ document.addEventListener('visibilitychange', () => {
       </div>
         <input v-model="fsFilter" class="fs-search" type="search" placeholder="이 폴더에서 이름 검색" />
         <div class="fs-list">
-          <button v-if="fsParent && !fsFilter" class="fs-item parent" @click="navigateFs(fsParent)">.. 상위 폴더</button>
+          <button v-if="fsParent && !fsFilter" class="fs-item parent" @click="navigateFs(fsParent)">
+            <svg class="fs-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l-6-6 6-6"/><path d="M3 12h12a6 6 0 0 1 6 6v2"/></svg>
+            상위 폴더
+          </button>
           <div v-if="fsFilter && !fsVisible.length" class="fs-empty">일치하는 항목 없음</div>
           <button
             v-for="e in fsVisible"
@@ -1762,6 +1766,7 @@ document.addEventListener('visibilitychange', () => {
             :disabled="!e.is_dir"
             @click="navigateFs(e.path)"
           >
+            <FsIcon :entry="e" />
             {{ e.name }}
           </button>
         </div>
