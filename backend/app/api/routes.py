@@ -584,6 +584,36 @@ async def git_status(session_id: str):
     return {"output": _git(ws, "-c", "core.quotepath=false", "status", "--short")}
 
 
+@router.get("/rooms/{session_id}/git/remote")
+async def git_remote(session_id: str, fetch: int = 1):
+    """원격 대비 ahead/behind(=push/pull 필요 커밋 수). GitHub Desktop과 동일 지표.
+    fetch=1이면 먼저 git fetch(네트워크)로 원격을 갱신한다."""
+    ws = await _room_workspace(session_id)
+    branch = _git(ws, "branch", "--show-current")
+    if fetch:
+        _git(ws, "fetch", "--quiet", timeout=40)  # 네트워크 — 타임아웃 넉넉히
+    upstream = _git(ws, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    if not upstream or "fatal" in upstream.lower() or "오류" in upstream or "no upstream" in upstream.lower():
+        return {"branch": branch, "has_upstream": False, "ahead": 0, "behind": 0, "upstream": ""}
+    # left-right --count: "behind<TAB>ahead" (left=upstream만, right=HEAD만)
+    counts = _git(ws, "rev-list", "--left-right", "--count", f"{upstream}...HEAD").split()
+    behind = int(counts[0]) if len(counts) == 2 and counts[0].isdigit() else 0
+    ahead = int(counts[1]) if len(counts) == 2 and counts[1].isdigit() else 0
+    return {"branch": branch, "has_upstream": True, "ahead": ahead, "behind": behind, "upstream": upstream}
+
+
+@router.post("/rooms/{session_id}/git/push")
+async def git_push(session_id: str):
+    ws = await _room_workspace(session_id)
+    return {"output": _git(ws, "push", timeout=90)}
+
+
+@router.post("/rooms/{session_id}/git/pull")
+async def git_pull(session_id: str):
+    ws = await _room_workspace(session_id)
+    return {"output": _git(ws, "pull", "--ff-only", timeout=90)}  # ff-only — 예기치 않은 머지 방지
+
+
 @router.get("/rooms/{session_id}/git/branches")
 async def git_branches(session_id: str):
     ws = await _room_workspace(session_id)

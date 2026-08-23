@@ -1934,6 +1934,43 @@ footer .image-preview-row {
   color: var(--text);
   font-size: 14px;
 }
+.gh-sync {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.gh-sync-counts { display: flex; align-items: center; gap: 8px; }
+.gh-sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.gh-sync-badge.zero { background: transparent; color: var(--muted); font-weight: 500; }
+.gh-sync-note { font-size: 12px; color: var(--muted); }
+.gh-sync-actions { display: flex; gap: 6px; }
+.gh-sync-btn {
+  font-size: 13px;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.gh-sync-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.gh-sync-btn:disabled { opacity: 0.4; cursor: default; }
+
 .gh-tabs {
   display: flex;
   border-bottom: 1px solid var(--border);

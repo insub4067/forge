@@ -199,6 +199,8 @@ const gitLog = ref([])
 const gitLogHasMore = ref(false)
 const gitLogLoadingMore = ref(false)
 const gitDetail = ref(null) // { title, sub, diff, loading }
+const gitRemote = ref({ ahead: 0, behind: 0, has_upstream: false, loading: false }) // 원격 대비 push/pull 수
+const gitSyncing = ref('') // '' | 'push' | 'pull'
 const steerMode = ref('queue') // 'queue' = 작업큐 대기(기본), 'switch' = 중단 후 새로 시작
 const pendingSend = ref(null)
 const showFiles = ref(false)
@@ -615,6 +617,54 @@ async function loadGit() {
     gitLogHasMore.value = !!l.has_more
   }
   gitLoading.value = false
+  loadRemote() // 원격 대비 ahead/behind — 네트워크 fetch라 비동기로 뒤따르게(패널은 즉시 표시)
+}
+
+// 원격(origin) 대비 push/pull 필요 커밋 수. git fetch 후 rev-list 카운트.
+async function loadRemote() {
+  const id = currentRoomId.value
+  if (!id) return
+  gitRemote.value = { ...gitRemote.value, loading: true }
+  try {
+    const r = await fetch(`/api/rooms/${id}/git/remote`)
+    gitRemote.value = r.ok ? { ...(await r.json()), loading: false } : { ...gitRemote.value, loading: false }
+  } catch {
+    gitRemote.value = { ...gitRemote.value, loading: false }
+  }
+}
+
+async function gitPush() {
+  const id = currentRoomId.value
+  if (!id || gitSyncing.value) return
+  if (!confirm('원격(origin)으로 push할까요?')) return
+  gitSyncing.value = 'push'
+  try {
+    const r = await fetch(`/api/rooms/${id}/git/push`, { method: 'POST' })
+    const d = await r.json().catch(() => ({}))
+    if (d.output && /rejected|error|오류|fatal/i.test(d.output)) gitError.value = 'Push 실패: ' + d.output
+  } catch (e) {
+    gitError.value = 'Push 실패: ' + (e.message || e)
+  } finally {
+    gitSyncing.value = ''
+    await loadRemote()
+  }
+}
+
+async function gitPull() {
+  const id = currentRoomId.value
+  if (!id || gitSyncing.value) return
+  gitSyncing.value = 'pull'
+  try {
+    const r = await fetch(`/api/rooms/${id}/git/pull`, { method: 'POST' })
+    const d = await r.json().catch(() => ({}))
+    if (d.output && /conflict|error|오류|fatal|abort/i.test(d.output)) gitError.value = 'Pull 실패: ' + d.output
+  } catch (e) {
+    gitError.value = 'Pull 실패: ' + (e.message || e)
+  } finally {
+    gitSyncing.value = ''
+    await loadRemote()
+    await loadGit()
+  }
 }
 
 // git 히스토리 무한 스크롤 — 다음 페이지를 이어붙인다.
@@ -2482,6 +2532,23 @@ document.addEventListener('visibilitychange', () => {
             <svg :class="{ spin: gitLoading }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
           </button>
           <button class="gh-close" @click="showGit = false">닫기</button>
+        </div>
+      </div>
+
+      <div v-if="!gitDetail" class="gh-sync">
+        <div class="gh-sync-counts">
+          <span class="gh-sync-badge up" :class="{ zero: !gitRemote.ahead }" title="push 필요">↑ {{ gitRemote.ahead }}</span>
+          <span class="gh-sync-badge down" :class="{ zero: !gitRemote.behind }" title="pull 필요">↓ {{ gitRemote.behind }}</span>
+          <span v-if="gitRemote.loading" class="gh-sync-note">원격 확인 중…</span>
+          <span v-else-if="!gitRemote.has_upstream" class="gh-sync-note">원격 추적 없음</span>
+        </div>
+        <div class="gh-sync-actions">
+          <button class="gh-sync-btn" :disabled="!gitRemote.behind || !!gitSyncing" @click="gitPull">
+            {{ gitSyncing === 'pull' ? 'Pull 중…' : 'Pull' }}
+          </button>
+          <button class="gh-sync-btn primary" :disabled="!gitRemote.ahead || !!gitSyncing" @click="gitPush">
+            {{ gitSyncing === 'push' ? 'Push 중…' : 'Push' }}
+          </button>
         </div>
       </div>
 
