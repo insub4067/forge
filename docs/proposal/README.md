@@ -20,6 +20,7 @@ Proposal 채택 여부도 기능 수나 token 절감보다 success/verification 
 
 - `global-workspace-skills.md` — **구현됨**. 실제는 Curated/Learned/Project 3-tier로 확장됨.
 - `token-cost-reduction.md` — living research. 단, 비용 절감은 항상 success-rate gate 아래에 둔다.
+- `low-cost-model-routing.md` — **proposal/experimental**. Ox Alpha·Ling 3.0 Flash·Qwen3.7 Flash 등 무료/초저가 모델을 동일 Developer Harness에서 CPS 기준으로 평가하고 privacy-aware fallback/routing을 도입하는 제안.
 - `durable-worker-resume.md` — **핵심 Auto Resume 구현됨**. worker 완전 분리/권한 semantics는 추가 과제.
 - `recursive-self-improvement.md` — **부분 구현**. R0 deterministic benchmark + promotion gate 구현, candidate worktree orchestration 미구현.
 - `remote-terminal.md` — **v1 구현됨**. proposal의 Docker-only가 아니라 현재 Mac host PTY.
