@@ -18,6 +18,7 @@ Proposal 채택 여부도 기능 수나 token 절감보다 success/verification 
 
 ## Product / Capability
 
+- `forge-runtime-hardening-roadmap.md` — **우선순위 로드맵 proposal**. Verification 3-state → ExecutionBackend → authoritative event/replay → benchmark-driven model routing → task worktree → RSI promotion → optional parallel Developer → visual loop 순으로 FORGE를 Verified Autonomous Software Execution Runtime으로 강화하는 제안.
 - `global-workspace-skills.md` — **구현됨**. 실제는 Curated/Learned/Project 3-tier로 확장됨.
 - `token-cost-reduction.md` — living research. 단, 비용 절감은 항상 success-rate gate 아래에 둔다.
 - `low-cost-model-routing.md` — **proposal/experimental**. Ling 3.0 Flash·Qwen3.7 Flash 등 저가 모델을 동일 Developer Harness에서 CPS 기준으로 평가하고 privacy-aware fallback/routing을 도입하는 제안. (Ox Alpha는 2026-08-23 코드에서 제거 — 문서 내 상태 노트 참고.)
