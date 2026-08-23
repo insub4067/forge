@@ -1432,9 +1432,7 @@ function newAssistant() {
 }
 
 const ROLE_LABELS = {
-  triage: '분류',
   developer: '개발',
-  chat: '응답',
   vision: '이미지 분석',
 }
 

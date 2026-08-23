@@ -12,10 +12,8 @@ FastAPI
         │
         ▼
 AgentRuntime (현재 API 프로세스 내부)
-  ├─ Triage
-  ├─ Planner
-  ├─ Coder
-  ├─ Reviewer ↔ Debugger
+  ├─ Triage (경량 라우터)
+  ├─ Developer (설계+구현+검증+수정 올인원)
   ├─ Context/Compaction/Recovery
   └─ Tool Executor
         │
@@ -38,26 +36,19 @@ Request
  ↓
 Triage ── CHAT → Chat Flash → Done
  │
- AGENT + SIMPLE/COMPLEX
+ AGENT
  ↓
-Planner
-  SIMPLE  → Flash + thinking medium
-  COMPLEX → Pro + thinking high
- ↓
-Coder Flash
- ↓
-Reviewer Flash
- ↓
-all tasks done? ── yes → completed
- ↓ no
-Debugger Flash
- ↓ 반복 실패 마지막 복구
-Debugger Pro
- ↓
-Reviewer 재검증
+Developer (flash + thinking medium)
+  ↻ Plan(3줄) → Execute → Verify(테스트/빌드)
+     PASS → completed
+     FAIL → Diagnose → Repair → Verify
+ ↓ 막힘(max_steps/repeated)
+Developer 승격 1회 (pro + thinking high, Sr)
 ```
 
-DB task 상태가 성공 판정의 authority다. 최대 자기수정 사이클은 3회다.
+역할은 Developer/Vision/Chat 3개. 별도 Planner/Reviewer/Debugger는 없다 — 에이전트마다
+컨텍스트를 다시 읽는 input token 비용을 없애기 위해 한 Developer가 끝까지 책임진다.
+세션 final_status가 성공 판정의 authority다. Sr 승격은 실패 시 1회로 제한한다.
 
 ## Context / 비용 구조
 

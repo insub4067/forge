@@ -8,7 +8,7 @@ import asyncio
 from app.runtime import agent as A
 
 
-def make_runtime(role_status="done", triage_route="agent"):
+def make_runtime(role_status="done"):
     rt = A.AgentRuntime()
     calls = []  # (role, escalate)
 
@@ -20,10 +20,6 @@ def make_runtime(role_status="done", triage_route="agent"):
         return st, 0, 0, {"model": "m", "thinking": False, "reasoning_effort": ""}
 
     rt._run_role = fake_run_role
-
-    async def fake_triage(all_messages):
-        return triage_route, "normal", 0, 0
-    rt._triage = fake_triage
 
     A.store.save_agent_run = lambda *a, **k: _noop()
     A.store.update_context_usage = lambda *a, **k: _noop()
@@ -72,12 +68,13 @@ async def main():
     assert data.get("status") == "completed", data
     print("Case B (막힘→Sr 승격→성공): OK", calls)
 
-    # Case C — 두 번 다 막힘 → max_steps로 종료
+    # Case C — 계속 막힘 → 최초 1회 + MAX_ESCALATIONS(2) 승격 = 총 3회 후 max_steps 종료
     rt, calls = make_runtime("max_steps")
     data, _ = await run_case(rt)
-    assert roles_of(calls) == ["developer", "developer"], roles_of(calls)
+    assert roles_of(calls) == ["developer"] * (1 + A.MAX_ESCALATIONS), roles_of(calls)
+    assert [e for _, e in calls] == [False, True, True], calls
     assert data.get("status") == "max_steps", data
-    print("Case C (두 번 막힘→종료): OK", data.get("status"))
+    print("Case C (계속 막힘→승격 루프 상한→종료): OK", len(calls), "회")
 
     # Case D — 중단: developer가 cancelled 반환(승격 재시도 안 함)
     rt, calls = make_runtime("cancelled")
@@ -92,13 +89,6 @@ async def main():
     assert roles_of(calls) == ["developer"], roles_of(calls)
     assert data.get("status") == "context_blocked", data
     print("Case E (context limit): OK")
-
-    # Case F — CHAT: developer 호출 안 함
-    rt, calls = make_runtime("done", triage_route="chat")
-    data, _ = await run_case(rt)
-    assert roles_of(calls) == ["chat"], roles_of(calls)
-    assert data.get("status") == "completed", data
-    print("Case F (CHAT fast path): OK", roles_of(calls))
 
     print("\n모든 케이스 통과 ✓")
 

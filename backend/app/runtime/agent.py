@@ -19,7 +19,7 @@ from .. import skills as skills_lib
 from ..db import store
 from ..llm.factory import create_adapter
 from ..orchestrator.model_router import ModelRouter
-from ..tools.registry import APPROVAL_REQUIRED, CHAT_TOOLS, TOOL_SCHEMAS, execute_tool
+from ..tools.registry import APPROVAL_REQUIRED, TOOL_SCHEMAS, execute_tool
 from ..sandbox.executor import DockerSandbox
 
 MAX_STEPS = 30
@@ -27,6 +27,8 @@ MAX_STEPS = 30
 # (옛 구조의 planner+coder+reviewer+debugger 여러 호출을 한 컨텍스트로 합친 것)
 DEVELOPER_MAX_STEPS = 45
 _ROLE_MAX_STEPS = {"developer": DEVELOPER_MAX_STEPS}
+# 막혀서 못 풀 때 pro로 승격해 재시도하는 최대 횟수(무한 루프·비용 폭주 방지).
+MAX_ESCALATIONS = 2
 MAX_REPEATED_CALLS = 3
 CONTEXT_BLOCK_RATIO = 0.95
 # 이 비율을 넘으면 오래된 대화를 요약해 모델 컨텍스트를 압축한다(비파괴 — 표시/저장용 원본은 유지).
@@ -337,7 +339,7 @@ class AgentRuntime:
         ]
         parts: list[str] = []
         try:
-            async for delta in self._adapter_for(self.router.triage_model).stream_chat(messages):
+            async for delta in self._adapter_for(self.router.utility_model).stream_chat(messages):
                 if delta.get("content"):
                     parts.append(delta["content"])
         except Exception as err:
@@ -593,58 +595,6 @@ class AgentRuntime:
             self.pending_questions.pop(question_id, None)
             self._pending_meta.pop(question_id, None)
             self._status_update(session_id, waiting_for=None, pending=None)
-
-    async def _triage(self, all_messages: list[dict]) -> tuple[str, str, int, int]:
-        """마지막 요청이 코드 작업인지(agent) 일반 대화·질문인지(chat) 분류한다.
-
-        chat이면 전체 파이프라인을 건너뛰고 단일 패스로 답한다.
-        """
-        # 최근 대화만 압축해서 분류 입력으로 쓴다 (텍스트만).
-        lines: list[str] = []
-        for m in all_messages[-6:]:
-            role = m.get("role", "")
-            if role == "tool":
-                continue
-            content = m.get("content", "")
-            if isinstance(content, list):
-                content = " ".join(
-                    c.get("text", "") for c in content
-                    if isinstance(c, dict) and c.get("type") == "text"
-                ) or "[이미지]"
-            text = str(content).strip()
-            if text:
-                lines.append(f"{role}: {text[:500]}")
-        transcript = "\n".join(lines)
-
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "너는 요청 분류기다. 마지막 사용자 메시지가 로컬 코드베이스를 "
-                    "수정·생성·실행·리팩터링·디버깅하는 작업이면 AGENT, 그 외 일반 대화·"
-                    "질문·설명·조회면 CHAT 이다. 코드를 읽어 설명만 하면 CHAT, 파일을 "
-                    "고치거나 명령을 실행해야 하면 AGENT.\n"
-                    "AGENT면 난이도도 판정한다: 여러 파일·여러 단계·설계 변경·까다로운 디버깅이 "
-                    "필요하면 COMPLEX, 단순한 한두 단계 수정이면 SIMPLE.\n"
-                    "형식: 'CHAT' 또는 'AGENT SIMPLE' 또는 'AGENT COMPLEX' — 이 중 하나만 답한다."
-                ),
-            },
-            {"role": "user", "content": transcript},
-        ]
-
-        parts: list[str] = []
-        prompt_t = 0
-        completion_t = 0
-        async for delta in self._adapter_for(self.router.triage_model).stream_chat(messages):
-            if delta.get("content"):
-                parts.append(delta["content"])
-            if delta.get("usage"):
-                prompt_t += delta["usage"].get("prompt_tokens", 0)
-                completion_t += delta["usage"].get("completion_tokens", 0)
-        answer = "".join(parts).upper()
-        route = "agent" if "AGENT" in answer else "chat"
-        complexity = "high" if "COMPLEX" in answer else "normal"
-        return route, complexity, prompt_t, completion_t
 
     async def _run_vision(
         self,
@@ -1055,32 +1005,21 @@ class AgentRuntime:
                 data["content"] = content
             await send("done", data)
 
-        # 0. Triage — 코드 작업(agent) vs 일반 대화(chat) 라우팅(경량 flash 분류기).
-        triage_route, complexity, tp, tc = await self._triage(all_messages)
-        await record("triage", tp, tc, {"model": self.router.triage_model, "model_calls": 1})
-        if triage_route == "chat":
-            status, p, c, route = await self._run_role(
-                "chat", all_messages, send, session_id, ws, state, recent_calls,
-                step_base, room_memory, tools=CHAT_TOOLS, skills=skills,
-            )
-            await record("chat", p, c, route)
-            if status != "done":
-                await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
-            else:
-                await finish("completed")
-            return all_messages
-
-        # 1. Developer — 올인원. 설계(3줄 계획)+구현+자체검증(테스트/빌드)+수정을 한 컨텍스트에서.
-        #    Planner/Reviewer/Debugger를 별도 에이전트로 두지 않아 컨텍스트 재읽기(input token)와
-        #    역할 전환 호출이 사라진다. 기본 flash+think-medium.
+        # Developer — 유일한 실행 역할. 대화든 코드든 모두 처리한다(Triage·Chat 없음).
+        #    설계(3줄 계획)+구현+자체검증(테스트/빌드)+수정을 한 컨텍스트에서. 별도 에이전트가
+        #    없어 컨텍스트 재읽기(input token)와 역할 전환 호출이 사라진다. 기본 flash+think-medium.
         status, p, c, route = await self._run_role(
             "developer", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory, skills=skills
         )
         await record("developer", p, c, route)
 
-        # 2. 실패 시에만 pro+think-high로 1회 승격 재시도(DeepSeek 권고 — 저비용·고품질).
-        #    막힌 경우(max_steps/repeated)에만 재시도해 무한 루프·비용 폭주를 막는다.
-        if status in ("max_steps", "repeated") and not settings.developer_pro:
+        # 막혀서 못 풀면 pro+think-high로 승격해 재시도하되, 상한 있는 루프로 푼다.
+        #    (막힘=max_steps/repeated일 때만. done/cancelled/context_blocked는 재시도 안 함.)
+        #    무한 루프·비용 폭주를 막으려 최대 MAX_ESCALATIONS회로 제한한다(DeepSeek 권고).
+        escalations = 0
+        while (status in ("max_steps", "repeated")
+               and escalations < MAX_ESCALATIONS and not settings.developer_pro):
+            escalations += 1
             step_base += DEVELOPER_MAX_STEPS
             status, p, c, route = await self._run_role(
                 "developer", all_messages, send, session_id, ws, state, recent_calls,

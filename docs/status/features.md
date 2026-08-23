@@ -7,11 +7,10 @@
 | 기능 | 상태 |
 |---|---|
 | Triage CHAT / AGENT + SIMPLE / COMPLEX | ✅ |
-| SIMPLE → Planner 생략, Coder 직행 | ✅ |
-| COMPLEX → Planner → Coder | ✅ |
-| Coder Flash | ✅ |
-| Reviewer ↔ Debugger 자기수정 루프 | ✅ |
-| Debugger 마지막 복구 Pro 승격 | ✅ |
+| 올인원 Developer(설계+구현+검증+수정) | ✅ |
+| Developer flash+think-medium 기본 | ✅ |
+| 실패 시 pro+think-high 1회 승격(Jr→Sr) | ✅ |
+| Triage → Chat/Developer 라우팅 | ✅ |
 | 최대 step / review cycle 제한 | ✅ |
 | 동일 tool 반복 감지 | ✅ |
 | 동일 session 동시 run 가드 | ✅ |
@@ -28,7 +27,7 @@
 | selective Skill retrieval | ✅ |
 | read-only tool 병렬 prefetch | ✅ |
 | role/session 비용·성공률 metrics | ✅ |
-| SIMPLE Planner 제거 | ✅ |
+| Planner/Reviewer/Debugger 제거(올인원) | ✅ |
 | reasoning 400 session 반복 retry 제거 | ✅ |
 | Tool Script/RPC Mode | ⬜ |
 

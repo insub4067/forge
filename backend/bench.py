@@ -68,19 +68,9 @@ def aggregate(results: list[dict]) -> dict:
 
 def _variant_label() -> str:
     from app.config import settings
-    parts = []
-    if settings.planner_off:
-        parts.append("planner=OFF")
-    elif settings.planner_flash:
-        parts.append("planner=FLASH")
-    else:
-        parts.append("planner=PRO(default)")
+    parts = ["developer=PRO(always)" if settings.developer_pro else "developer=FLASH+think(Jr→Sr)"]
     if settings.skills_off:
         parts.append("skills=OFF")
-    if settings.no_review:
-        parts.append("review=OFF")
-    if settings.coder_pro:
-        parts.append("coder=PRO")
     return " ".join(parts)
 
 

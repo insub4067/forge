@@ -9,15 +9,17 @@ FORGE optimizes for **equal or better task success with fewer tokens, API calls,
 ```text
 User Goal
   ↓
-Triage (Flash)
+Triage (Flash, lightweight router)
   ├─ CHAT → Chat
-  ├─ SIMPLE → Coder → Reviewer
-  └─ COMPLEX → Planner → Coder → Reviewer
-                              ↓ when needed
-                         Debugger ↔ Reviewer
+  └─ AGENT → Developer (flash + thinking medium)
+               loop: Plan(3 lines) → Execute → Verify(tests/build) → done
+                                          └ fail → Diagnose → Repair → Verify
+               ↓ if stuck: escalate once to pro + thinking high (Sr)
 ```
 
-SIMPLE tasks bypass the Planner to avoid unnecessary exploration and context retransmission. Planning is reserved for complex work.
+Three roles only: Developer / Vision / Chat. No separate Planner/Reviewer/Debugger — each
+extra agent re-reads the whole context (input tokens). One Developer owns design, implementation,
+self-verification and repair end-to-end in a single context.
 
 ## ⚠️ Security Warning
 
@@ -30,9 +32,8 @@ The Host Terminal is effectively a remote shell. Application-level WebSocket aut
 ## Current Implementation
 
 - DeepSeek V4 streaming / tool calling / thinking
-- SIMPLE Planner bypass + COMPLEX planning
+- All-in-one Developer (design + implement + self-verify + repair); flash+think default, pro on failure (Jr→Sr)
 - Flash-first / Pro-on-demand routing
-- Reviewer ↔ Debugger self-correction loop
 - context pruning / 75% compaction / 95% hard block
 - cache telemetry + selective Self-Improving Skills
 - reasoning_content recovery and repeated-retry elimination per affected session

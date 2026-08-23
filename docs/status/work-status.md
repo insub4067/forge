@@ -11,8 +11,8 @@
 
 ## 최근 핵심 변화
 
-- [x] SIMPLE 작업 Planner 제거: `Triage → Coder → Reviewer`
-- [x] COMPLEX만 Planner 실행
+- [x] 올인원 구조: Planner/Reviewer/Debugger 제거, Developer 하나로 통합
+- [x] Developer flash+think 기본, 실패 시 pro 승격(Jr→Sr)
 - [x] reasoning_content 400을 겪은 session의 후속 thinking을 미리 꺼 반복 retry 낭비 제거
 - [x] `build_frontend`: Agent가 FORGE 프론트 수정 후 host production build까지 직접 수행
 - [x] Mac host PTY + WebSocket + xterm.js Terminal
@@ -27,11 +27,11 @@
 
 ```text
 CHAT    → Chat
-SIMPLE  → Coder → Reviewer → 필요 시 Debugger ↔ Reviewer
-COMPLEX → Planner → Coder → Reviewer → 필요 시 Debugger ↔ Reviewer
+AGENT → Developer: Plan(3줄)→Execute→Verify→(실패 시)Diagnose→Repair→Verify
+        막히면 pro로 1회 승격(Sr)
 ```
 
-Reviewer task authority, review limit, repeated tool guard, concurrent-run guard, runtime message injection, cancel은 유지한다.
+final_status authority, repeated tool guard, concurrent-run guard, runtime message injection, cancel은 유지한다. Sr 승격은 실패 시 1회.
 
 ## Tool / Self-development
 

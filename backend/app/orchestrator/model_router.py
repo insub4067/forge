@@ -22,15 +22,11 @@ class ModelRouter:
                 "thinking": False,
                 "reasoning_effort": "low",
             },
-            "chat": {
-                "model": settings.chat_model or "deepseek-v4-flash",
-                "thinking": False,
-                "reasoning_effort": "low",
-            },
         }
         # 실패 시 승격 모델(pro)
         self.developer_pro_model = settings.developer_pro_model or settings.deep_seek_model or "deepseek-v4-pro"
-        self.triage_model = settings.triage_model or "deepseek-v4-flash"
+        # compaction 등 저비용 유틸 요약용 flash 모델
+        self.utility_model = "deepseek-v4-flash"
 
     def select_model(self, agent_type: str, retry_count: int = 0,
                      complexity: str = "normal", escalate: bool = False) -> dict:

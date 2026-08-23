@@ -2,35 +2,24 @@
 
 ## 역할
 
-역할별 에이전트(Planner, Coder, Reviewer, Debugger)를 조율하는 실행 관리자.
-
-## 태스크 상태 전이
-
-```
-todo
-  ↓ Planner가 계획을 등록
-planning
-  ↓ Coder가 작업 시작
-in_progress
-  ↓ 구현 완료
-review       ← Reviewer 검토
-  ↓ 통과             ↓ 실패
-done              debug
-                     ↓ Debugger 수정 완료
-                   review (재검토)
-```
+역할은 **Developer 하나**뿐이다(+이미지 전처리 Vision). Triage·Chat·Planner·Reviewer·Debugger를
+두지 않는다 — Developer가 대화·질문·코드 작업을 모두 한 컨텍스트에서 처리한다.
 
 ## 흐름
 
-1. **Planner** — 요구 분석 → 태스크 분해 → `update_tasks`
-2. **Coder** — 태스크를 `in_progress`로 바꾸고 구현 → `review`로 전환
-3. **Reviewer** — 검토·검증 → 통과 시 `done`, 실패 시 `debug`
-4. **Debugger** — 원인 분석·수정 → `review`로 되돌림
-5. 모든 태스크가 `done`이면 종료 보고
+```
+User → Developer
+         대화·질문이면 도구 없이 바로 답
+         코드 작업이면: Plan(3줄) → Execute → Verify → PASS: 완료
+                                          └ FAIL: Diagnose → Repair → Verify
+         막히면 pro+think-high로 승격(최대 2회 루프)
+```
+
+기본 flash+think-medium(Jr). 막힘(max_steps/repeated)일 때만 pro+think-high로 승격하고,
+최대 2회까지 재시도(루프)한다. 그래도 못 풀면 남은 문제를 사용자에게 보고한다.
 
 ## 종료 조건
 
-- 모든 태스크 `done`
-- 최대 스텝 초과
-- 컨텍스트 한도 도달
-- 사용자 중단
+- Developer 자체검증 통과(완료)
+- 승격 재시도 상한(2회) 초과 → 남은 문제 보고
+- 최대 스텝 초과 / 컨텍스트 한도 / 사용자 중단

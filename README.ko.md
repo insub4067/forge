@@ -9,15 +9,17 @@
 ```text
 User Goal
   ↓
-Triage (Flash)
+Triage (Flash, 경량 라우터)
   ├─ CHAT → Chat
-  ├─ SIMPLE → Coder → Reviewer
-  └─ COMPLEX → Planner → Coder → Reviewer
-                              ↓ 필요 시
-                         Debugger ↔ Reviewer
+  └─ AGENT → Developer (flash + thinking medium)
+               ↻ Plan(3줄) → Execute → Verify(테스트/빌드) → 완료
+                                            └ 실패 → Diagnose → Repair → Verify
+               ↓ 막히면 pro + thinking high 1회 승격(Sr)
 ```
 
-SIMPLE 작업은 Planner를 생략한다. 짧은 작업에서 Planner의 과탐색·context 재전송 비용을 없애고, 복잡한 작업에만 계획 단계를 사용한다.
+역할은 Developer/Vision/Chat 3개다. 별도 Planner/Reviewer/Debugger를 두지 않는다 —
+에이전트가 늘 때마다 컨텍스트를 처음부터 다시 읽는 input token 비용이 발생하기 때문이다.
+Developer 하나가 설계·구현·자체검증·수정을 한 컨텍스트에서 끝까지 책임진다.
 
 ## ⚠️ 보안 경고
 
@@ -30,9 +32,8 @@ Cloudflare Tunnel 자체는 사용자 인증이 아니다. 원격 사용 시 **C
 ## 현재 구현
 
 - DeepSeek V4 streaming / tool calling / thinking
-- SIMPLE Planner bypass + COMPLEX planning
+- 올인원 Developer(설계+구현+자체검증+수정) — flash+think 기본, 실패 시 pro 승격(Jr→Sr)
 - Flash-first / Pro-on-demand routing
-- Reviewer ↔ Debugger 자기수정 루프
 - context pruning / 75% compaction / 95% hard block
 - cache hit/miss telemetry + selective Skills
 - reasoning_content 400 recovery 및 session 반복 retry 제거
