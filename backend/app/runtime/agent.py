@@ -205,6 +205,15 @@ def _select_skills(workspace: str, query: str) -> str:
     return "\n\n".join(blocks)
 
 
+def _est_tokens(text: str) -> int:
+    """토큰 근사치 — 전송 전 영역별 비중 파악용(실측은 provider usage). ASCII는 ~4자/토큰,
+    비ASCII(한글 등)는 ~1.5자/토큰으로 어림한다. 절대값보다 영역 간 상대 비교가 목적."""
+    if not text:
+        return 0
+    ascii_n = sum(1 for c in text if ord(c) < 128)
+    return ascii_n // 4 + (len(text) - ascii_n) * 2 // 3 + 1
+
+
 def _stable_prefix(role: str) -> str:
     """호출마다 변하지 않는 프리픽스: BASE_PROMPT + role 지침.
 
@@ -365,6 +374,7 @@ class AgentRuntime:
         # 세션별 마지막 이벤트 seq — run마다 0부터 시작하면 폴링 since가 깨지므로
         # 세션 단위로 단조 증가시켜 eventlog.tail(since)의 전제를 보장한다.
         self._last_seq: dict[str, int] = {}
+        self._last_context: dict[str, dict] = {}  # 세션별 마지막 context 영역 분해(debug view)
         # reasoning_content 400을 한 번 겪은 세션 — 이후 호출은 미리 reasoning을 벗긴다.
         self._strip_reasoning_sessions: set[str] = set()
         self._auto_approve_sessions: set[str] = set()
@@ -893,6 +903,9 @@ class AgentRuntime:
             reasoning_disabled = session_id in self._strip_reasoning_sessions
             if reasoning_disabled:
                 call_messages = self._strip_reasoning(call_messages)
+            # context 영역 분해 계측(debug view/최적화 근거) — 무엇이 컨텍스트를 차지하는지.
+            if session_id:
+                self._record_context_breakdown(session_id, role, system_msg, projected, skills, room_memory)
             route["model_calls"] += 1
             async for delta in self._stream_with_recovery(
                 route["model"],
@@ -1342,6 +1355,46 @@ class AgentRuntime:
             labels.append("runtime smoke")
         return ("passed", "검증 통과: " + ", ".join(labels)) if any_passed \
             else ("unavailable", "검증 실행 불가(모든 check가 unavailable)")
+
+    def _record_context_breakdown(self, session_id, role, system_msg, projected, skills, room_memory):
+        """전송 직전 context를 영역별로 추정해 저장한다(debug view/최적화 근거).
+        절대값은 추정, 상대 비중 파악이 목적. 실측 총량은 usage(measured)가 별도로 남는다."""
+        try:
+            system_total = _est_tokens(system_msg.get("content", ""))
+            skills_t = _est_tokens(skills or "")
+            memory_t = _est_tokens(room_memory or "") + _est_tokens(_load_global_memory())
+            tool_t = hist_t = 0
+            for m in projected:
+                c = m.get("content", "")
+                text = c if isinstance(c, str) else " ".join(
+                    x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text"
+                ) if isinstance(c, list) else str(c)
+                if m.get("role") == "tool":
+                    tool_t += _est_tokens(text)
+                else:
+                    hist_t += _est_tokens(text)
+            # base+role 지침 = system 전체에서 memory/skills를 뺀 근사
+            base_role_t = max(0, system_total - skills_t - memory_t)
+            total = system_total + tool_t + hist_t
+            budget = settings.logical_budget
+            self._last_context[session_id] = {
+                "role": role,
+                "areas": {
+                    "system_base_role": base_role_t,
+                    "memory": memory_t,
+                    "skills": skills_t,
+                    "history": hist_t,
+                    "tool_results": tool_t,
+                },
+                "total_est": total,
+                "budget": budget,
+                "pct_est": round(total / budget * 100, 1) if budget else 0,
+            }
+        except Exception as err:
+            error_log.record("context_breakdown", str(err), session_id)
+
+    def get_context_breakdown(self, session_id: str) -> dict:
+        return self._last_context.get(session_id, {})
 
     async def _runtime_smoke(self, ws: str, send: EventSink) -> tuple[str, str]:
         """self-repo(FORGE 자신)일 때만: 빌드된 앱을 headless로 로드해 런타임 검증한다.

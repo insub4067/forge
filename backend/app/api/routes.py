@@ -389,6 +389,13 @@ async def session_status(session_id: str):
     return runtime.get_status(session_id)
 
 
+@router.get("/sessions/{session_id}/context")
+async def session_context(session_id: str):
+    """마지막 LLM 호출의 context 영역별 분해(debug view) — 무엇이 컨텍스트를 차지하는지.
+    system_base_role / memory / skills / history / tool_results 추정 토큰 + 총량·예산 대비 %."""
+    return runtime.get_context_breakdown(session_id)
+
+
 @router.get("/sessions/{session_id}/events")
 async def session_events(session_id: str, since: int = 0):
     """seq > since 인 이벤트만 반환 — 폴링으로 SSE를 보완(프록시 버퍼링 내성).
