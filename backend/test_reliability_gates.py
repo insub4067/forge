@@ -66,6 +66,29 @@ async def main():
     print("autocommit(AUTO_COMMIT=0): OK — no-op")
     A.settings.auto_commit = True  # 원복
 
+    # ── _verify: 프로세스가 test/build를 실제로 돌려 신뢰성을 보장 ──
+    import tempfile
+    import os
+    import json
+
+    async def _ns(t, d):
+        pass
+
+    with tempfile.TemporaryDirectory() as d:  # 검증 대상 없음 → 통과(없는 걸 실패로 막지 않음)
+        ok, _ = await rt._verify(d, _ns)
+        assert ok
+    with tempfile.TemporaryDirectory() as d:  # 빌드 실패 → 차단
+        open(os.path.join(d, "package.json"), "w").write(
+            json.dumps({"name": "t", "version": "1.0.0", "scripts": {"build": "exit 1"}}))
+        ok, rep = await rt._verify(d, _ns)
+        assert not ok, rep
+    with tempfile.TemporaryDirectory() as d:  # 빌드 성공 → 통과
+        open(os.path.join(d, "package.json"), "w").write(
+            json.dumps({"name": "t", "version": "1.0.0", "scripts": {"build": "exit 0"}}))
+        ok, rep = await rt._verify(d, _ns)
+        assert ok, rep
+    print("verify: OK — 빌드 실패 차단 / 성공 통과 / 대상없음 통과")
+
     print("\n모든 케이스 통과 ✓")
 
 

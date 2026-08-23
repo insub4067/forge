@@ -1084,6 +1084,63 @@ class AgentRuntime:
         except Exception as err:
             error_log.record("autocommit", str(err), "")
 
+    async def _verify(self, ws: str, send: EventSink) -> tuple[bool, str]:
+        """Strict 검증 — 워크스페이스의 test/build를 실행해 통과해야 완료로 인정한다.
+        (passed, report) 반환. 검증 대상이 없으면 (True, ...) — 없는 걸 실패로 막지 않는다.
+
+        거짓 실패(정상 코드를 막는 것)를 피하려고 '실제 실패'만 차단한다:
+        - npm run build: exit!=0 → 실패(빌드/타입 깨짐).
+        - pytest: exit 1 → 실패(테스트 실제 실패). exit 5(테스트 없음)·기타(설정/미설치)는 통과 처리.
+        """
+        import os
+        import shutil
+        import glob
+        if not ws or not os.path.isdir(ws):
+            return True, "검증 대상 없음(워크스페이스 없음)"
+
+        async def _sh(args, cwd, timeout=240):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *args, cwd=cwd,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+                return proc.returncode, out.decode(errors="replace")
+            except Exception as err:
+                return -1, f"실행 오류: {err}"
+
+        checks: list[tuple[str, list[str], str]] = []  # (label, args, cwd)
+        npm = shutil.which("npm")
+        for sub in ("", "frontend"):
+            pj = os.path.join(ws, sub, "package.json")
+            if npm and os.path.isfile(pj):
+                try:
+                    scripts = json.loads(open(pj, encoding="utf-8").read()).get("scripts", {})
+                except Exception:
+                    scripts = {}
+                if "build" in scripts:
+                    checks.append((f"npm run build{f' ({sub})' if sub else ''}",
+                                   [npm, "run", "build"], os.path.join(ws, sub)))
+        for sub in ("", "backend"):
+            d = os.path.join(ws, sub)
+            if os.path.isdir(d) and glob.glob(os.path.join(d, "test_*.py")):
+                venv_py = os.path.join(d, ".venv", "bin", "python")
+                interp = venv_py if os.path.isfile(venv_py) else (shutil.which("python3") or shutil.which("python"))
+                if interp:
+                    checks.append((f"pytest{f' ({sub})' if sub else ''}",
+                                   [interp, "-m", "pytest", "-q"], d))
+
+        if not checks:
+            return True, "검증 대상 없음(test/build 미검출)"
+        await send("verify_start", {"checks": [c[0] for c in checks]})
+        for label, args, cwd in checks:
+            rc, out = await _sh(args, cwd)
+            is_pytest = "pytest" in label
+            # pytest는 exit 1만 실제 실패. 5(수집 0)·2(에러)·-1(미실행)은 거짓실패 방지 위해 통과.
+            failed = (rc == 1) if is_pytest else (rc != 0)
+            if failed:
+                return False, f"[{label}] 검증 실패 (exit {rc}):\n{out[-1500:]}"
+        return True, "검증 통과: " + ", ".join(c[0] for c in checks)
+
     async def run(
         self,
         history: list[dict],
@@ -1272,7 +1329,24 @@ class AgentRuntime:
         if status != "done":
             await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
             return all_messages
-        await finish("completed", "작업을 완료했습니다.")
+
+        # ── Strict 검증 게이트 — 신뢰성은 모델이 아니라 프로세스가 보장한다 ──
+        # 완료 = 검증(test/build) 통과. 모델이 "됐습니다" 해도 프로세스가 실제로 돌려
+        # 통과해야 완료로 인정한다. 실패하면 1회 수리 재시도, 그래도 실패면
+        # verification_failed로 정직하게 보고하고 커밋하지 않는다(검증 안 된 코드는 안 나간다).
+        verified, report = await self._verify(ws, send)
+        if not verified:
+            await send("verify_failed", {"report": report[:800]})
+            all_messages.append({"role": "user", "content":
+                "[검증 실패 — 프로세스가 test/build를 실제로 돌린 결과다. 아래를 고쳐 통과시켜라]\n" + report})
+            status = await _run_developer("")
+            if status == "done":
+                verified, report = await self._verify(ws, send)
+        if verified:
+            await finish("completed", "작업 완료 — 검증 통과.")
+        else:
+            await finish("verification_failed",
+                         "검증(test/build) 실패로 완료하지 못했습니다. 커밋하지 않았습니다:\n" + report[:600])
         return all_messages
 
     @staticmethod
