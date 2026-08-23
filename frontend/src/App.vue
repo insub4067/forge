@@ -57,6 +57,7 @@ const MODEL_TIERS = [
   { key: 'auto', label: '자동', desc: 'Flash로 처리하고 막히면 Pro로 승격 (권장·균형)' },
   { key: 'pro', label: '프로', desc: '항상 Pro — 가장 정확, 비용 높음' },
   { key: 'flash', label: '플래시', desc: 'Flash만 — 가장 빠르고 저렴, 승격 없음' },
+  { key: 'ox', label: 'Ox', desc: 'Ox Alpha(실험) — OpenRouter 경유, 모델 벤치마크용' },
 ]
 function pickModel(key) {
   modelTier.value = key
@@ -1540,6 +1541,16 @@ function phaseStatus(p) {
   return 'done'
 }
 
+// 작성 중 어떤 모델이 답하는지 한눈에 — 모델명을 짧은 배지로.
+function shortModel(m) {
+  if (!m) return ''
+  if (m.includes('ox-alpha') || m.startsWith('stealth/')) return 'Ox'
+  if (m.includes('pro')) return 'Pro'
+  if (m.includes('vision')) return 'Vision'
+  if (m.includes('flash')) return 'Flash'
+  return m.split('/').pop()
+}
+
 function runningTool(p) {
   return p.tools.find((t) => t.status === 'running')
 }
@@ -2267,6 +2278,7 @@ document.addEventListener('visibilitychange', () => {
               >
                 <span class="activity-dot" :class="phaseStatus(p)"></span>
                 <span class="activity-label">{{ phaseLabel(p) }}</span>
+                <span v-if="p.model" class="activity-model">{{ shortModel(p.model) }}</span>
                 <span v-if="p.running && runningTool(p)" class="activity-live">{{ runningTool(p).name }} 실행 중…</span>
                 <span v-else-if="p.tools.length" class="activity-count">도구 {{ p.tools.length }}</span>
                 <svg class="activity-chevron" :class="{ open: !p.collapsed }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>

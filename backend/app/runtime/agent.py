@@ -615,7 +615,7 @@ class AgentRuntime:
             self._auto_approve_sessions.discard(session_id)
 
     def set_model_tier(self, session_id: str, tier: str) -> None:
-        self._model_tier[session_id] = tier if tier in ("auto", "pro", "flash") else "auto"
+        self._model_tier[session_id] = tier if tier in ("auto", "pro", "flash", "ox") else "auto"
 
     def set_agent_mode(self, session_id: str, mode: str) -> None:
         """에이전트 모드: auto(복잡도 기반 자동 전환) | multi(Planner→Developer→Reviewer) | single(올인원).
@@ -747,7 +747,8 @@ class AgentRuntime:
         plan: str = "",
     ) -> tuple:
         route = self.router.select_model(role, retry_count, complexity, escalate=escalate,
-                                         has_image=has_image)
+                                         has_image=has_image,
+                                         tier=self._model_tier.get(session_id, "auto"))
         tool_schemas = tools if tools is not None else TOOL_SCHEMAS
         await send("role_start", {
             "role": role, "model": route["model"], "thinking": route["thinking"],

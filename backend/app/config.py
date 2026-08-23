@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     deep_seek_api_key: str = ""
     deep_seek_model: str = "deepseek-v4-pro"
     llm_provider: str = "deepseek"
+    # Ox Alpha(OpenRouter 경유, OpenAI 호환) — 모델 벤치마크·실험용. key는 .env의 OX_ALPHA_API_KEY.
+    ox_alpha_api_key: str = ""
+    ox_base_url: str = "https://openrouter.ai/api/v1"
+    ox_model: str = "stealth/ox-alpha"
     # 잔액 표시용 환율(USD→CNY 근사). DeepSeek 잔액 API는 CNY로 반환한다.
     usd_cny_rate: float = 7.2
     # 잔액 영역 탭 시 안내하는 충전 화면 URL(DeepSeek 플랫폼).
@@ -55,4 +59,7 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     "deepseek-v4-flash": {"cache_miss": 0.28, "cache_hit": 0.028, "output": 0.42},
     "deepseek-v4-pro": {"cache_miss": 0.55, "cache_hit": 0.055, "output": 2.19},
     "deepseek-v4-flash-vision-exp": {"cache_miss": 0.28, "cache_hit": 0.028, "output": 0.42},
+    # Ox Alpha — 현재 무료 preview라 실제 청구 $0. 단, 토큰 raw usage는 계측되므로
+    # 정식 가격 발표 시 이 표만 고치면 소급 계산된다(§무료 가격에 속지 말 것).
+    "stealth/ox-alpha": {"cache_miss": 0.0, "cache_hit": 0.0, "output": 0.0},
 }
