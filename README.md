@@ -2,63 +2,87 @@
 
 **English** | [한국어](README.ko.md)
 
-A self-hosted **agentic coding runtime** that executes, reviews, and repairs work iteratively while running on a Mac and remaining controllable from a mobile PWA.
+A self-hosted **agentic coding runtime** that executes, verifies, repairs, and resumes software work on a Mac while remaining controllable from a mobile PWA.
 
-FORGE optimizes for **equal or better task success with fewer tokens, API calls, time, and cost**. The primary metric is **cost per successfully completed task**.
+## Core Thesis
+
+FORGE is **not** primarily about running LLMs cheaply.
+
+> **The key is to make inexpensive models reliable through a strong harness and deterministic quality-control process.**
+
+Quality is not delegated to the model's confidence. The process verifies real artifacts with tests/builds, repairs failures, and escalates to a stronger model only when needed.
+
+```text
+Inexpensive model
+  ↓
+bounded execution loop
+  ↓
+real code/tool actions
+  ↓
+deterministic test/build verification
+  ├─ PASS → completed / commit
+  └─ FAIL → diagnose / repair / verify again
+                         ↓ only when stuck: stronger model
+```
+
+Optimization order is therefore: **success/quality first → verified completion → cost per successful task → elapsed time → human intervention**. Saving tokens while reducing success rate is not an improvement.
+
+## Current Runtime
 
 ```text
 User Goal
   ↓
-Triage (Flash, lightweight router)
-  ├─ CHAT → Chat
-  └─ AGENT → Developer (flash + thinking medium)
-               loop: Plan(3 lines) → Execute → Verify(tests/build) → done
-                                          └ fail → Diagnose → Repair → Verify
-               ↓ if stuck: escalate to pro + thinking high (Sr), up to 2 retries
+Triage
+  ├─ CHAT → Chat (Flash)
+  └─ AGENT → Developer (Flash + thinking)
+               ↻ Plan → Execute → Self-verify/Repair
+               ↓ Pro escalation when needed
+               ↓
+          Strict Verification Gate
+          real test/build execution
+               ├─ PASS → completed → auto commit/push allowed
+               └─ FAIL → bounded repair → verification_failed
 ```
 
-Roles: Triage (cheap router) → Chat (cheapest flash) for small talk, or Developer for code. Plus Vision for images. No separate Planner/Reviewer/Debugger — each
-extra agent re-reads the whole context (input tokens). One Developer owns design, implementation,
-self-verification and repair end-to-end in a single context.
-
-## ⚠️ Security Warning
-
-FORGE can modify files, execute shell commands, change Git repositories, and now exposes Mac remote capabilities including a **host PTY terminal, screen viewing, and camera viewing**. Do not expose a FORGE instance directly to the public Internet.
-
-A Cloudflare Tunnel alone is not authorization. Put remote deployments behind **Cloudflare Zero Trust / Access, Tailscale, a VPN, or another trusted access-control layer**. The project's development deployment uses explicit Cloudflare Zero Trust Access policies.
-
-The Host Terminal is effectively a remote shell. Application-level WebSocket authorization and network access controls must be independently verified.
+The default pipeline does not use separate Planner/Reviewer/Debugger agents. One Developer owns the working context end-to-end, while the final quality authority is the process-level verification gate—not the model saying "done".
 
 ## Current Implementation
 
-- DeepSeek V4 streaming / tool calling / thinking
-- All-in-one Developer (design + implement + self-verify + repair); flash+think default, pro on failure (Jr→Sr)
-- Flash-first / Pro-on-demand routing
-- context pruning / 75% compaction / 95% hard block
-- cache telemetry + selective Self-Improving Skills
-- reasoning_content recovery and repeated-retry elimination per affected session
-- read/write/edit/bash/grep/list tools with approval boundaries
-- `build_frontend` host-build tool so FORGE can modify and production-build its own frontend
-- Docker Sandbox by default + opt-in `SANDBOX_MODE=host`
-- PostgreSQL persistence / agent telemetry / JSONL event log
-- `/status` recovery after SSE loss and pending-approval restoration
-- mobile PWA organized around Sessions / Automation / Mac remote operation
+- DeepSeek V4 / OpenRouter model routing, streaming, tool calling and thinking
+- Flash-first with bounded Pro escalation
+- all-in-one Developer loop
+- **Strict Verification Gate** running real build/pytest checks
+- bounded repair after verification failure
+- auto commit/push only on verified completion paths
+- step-level history persistence
+- **Durable Auto Resume** for unfinished runs after server restart, with crash-loop guard
+- PostgreSQL persistence / JSONL event log / metrics
+- context pruning / compaction / cache telemetry
+- Curated / Learned / Project three-tier Skills
+- deterministic R0 benchmark harness with 21 tasks
+- bounded RSI promotion gate: success rate → cost per success → elapsed
+- Docker Sandbox by default + opt-in Host mode
+- application-level HTTP/WebSocket auth via `FORGE_AUTH_TOKEN`
+- mobile PWA organized around Sessions / Automation / Mac
 - Git / Files / Skills / Metrics / Kanban / Vision
-- view-only Mac screen
-- Mac host PTY + WebSocket + xterm.js Terminal
-- Mac camera via `imagesnap` JPEG polling PoC
-- scheduled-job foundations and workspace fallback
+- Mac host PTY Terminal / screen view / camera PoC
+- scheduled-job foundations
 
 ## Major Remaining Work
 
-- Durable Worker + authoritative event replay for true restart continuation
-- security review of Terminal / Screen / Camera authorization boundaries
-- complete Scheduled / Deferred / Condition Jobs + Web Push
+- harden approval/capability boundaries during Durable Resume
+- distinguish verification `PASSED / FAILED / UNAVAILABLE`
+- expand benchmark coverage and compare against external harnesses
+- complete bounded RSI R1: candidate worktree → benchmark → human promotion
+- finish restart/idempotency/timezone semantics for Scheduled / Deferred / Condition Jobs
 - Tool Script/RPC Mode
-- ExecutionBackend abstraction
-- bounded RSI pipeline: candidate → benchmark → promotion/rollback
+- ExecutionBackend cleanup (Local/Docker/SSH)
 
-FORGE can already modify its own repository and perform parts of its own build workflow, but it is not treated as fully recursive self-improving until evaluation and promotion are automatically closed-loop.
+## Security
+
+FORGE can modify files, execute shell commands, change Git repositories, expose a host PTY terminal, and access screen/camera capabilities. Do not expose it directly to the public Internet.
+
+A Cloudflare Tunnel alone is not authorization. Use Cloudflare Zero Trust / Access, Tailscale, a VPN, or equivalent network controls, while keeping application-level `FORGE_AUTH_TOKEN` protection enabled independently.
 
 ## Getting Started
 
@@ -81,14 +105,7 @@ npm run build
 
 ## Documentation
 
-Use [`docs/README.md`](docs/README.md) as the authoritative documentation index.
-
-- `docs/core/` — current architecture and Agent loop
-- `docs/status/` — actual implementation status
-- `docs/operations/` — benchmarks and troubleshooting
-- `docs/planning/` — roadmap
-- `docs/proposal/` — proposals and adoption research
-- `docs/agents/` — **live runtime prompts**
+Use [`docs/README.md`](docs/README.md) as the authoritative documentation index. Prefer current code plus `docs/core` and `docs/status` over Proposal/Archive documents.
 
 ## License
 
