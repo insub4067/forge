@@ -790,7 +790,7 @@ function startPhase(m, role = '', model = '') {
     p.collapsed = true
     p.running = false
   })
-  const p = reactive({ role, model, thinking: '', text: '', tools: [], collapsed: false, running: true })
+  const p = reactive({ role, model, thinking: '', text: '', tools: [], collapsed: false, running: true, thinkOpen: false })
   m.phases.push(p)
   return p
 }
@@ -1031,11 +1031,18 @@ function stopEventPolling() {
   }
 }
 
+// 모드 전용 토글 — 작업 실행에는 전혀 영향을 주지 않는다(네트워크 호출 없음).
+// 작업 중단(일시 정지)은 계획수정 메시지가 실제로 채팅에 전송될 때만 일어난다(steerDuringRun).
+function toggleSteerMode() {
+  steerMode.value = steerMode.value === 'queue' ? 'switch' : 'queue'
+}
+
 async function steerDuringRun(text) {
   const id = currentRoomId.value
   input.value = ''
   if (steerMode.value === 'switch') {
-    // 현재 작업 중단 후, 이 메시지로 새로 시작 (스트림 종료 시 자동 전송)
+    // 계획수정: 메시지가 전송된 이 순간에만 작업을 일시 정지한다.
+    // 이후 이 메시지로 새 작업을 시작(스트림 종료 시 자동 전송).
     try {
       await fetch(`/api/sessions/${id}/cancel`, { method: 'POST' })
     } catch {}
@@ -1414,10 +1421,10 @@ document.addEventListener('visibilitychange', () => {
               <div v-if="p.text" class="text" v-html="renderMarkdown(p.text)"></div>
 
               <template v-if="!p.collapsed">
-                <details v-if="p.thinking" class="thinking">
-                  <summary>추론</summary>
-                  <div class="thinking-body">{{ p.thinking }}</div>
-                </details>
+                <div v-if="p.thinking" class="thinking" :class="{ open: p.thinkOpen }" @click="p.thinkOpen = !p.thinkOpen">
+                  <div class="thinking-summary">추론</div>
+                  <div v-if="p.thinkOpen" class="thinking-body">{{ p.thinking }}</div>
+                </div>
 
                 <button
                   v-if="!p.showAll && p.tools.length > ACTIVITY_LIMIT"
@@ -1576,7 +1583,7 @@ document.addEventListener('visibilitychange', () => {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
               {{ autoApprove ? '자동 승인' : '수동 승인' }}
             </button>
-            <button v-if="busy || sessionRunning" class="mode-chip small ghost" @click="steerMode = steerMode === 'queue' ? 'switch' : 'queue'">
+            <button v-if="busy || sessionRunning" class="mode-chip small ghost" @click="toggleSteerMode">
               {{ steerMode === 'queue' ? '작업 대기' : '계획 수정' }}
             </button>
           </div>

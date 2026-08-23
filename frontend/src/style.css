@@ -1312,20 +1312,18 @@ main {
 }
 
 .thinking {
+  cursor: pointer;
   margin-bottom: 10px;
   border-left: 2px solid var(--border);
   padding-left: 10px;
 }
 
-.thinking summary {
+.thinking .thinking-summary {
   cursor: pointer;
   color: var(--muted);
   font-size: 12px;
   list-style: none;
-}
-
-.thinking summary::-webkit-details-marker {
-  display: none;
+  user-select: none;
 }
 
 .thinking-body {
