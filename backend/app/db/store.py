@@ -527,6 +527,9 @@ def _aggregate_runs(runs: list) -> dict:
         "total_compactions": sum(r.compactions for r in runs),
         "elapsed_ms": sum(r.elapsed_ms for r in runs),
         "pro_calls": sum(1 for r in runs if "pro" in (r.model or "").lower()),
+        # RTK식 gain — 도구 결과 압축 전/후·절감률(도구 출력 한정 지표. 전체 API 토큰과 구분).
+        "tool_raw_tokens": sum(getattr(r, "tool_raw_tokens", 0) or 0 for r in runs),
+        "tool_visible_tokens": sum(getattr(r, "tool_visible_tokens", 0) or 0 for r in runs),
         "role_tokens": role_tokens,
         "role_calls": role_calls,
         "model_tokens": model_tokens,
