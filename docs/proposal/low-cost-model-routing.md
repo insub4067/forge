@@ -3,6 +3,10 @@
 > 상태: Proposal / Experimental
 > 작성 기준: 2026-08-23
 > 북극성: **모델 단가가 아니라 `cost_per_successful_task`를 최소화한다.**
+>
+> **갱신 2026-08-23**: Ox Alpha는 read 루프·지연으로 실사용에 부적합해 코드에서 제거됐다.
+> 이 문서의 Ox 관련 내용(가격표·다이어그램·§4.1)은 히스토리로만 유효하다.
+> `cost_per_successful_task` 기준의 평가·라우팅 틀과 나머지 후보(Ling/Qwen 등)는 그대로 적용된다.
 
 ## 1. 배경
 
