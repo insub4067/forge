@@ -83,6 +83,29 @@ def test_stable_prefix():
     print("OK stable prefix cache-friendliness (7)")
 
 
+def test_project_shrinks_after_compaction():
+    # 전송 전 사전 압축 루프가 의존하는 불변식: 압축 항목이 있으면 _project는
+    # [요약] + 최근 tail 만 남겨 컨텍스트가 실제로 줄어든다.
+    rt = AgentRuntime.__new__(AgentRuntime)  # docker/router 없이 _project만 검증
+    rt._compaction = {}
+    msgs = [{"role": "user", "content": "start"}] + [
+        {"role": "tool", "content": "X" * 4000} for _ in range(30)
+    ]
+    # 10. 압축 없음 → 전체 그대로
+    assert len(rt._project(msgs, "s")) == len(msgs)
+    # 11. 압축 진입(covered=len-8) → 요약 1개 + 최근 8개로 축소
+    rt._compaction["s"] = {"summary": "요약본", "covered": len(msgs) - 8}
+    proj = rt._project(msgs, "s")
+    assert len(proj) == 1 + 8, len(proj)
+    assert proj[0]["content"].startswith("[이전 작업 요약")
+    # 축소 후 추정 토큰이 원본보다 크게 작다(대량 도구 결과가 요약으로 대체됨)
+    from app.runtime.agent import _est_tokens
+    before = sum(_est_tokens(m["content"]) for m in msgs)
+    after = sum(_est_tokens(m["content"]) for m in proj)
+    assert after < before / 2, (before, after)
+    print("OK projection shrinks after compaction (10-11)")
+
+
 def test_developer_escalation():
     r = ModelRouter()
     # 8. Developer 기본 → Flash + thinking(설계+구현+자체검증)
@@ -102,5 +125,6 @@ if __name__ == "__main__":
     test_compaction_thresholds()
     test_skill_selection()
     test_stable_prefix()
+    test_project_shrinks_after_compaction()
     test_developer_escalation()
     print("\n전체 통과")

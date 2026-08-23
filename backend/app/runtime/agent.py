@@ -919,6 +919,22 @@ class AgentRuntime:
             # vision 모델(이미지 작업)이면 원본 이미지를 data URI로 실어 보낸다(/uploads 경로는
             # 모델이 못 읽음). non-vision 모델에는 이미지를 보내지 않는다(모델이 image 미지원 → 400).
             projected = self._project(all_messages, session_id)
+            # 전송 전 사전 압축: 한 스텝에서 도구 결과가 대량으로 쌓이면(예: 병렬 read_file
+            # 다수) 실측 후 압축은 이미 예산 초과 호출을 한 번 보내버린다(실측 195K 관측).
+            # 보내기 전에 추정치로 미리 압축해 그 초과 호출 자체를 막는다.
+            if session_id:
+                for _ in range(3):
+                    est = _est_tokens(system_msg.get("content", "")) + sum(
+                        _est_tokens(m["content"]) for m in projected
+                        if isinstance(m.get("content"), str)
+                    )
+                    if est <= settings.logical_budget * CONTEXT_COMPACT_RATIO:
+                        break
+                    if not await self._compact(all_messages, session_id):
+                        break
+                    route["compactions"] += 1
+                    await send("compaction", {"covered": self._compaction[session_id]["covered"]})
+                    projected = self._project(all_messages, session_id)
             if has_image:
                 call_messages = [
                     system_msg,
