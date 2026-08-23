@@ -129,6 +129,10 @@ onMounted(async () => {
           <div v-else-if="adminBalance && adminBalance.error" class="admin-sub">잔액 조회 실패: {{ adminBalance.error }}</div>
           <div v-else class="admin-sub">잔액 불러오는 중…</div>
         </button>
+        <div v-if="sessionMetrics && sessionMetrics.estimated_cost != null" class="admin-row balance-cost">
+          <span>이번 세션 비용</span>
+          <span class="mono">${{ sessionMetrics.estimated_cost.toFixed(4) }}<span v-if="sessionMetrics.final_status"> · {{ sessionMetrics.final_status }}</span></span>
+        </div>
       </div>
 
       <div v-if="sessionMetrics" class="admin-section">
@@ -143,12 +147,6 @@ onMounted(async () => {
         </div>
         <div v-if="sessionMetrics.selected_skills" class="admin-sub">skill: {{ sessionMetrics.selected_skills }}</div>
         <div v-for="(b, bi) in (sessionMetrics.bottlenecks || [])" :key="bi" class="metric-warn">⚠ {{ b }}</div>
-      </div>
-
-      <div v-if="sessionMetrics && sessionMetrics.estimated_cost != null" class="admin-section">
-        <div class="admin-stat-title">이번 세션 비용</div>
-        <div class="admin-big">${{ sessionMetrics.estimated_cost.toFixed(4) }}</div>
-        <div class="admin-sub">상태 {{ sessionMetrics.final_status || '—' }}</div>
       </div>
 
       <div class="admin-section">

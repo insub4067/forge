@@ -3645,3 +3645,11 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* 잔액 카드에 합친 세션 비용 한 줄 */
+.balance-cost {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
