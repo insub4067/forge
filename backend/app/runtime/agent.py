@@ -639,10 +639,15 @@ class AgentRuntime:
         session_id: str = "",
     ) -> str:
         question_id = uuid.uuid4().hex
+        options = list(args.get("options", []) or [])
+        # 선택형 질문이면 항상 마지막에 "FORGE가 판단" 선택지를 붙인다 —
+        # 사용자가 선택을 모를 때 FORGE(모델)가 스스로 판단해 진행하게 한다.
+        if options:
+            options = [*options, "FORGE 판단으로 선택"]
         detail = {
             "id": question_id,
             "question": args.get("question", ""),
-            "options": args.get("options", []),
+            "options": options,
         }
         await send("question_request", detail)
         fut: asyncio.Future = asyncio.get_running_loop().create_future()

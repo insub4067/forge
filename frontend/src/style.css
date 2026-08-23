@@ -1736,7 +1736,16 @@ footer .image-preview-row {
   background: var(--panel-2);
   color: var(--text);
   font-size: 15px;
+  line-height: 1.45;
   text-align: left;
+  white-space: pre-wrap;
+}
+
+/* 마지막 선택지(항상 FORGE 판단)는 시각적으로 구분해 한눈에 보이게 한다. */
+.modal-options button:last-child {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .modal-input {
