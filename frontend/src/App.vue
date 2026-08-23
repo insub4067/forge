@@ -371,8 +371,9 @@ function shortPath(p) {
 
 function ctxPct(room) {
   const used = room?.used_tokens || 0
-  const budget = room?.logical_budget || 262144
-  if (!budget) return 0
+  // 런타임 compaction과 같은 기준(모델 실제 한도 ~128k)으로 표시한다. DB 세션값은 옛 256k라
+  // 쓰면 실제 60% 소진이 30%로 보이는 표시/실제 불일치가 생긴다.
+  const budget = 131072
   return Math.min(100, Math.round((used / budget) * 100))
 }
 
@@ -1314,7 +1315,7 @@ document.addEventListener('visibilitychange', () => {
       @toggle-pin="togglePin"
     />
 
-    <div v-if="sessionRunning && !busy" class="running-banner" :class="{ waiting: agentStatus && agentStatus.waiting_for }">
+    <div v-if="sessionRunning && !busy && (!isAtBottom || (agentStatus && agentStatus.waiting_for))" class="running-banner" :class="{ waiting: agentStatus && agentStatus.waiting_for }">
       <span class="running-dot"></span>{{ runningBannerText() }}
     </div>
 

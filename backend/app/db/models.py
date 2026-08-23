@@ -18,7 +18,7 @@ class Session(Base):
     workspace_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String, default="active")
     model: Mapped[str] = mapped_column(String, default="")
-    logical_budget: Mapped[int] = mapped_column(Integer, default=262144)
+    logical_budget: Mapped[int] = mapped_column(Integer, default=131072)
     used_tokens: Mapped[int] = mapped_column(Integer, default=0)
     # run이 실행 중인지 영속화한다 — 서버 재시작으로 중단된 run을 시작 시 감지하기 위함.
     running: Mapped[bool] = mapped_column(Boolean, default=False)
