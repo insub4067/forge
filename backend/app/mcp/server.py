@@ -30,6 +30,7 @@ TOOLS = [
                 "goal": {"type": "string", "description": "달성할 목표(자연어). 예: '로그인 버그를 찾아 수정하고 테스트까지 완료'"},
                 "workspace": {"type": "string", "description": "작업할 로컬 워크스페이스 절대경로"},
                 "plan": {"type": "string", "description": "선택. 당신이 세운 단계별 실행 계획. 주면 FORGE 내부 planner를 건너뛰고 이 계획대로 코딩만 한다(비용↓). 복잡한 작업일수록 구체적 계획을 넘기는 것을 권장."},
+                "images": {"type": "array", "items": {"type": "string"}, "description": "선택. 스크린샷/UI/차트 등 이미지가 필요한 작업이면 이미지 파일 절대경로를 넘겨라. 각 항목은 로컬 이미지 파일의 절대경로(예: /path/to/screenshot.png). 이미지가 있으면 Developer가 vision 모델로 실행된다."},
                 "auto_approve": {"type": "boolean", "description": "쓰기/실행 도구를 자동 승인할지(무인 위임 시 true). 기본 false", "default": False},
             },
             "required": ["goal", "workspace"],
@@ -61,7 +62,8 @@ async def _call_tool(name: str, args: dict) -> dict:
         if not goal or not workspace:
             return _text("goal과 workspace는 필수입니다.", is_error=True)
         task_id = await task_facade.execute(goal, workspace, bool(args.get("auto_approve", False)),
-                                            plan=str(args.get("plan", "")))
+                                            plan=str(args.get("plan", "")),
+                                            images=args.get("images") or [])
         return _text(json.dumps({"task_id": task_id, "status": "running"}, ensure_ascii=False))
     if name == "forge_status":
         return _text(json.dumps(task_facade.status(str(args.get("task_id", ""))), ensure_ascii=False))
