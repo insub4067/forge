@@ -74,20 +74,27 @@ async def main():
     async def _ns(t, d):
         pass
 
-    with tempfile.TemporaryDirectory() as d:  # 검증 대상 없음 → 통과(없는 걸 실패로 막지 않음)
-        ok, _ = await rt._verify(d, _ns)
-        assert ok
-    with tempfile.TemporaryDirectory() as d:  # 빌드 실패 → 차단
+    with tempfile.TemporaryDirectory() as d:  # 검증 대상 없음 → unavailable(성공으로 기록 안 함)
+        st, _ = await rt._verify(d, _ns)
+        assert st == "unavailable", st
+    with tempfile.TemporaryDirectory() as d:  # 빌드 실패(node_modules 있음) → failed
         open(os.path.join(d, "package.json"), "w").write(
             json.dumps({"name": "t", "version": "1.0.0", "scripts": {"build": "exit 1"}}))
-        ok, rep = await rt._verify(d, _ns)
-        assert not ok, rep
-    with tempfile.TemporaryDirectory() as d:  # 빌드 성공 → 통과
+        os.mkdir(os.path.join(d, "node_modules"))
+        st, rep = await rt._verify(d, _ns)
+        assert st == "failed", (st, rep)
+    with tempfile.TemporaryDirectory() as d:  # 빌드 성공 → passed
         open(os.path.join(d, "package.json"), "w").write(
             json.dumps({"name": "t", "version": "1.0.0", "scripts": {"build": "exit 0"}}))
-        ok, rep = await rt._verify(d, _ns)
-        assert ok, rep
-    print("verify: OK — 빌드 실패 차단 / 성공 통과 / 대상없음 통과")
+        os.mkdir(os.path.join(d, "node_modules"))
+        st, rep = await rt._verify(d, _ns)
+        assert st == "passed", (st, rep)
+    with tempfile.TemporaryDirectory() as d:  # node_modules 없음 → 실행불가 → unavailable(거짓 failed 방지)
+        open(os.path.join(d, "package.json"), "w").write(
+            json.dumps({"name": "t", "version": "1.0.0", "scripts": {"build": "exit 1"}}))
+        st, _ = await rt._verify(d, _ns)
+        assert st == "unavailable", st
+    print("verify 3-state: OK — passed/failed/unavailable 구분, 거짓 failed 방지")
 
     print("\n모든 케이스 통과 ✓")
 

@@ -87,7 +87,7 @@ async def main():
     assert mode == "single", mode
     assert roles == ["developer"], roles
     assert plan_flags(all_calls) == [False], plan_flags(all_calls)
-    assert data.get("status") == "completed", data
+    assert data.get("status") in ("completed", "completed_unverified"), data
     print("Case A (auto+simple → single): OK", roles)
 
     # Case B — auto + complex(설계 키워드): multi, planner가 세운 계획이 developer에 전달
@@ -96,7 +96,7 @@ async def main():
     assert mode == "multi", mode
     assert roles == ["planner", "developer", "reviewer"], roles
     assert plan_flags(all_calls) == [False, True, False], plan_flags(all_calls)  # developer만 plan 보유
-    assert data.get("status") == "completed", data
+    assert data.get("status") in ("completed", "completed_unverified"), data
     print("Case B (auto+complex → multi, plan 전달): OK", roles)
 
     # Case C — multi + Reviewer FAIL: developer가 1회 재수정(리뷰 루프 1회 상한)
@@ -105,14 +105,14 @@ async def main():
     data, mode, roles, all_calls = await run_case(rt, calls, msg="모듈을 설계에 따라 리팩토링해줘")
     assert mode == "multi", mode
     assert roles == ["planner", "developer", "reviewer", "developer"], roles
-    assert data.get("status") == "completed", data
+    assert data.get("status") in ("completed", "completed_unverified"), data
     print("Case C (Reviewer FAIL → 1회 재수정): OK", roles)
 
     # Case D — multi + Reviewer PASS: 재수정 없음
     rt, calls = make_runtime()
     data, mode, roles, _ = await run_case(rt, calls, msg="아키텍처를 리팩토링해줘")
     assert roles == ["planner", "developer", "reviewer"], roles
-    assert data.get("status") == "completed", data
+    assert data.get("status") in ("completed", "completed_unverified"), data
     print("Case D (Reviewer PASS → 재수정 없음): OK", roles)
 
     # Case D2 — FAIL 본문에 'pass' 단어가 있어도 FAIL로 판정(마지막 줄만 본다).
@@ -127,14 +127,14 @@ async def main():
     data, mode, roles, _ = await run_case(rt, calls, msg="간단한 작업")
     assert mode == "single", mode
     assert roles == ["developer"], roles
-    assert data.get("status") == "completed", data
+    assert data.get("status") in ("completed", "completed_unverified"), data
     print("Case E (simple → single): OK", roles)
 
     # Case F — multi + Planner 실패: 올인원 Developer로 안전 폴백
     rt, calls = make_runtime(planner_status="max_steps")
     data, mode, roles, _ = await run_case(rt, calls, msg="설계에 따라 리팩토링해줘")
     assert roles == ["planner", "developer"], roles
-    assert data.get("status") == "completed", data
+    assert data.get("status") in ("completed", "completed_unverified"), data
     print("Case F (Planner 실패 → Developer 폴백): OK", roles)
 
     # Case G — multi + Developer 막힘: 승격 루프(plan 유지) 후 Reviewer로 진행
@@ -144,7 +144,7 @@ async def main():
     data, mode, roles, all_calls = await run_case(rt, calls, msg="설계에 따라 리팩토링해줘")
     assert roles == ["planner", "developer", "developer", "reviewer"], roles
     assert plan_flags(all_calls) == [False, True, True, False], plan_flags(all_calls)
-    assert data.get("status") == "completed", data
+    assert data.get("status") in ("completed", "completed_unverified"), data
     print("Case G (multi+승격 루프, plan 유지): OK", roles)
 
     # Case H — multi + Developer 최종 실패: 실패 종료

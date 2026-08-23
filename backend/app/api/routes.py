@@ -153,14 +153,18 @@ async def resume_run(session_id: str, workspace_path: str | None) -> None:
             return
         await store.set_session_final_status(session_id, "resuming")
         await store.mark_running(session_id, True)
-        # headless 재개는 승인할 클라이언트가 없으므로 auto_approve를 켠다 — 안 켜면
-        # write_file/bash에서 approval_request로 영영 멈춘다(재개의 목적은 무인 완주).
-        runtime.set_auto_approve(session_id, True)
+        # 승인 정책은 재시작 전 사용자가 정한 값을 그대로 복원한다 — 재시작했다는 이유로
+        # 권한이 확대되지 않는다(invariant). 원래 auto_approve였으면(무인 위임) 계속 자동 승인,
+        # 아니었으면 새 위험 작업은 approval_request로 pause되어 사용자 승인을 기다린다.
+        restored_aa = await store.get_session_auto_approve(session_id)
+        runtime.set_auto_approve(session_id, restored_aa)
 
         async def _noop(_evt: dict) -> None:
             return None
 
-        new_history = await runtime.run(history, _noop, session_id, workspace_path)
+        # 재개 상한(defense-in-depth): 폭주하는 재개가 무한히 돌지 않게 20분 타임아웃.
+        new_history = await asyncio.wait_for(
+            runtime.run(history, _noop, session_id, workspace_path), timeout=1200)
         await store.save_history(session_id, new_history)
         await _notify_done(session_id, new_history)
     except Exception as err:
@@ -175,7 +179,8 @@ async def chat(req: Request):
     body = await req.json()
     session_id = body.get("session_id") or uuid.uuid4().hex
     message = str(body.get("message", ""))
-    runtime.set_auto_approve(session_id, bool(body.get("auto_approve", False)))
+    _auto_approve = bool(body.get("auto_approve", False))
+    runtime.set_auto_approve(session_id, _auto_approve)
     runtime.set_model_tier(session_id, str(body.get("model_tier", "auto")))
     # 폴링 시작점: 이번 run 이전까지 기록된 마지막 seq. run마다 seq를 새로 세지 않고
     # 세션 단위로 단조 증가시키므로, 이 값부터 새 이벤트를 안전하게 이어 받는다.
@@ -209,6 +214,8 @@ async def chat(req: Request):
     history = await store.load_history(session_id)
     if not history:
         await store.ensure_session(session_id, message[:40], workspace_path)
+    # 승인 정책 영속화 — durable resume가 이 값을 복원해 권한이 확대되지 않게 한다.
+    await store.set_session_auto_approve(session_id, _auto_approve)
 
     # 다중 이미지 지원(image_urls). 단일 image_url도 하위호환.
     image_urls = body.get("image_urls") or ([body["image_url"]] if body.get("image_url") else [])
@@ -615,6 +622,7 @@ async def set_auto_approve(session_id: str, req: Request):
     body = await req.json()
     enabled = bool(body.get("enabled", False))
     runtime.set_auto_approve(session_id, enabled)
+    await store.set_session_auto_approve(session_id, enabled)  # 영속화(resume가 복원)
     resolved = runtime.resolve_pending_approvals(session_id) if enabled else 0
     return {"enabled": enabled, "resolved": resolved}
 

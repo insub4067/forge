@@ -27,6 +27,7 @@ _COLUMN_PATCHES = [
     "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS elapsed_ms INTEGER DEFAULT 0",
     "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS selected_skill_count INTEGER DEFAULT 0",
     "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS selected_skills VARCHAR DEFAULT ''",
+    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS auto_approve BOOLEAN DEFAULT FALSE",
     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS running BOOLEAN DEFAULT FALSE",
     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS final_status VARCHAR DEFAULT ''",
 ]
@@ -46,13 +47,20 @@ async def lifespan(app: FastAPI):
             if settings.auto_resume:
                 from .api.routes import resume_run
 
+                import os as _os
+
                 async def _resume_all(items):
                     for it in items:
-                        # 크래시 루프 가드: 재개 중 또 죽은 것(resuming)은 재재개하지 않고 안내만.
-                        if it["final_status"] == "resuming":
+                        ws = it["workspace_path"]
+                        # 재개하지 않는 조건(안내만 남김):
+                        # - resuming: 재개 중 또 죽은 것 → 재재개 금지(크래시 루프 가드).
+                        # - workspace가 없거나/루트("/")거나/실제 디렉터리가 아님 → 잘못된 세션.
+                        #   (ws="/"에서 전체 파일시스템 스캔 등으로 서버가 위험해지는 것을 막는다.)
+                        if (it["final_status"] == "resuming" or not ws
+                                or ws == "/" or not _os.path.isdir(ws)):
                             await store.mark_interrupted_note(it["id"])
                             continue
-                        await resume_run(it["id"], it["workspace_path"])  # 순차 — 스파이크 방지
+                        await resume_run(it["id"], ws)  # 순차 — 스파이크 방지
 
                 asyncio.create_task(_resume_all(interrupted))
             else:

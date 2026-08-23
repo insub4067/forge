@@ -272,6 +272,20 @@ _COMPLEX_KEYWORDS = (
 )
 
 
+# 칸반 invariant: 모델은 todo/working만 설정한다. testing→done은 프로세스(검증 게이트·
+# _finalize_tasks)가 소유하므로, 모델이 넣은 done/testing/레거시 상태를 강등한다.
+_TASK_STATUS_CLAMP = {
+    "todo": "todo", "working": "working",
+    "planning": "todo", "in_progress": "working", "in-progress": "working",
+    "review": "working", "debug": "working",
+}
+
+
+def _clamp_task_status(status: str) -> str:
+    """모델이 설정할 수 있는 task 상태를 todo/working으로 제한한다(done/testing은 프로세스만)."""
+    return _TASK_STATUS_CLAMP.get(str(status), "working")
+
+
 def _estimate_complexity(goal: str, all_messages: list[dict]) -> str:
     """simple | complex — 세션의 에이전트 모드가 auto일 때 single/multi를 가른다."""
     text = goal or ""
@@ -980,6 +994,9 @@ class AgentRuntime:
 
                 if name == "update_tasks":
                     tasks = args.get("tasks", [])
+                    # invariant: 모델은 todo/working만. testing→done은 프로세스가 소유한다.
+                    for _t in tasks:
+                        _t["status"] = _clamp_task_status(_t.get("status", "todo"))
                     if session_id:
                         await store.replace_tasks(session_id, tasks)
                     await send("task_update", {"tasks": tasks})
@@ -1102,19 +1119,21 @@ class AgentRuntime:
         except Exception as err:
             error_log.record("autocommit", str(err), "")
 
-    async def _verify(self, ws: str, send: EventSink) -> tuple[bool, str]:
-        """Strict 검증 — 워크스페이스의 test/build를 실행해 통과해야 완료로 인정한다.
-        (passed, report) 반환. 검증 대상이 없으면 (True, ...) — 없는 걸 실패로 막지 않는다.
-
-        거짓 실패(정상 코드를 막는 것)를 피하려고 '실제 실패'만 차단한다:
-        - npm run build: exit!=0 → 실패(빌드/타입 깨짐).
-        - pytest: exit 1 → 실패(테스트 실제 실패). exit 5(테스트 없음)·기타(설정/미설치)는 통과 처리.
+    async def _verify(self, ws: str, send: EventSink) -> tuple[str, str]:
+        """3상태 검증 — 프로세스가 test/build를 직접 실행. 반환 (state, report),
+        state ∈ {"passed","failed","unavailable"}.
+        - passed: 실제 검증이 돌아 통과.
+        - failed: 실제 검증이 돌아 실패(assertion/build error) → 완료 아님, 커밋 금지.
+        - unavailable: 검증 대상 없음 or 실행 불가(미설치/수집0/설정오류/timeout).
+          '검증 못 함'을 '검증 성공'으로 기록하지 않으려 별도 상태로 둔다.
+        정책: 하나라도 failed→failed. 아니고 하나라도 passed→passed. 전부 unavailable→unavailable.
+        흔한 구조만 지원: root/frontend package.json build, root/backend pytest(과설계 금지).
         """
         import os
         import shutil
         import glob
         if not ws or not os.path.isdir(ws):
-            return True, "검증 대상 없음(워크스페이스 없음)"
+            return "unavailable", "검증 대상 없음(워크스페이스 없음)"
 
         async def _sh(args, cwd, timeout=240):
             try:
@@ -1126,42 +1145,49 @@ class AgentRuntime:
             except Exception as err:
                 return -1, f"실행 오류: {err}"
 
-        checks: list[tuple[str, list[str], str]] = []  # (label, args, cwd)
+        checks: list[tuple[str, list[str], str, str]] = []  # (label, args, cwd, kind)
         npm = shutil.which("npm")
         for sub in ("", "frontend"):
-            pj = os.path.join(ws, sub, "package.json")
-            if npm and os.path.isfile(pj):
+            d = os.path.join(ws, sub)
+            pj = os.path.join(d, "package.json")
+            # node_modules 없으면 빌드가 환경 문제로 깨진다 — 거짓 failed 방지 위해 스킵(unavailable).
+            if npm and os.path.isfile(pj) and os.path.isdir(os.path.join(d, "node_modules")):
                 try:
                     scripts = json.loads(open(pj, encoding="utf-8").read()).get("scripts", {})
                 except Exception:
                     scripts = {}
                 if "build" in scripts:
                     checks.append((f"npm run build{f' ({sub})' if sub else ''}",
-                                   [npm, "run", "build"], os.path.join(ws, sub)))
+                                   [npm, "run", "build"], d, "build"))
         for sub in ("", "backend"):
             d = os.path.join(ws, sub)
             if os.path.isdir(d) and glob.glob(os.path.join(d, "test_*.py")):
                 venv_py = os.path.join(d, ".venv", "bin", "python")
                 interp = venv_py if os.path.isfile(venv_py) else (shutil.which("python3") or shutil.which("python"))
-                # pytest가 설치돼 있을 때만 — 미설치 시 exit 1을 '테스트 실패'로 오인해
-                # 정상 작업을 막는 거짓 실패를 방지한다(신뢰성엔 거짓 실패가 더 해롭다).
-                if interp:
-                    chk = await _sh([interp, "-c", "import pytest"], d, timeout=20)
-                    if chk[0] == 0:
-                        checks.append((f"pytest{f' ({sub})' if sub else ''}",
-                                       [interp, "-m", "pytest", "-q"], d))
+                # pytest 설치된 경우에만 검증으로 취급(미설치=unavailable, 거짓 failed 방지).
+                if interp and (await _sh([interp, "-c", "import pytest"], d, timeout=20))[0] == 0:
+                    checks.append((f"pytest{f' ({sub})' if sub else ''}",
+                                   [interp, "-m", "pytest", "-q"], d, "pytest"))
 
         if not checks:
-            return True, "검증 대상 없음(test/build 미검출)"
+            return "unavailable", "검증 대상 없음(test/build 미검출 또는 실행 불가)"
         await send("verify_start", {"checks": [c[0] for c in checks]})
-        for label, args, cwd in checks:
+        any_passed = False
+        for label, args, cwd, kind in checks:
             rc, out = await _sh(args, cwd)
-            is_pytest = "pytest" in label
-            # pytest는 exit 1만 실제 실패. 5(수집 0)·2(에러)·-1(미실행)은 거짓실패 방지 위해 통과.
-            failed = (rc == 1) if is_pytest else (rc != 0)
-            if failed:
-                return False, f"[{label}] 검증 실패 (exit {rc}):\n{out[-1500:]}"
-        return True, "검증 통과: " + ", ".join(c[0] for c in checks)
+            if kind == "pytest":
+                # 0=통과, 1=실제 실패, 그 외(2~5·-1 timeout/error)=unavailable(이 check 건너뜀).
+                if rc == 0:
+                    any_passed = True
+                elif rc == 1:
+                    return "failed", f"[{label}] 테스트 실패 (exit 1):\n{out[-1500:]}"
+            else:  # build: 0=통과, 양수=실패(빌드/타입 깨짐), -1(실행 불가)=unavailable
+                if rc == 0:
+                    any_passed = True
+                elif isinstance(rc, int) and rc > 0:
+                    return "failed", f"[{label}] 빌드 실패 (exit {rc}):\n{out[-1500:]}"
+        return ("passed", "검증 통과: " + ", ".join(c[0] for c in checks)) if any_passed \
+            else ("unavailable", "검증 실행 불가(모든 check가 unavailable)")
 
     async def run(
         self,
@@ -1246,7 +1272,9 @@ class AgentRuntime:
         async def finish(status: str, content: str = "") -> None:
             # 성공 완료 시 하네스가 장부를 마감한다 — 모델이 잊어도 신뢰성 보장:
             # 남은 task done 처리(칸반), 변경 자동 commit+push(커밋 누락 방지).
-            if status == "completed":
+            # completed(검증됨)와 completed_unverified(검증 대상 없음) 둘 다 커밋 대상.
+            # verification_failed는 여기 안 걸려 절대 커밋되지 않는다(invariant).
+            if status in ("completed", "completed_unverified"):
                 await self._finalize_tasks(session_id, send)
                 await self._autocommit(ws, goal, send)
             # done 이벤트를 보내면서 세션 final_status를 영속화(성공 정의·집계 기준).
@@ -1357,19 +1385,24 @@ class AgentRuntime:
         # 통과해야 완료로 인정한다. 실패하면 1회 수리 재시도, 그래도 실패면
         # verification_failed로 정직하게 보고하고 커밋하지 않는다(검증 안 된 코드는 안 나간다).
         await self._mark_testing(session_id, send)  # 칸반: 검증(test) 단계 진입(프로세스 소유)
-        verified, report = await self._verify(ws, send)
-        if not verified:
+        vstate, report = await self._verify(ws, send)
+        # failed일 때만 1회 수리 재시도(bounded — 무제한 repair loop 금지, 비용 상한).
+        if vstate == "failed":
             await send("verify_failed", {"report": report[:800]})
             all_messages.append({"role": "user", "content":
                 "[검증 실패 — 프로세스가 test/build를 실제로 돌린 결과다. 아래를 고쳐 통과시켜라]\n" + report})
             status = await _run_developer("")
             if status == "done":
-                verified, report = await self._verify(ws, send)
-        if verified:
-            await finish("completed", "작업 완료 — 검증 통과.")
-        else:
+                vstate, report = await self._verify(ws, send)
+        # 3상태 완료 정책: passed=검증됨 / unavailable=검증불가(정직 표기) / failed=커밋 금지.
+        if vstate == "failed":
             await finish("verification_failed",
                          "검증(test/build) 실패로 완료하지 못했습니다. 커밋하지 않았습니다:\n" + report[:600])
+        elif vstate == "passed":
+            await finish("completed", "작업 완료 — 검증 통과.")
+        else:  # unavailable — 검증 못 함을 '검증 성공'으로 기록하지 않는다(별도 상태).
+            await send("verify_unavailable", {"report": report[:400]})
+            await finish("completed_unverified", "작업 완료(검증 대상 없음 — 미검증). " + report[:200])
         return all_messages
 
     @staticmethod

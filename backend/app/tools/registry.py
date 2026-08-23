@@ -140,7 +140,8 @@ TOOL_SCHEMAS: list[dict] = [
                                 "title": {"type": "string"},
                                 "status": {
                                     "type": "string",
-                                    "enum": ["todo", "planning", "in_progress", "review", "debug", "done"],
+                                    "enum": ["todo", "working"],
+                                    "description": "todo 또는 working만 설정한다. testing/done은 프로세스(검증 게이트)가 소유하므로 직접 설정하지 않는다.",
                                 },
                                 "progress": {"type": "integer", "minimum": 0, "maximum": 100},
                             },

@@ -292,13 +292,13 @@ const kanbanOpen = ref({
   done: false,
 })
 
-// 레거시 status를 신뢰성 4단계로 정규화: todo → working → verifying → done.
-// (프로세스가 검증 단계를 소유한다: 실행=working, test/build 실행=verifying, 통과=done)
+// 레거시 status를 신뢰성 4단계로 정규화: todo → working → testing → done.
+// (프로세스가 검증 단계를 소유한다: 실행=working, test/build 실행=testing, 통과=done)
 function normStatus(s) {
   if (s === 'planning') return 'todo'
   if (s === 'in_progress' || s === 'in-progress' || s === 'debug') return 'working'
   if (s === 'review' || s === 'verifying') return 'testing'
-  return s // todo/working/verifying/done는 그대로
+  return s // todo/working/testing/done는 그대로
 }
 
 let touchStartX = 0

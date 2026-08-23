@@ -203,6 +203,22 @@ async def mark_running(session_id: str, running: bool) -> None:
             await s.commit()
 
 
+async def set_session_auto_approve(session_id: str, enabled: bool) -> None:
+    """세션의 승인 정책을 영속화한다 — durable resume가 이 값을 복원해 권한 확대를 막는다."""
+    async with async_session() as s:
+        sess = await s.get(Session, session_id)
+        if sess:
+            sess.auto_approve = bool(enabled)
+            await s.commit()
+
+
+async def get_session_auto_approve(session_id: str) -> bool:
+    """세션의 승인 정책을 읽는다. 모르면 False(안전 — 자동 승인하지 않음)."""
+    async with async_session() as s:
+        sess = await s.get(Session, session_id)
+        return bool(sess.auto_approve) if sess else False
+
+
 async def reconcile_interrupted_runs() -> int:
     """서버 시작 시, running=True로 남은 세션은 재시작으로 중단된 run이다.
     복구 안내 메시지를 히스토리에 남기고 플래그를 내린다. 정리한 세션 수를 반환."""

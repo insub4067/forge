@@ -24,6 +24,9 @@ class Session(Base):
     running: Mapped[bool] = mapped_column(Boolean, default=False)
     # 마지막 run의 종료 상태 — 성공 정의(completed)와 세션 집계의 기준.
     final_status: Mapped[str] = mapped_column(String, default="")
+    # 이 세션의 승인 정책(사용자가 정한 것). durable resume가 이 값을 복원해
+    # "재시작으로 권한이 확대되지 않는다"는 invariant를 지킨다. 기본 False(안전).
+    auto_approve: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

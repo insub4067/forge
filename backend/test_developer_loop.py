@@ -66,7 +66,7 @@ async def main():
     rt, calls = make_runtime("done")
     data, _ = await run_case(rt)
     assert roles_of(calls) == ["developer"], roles_of(calls)
-    assert data.get("status") == "completed", data
+    assert data.get("status") in ("completed", "completed_unverified"), data
     print("Case A (정상 1패스): OK", roles_of(calls))
 
     # Case B — 1차 막힘(max_steps) → Sr 승격 재시도(escalate) → done
@@ -76,7 +76,7 @@ async def main():
     data, _ = await run_case(rt)
     assert roles_of(calls) == ["developer", "developer"], roles_of(calls)
     assert calls[0][1] is False and calls[1][1] is True, calls  # 2차만 escalate
-    assert data.get("status") == "completed", data
+    assert data.get("status") in ("completed", "completed_unverified"), data
     print("Case B (막힘→Sr 승격→성공): OK", calls)
 
     # Case C — 계속 막힘 → 최초 1회 + MAX_ESCALATIONS(2) 승격 = 총 3회 후 max_steps 종료
@@ -105,7 +105,7 @@ async def main():
     rt, calls = make_runtime("done", route_kind="chat")
     data, _ = await run_case(rt)
     assert roles_of(calls) == ["chat"], roles_of(calls)
-    assert data.get("status") == "completed", data
+    assert data.get("status") in ("completed", "completed_unverified"), data
     print("Case F (단순 대화→chat 최저가): OK", roles_of(calls))
 
     print("\n모든 케이스 통과 ✓")
