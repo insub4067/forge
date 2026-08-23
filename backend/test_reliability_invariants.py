@@ -131,16 +131,22 @@ async def main():
     rt, c = make_rt(["passed"], changed=True, change_from=2)
     st = await run_once(rt)
     assert st == "completed", st
-    assert c["dev_calls"] == 2, c["dev_calls"]      # 한 번 더 실행됐다
-    print("변경 0건으로 끝나려 하면 1회 이어붙임 → 완료: OK")
+    assert c["dev_calls"] == 2, c["dev_calls"]      # 원 1회 + 이어붙임 1회에 변경 발생 → 즉시 종료
+    print("변경 없이 끝나려 하면 이어붙이고, 변경 생기면 즉시 완료: OK")
 
-    # 이어붙여도 안 바꾸면 상한 1회에서 멈추고 정직하게 끝낸다(무한 루프 없음)
+    # 진전(파일 변경)이 생기면 남은 상한을 쓰지 않고 바로 빠져나온다
+    rt, c = make_rt(["passed"], changed=True, change_from=3)
+    st = await run_once(rt)
+    assert st == "completed" and c["dev_calls"] == 3, c["dev_calls"]  # 원 1 + nudge 2에서 변경
+    print("상한(2회)까지 이어붙여 변경 유도: OK")
+
+    # 상한까지 이어붙여도 변경 0이면 멈추고 정직하게 끝낸다(무한 루프 없음)
     rt, c = make_rt(["passed"], changed=False)
     st = await run_once(rt)
     assert st == "completed_unverified", st
-    assert c["dev_calls"] == 2, c["dev_calls"]
+    assert c["dev_calls"] == 1 + A.NUDGE_MAX, c["dev_calls"]  # 원 1 + 상한
     assert c["count"] == 0
-    print("이어붙임 상한 1회 + 그래도 변경 0 → completed_unverified: OK")
+    print(f"이어붙임 상한 {A.NUDGE_MAX}회 + 그래도 변경 0 → completed_unverified: OK")
 
     # ── 칸반 invariant: 모델은 done/testing을 설정 못 한다 ──
     assert A._clamp_task_status("done") == "working", "모델 done → working로 강등"

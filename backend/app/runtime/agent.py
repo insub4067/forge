@@ -38,6 +38,8 @@ _ROLE_MAX_STEPS = {"developer": DEVELOPER_MAX_STEPS,
 # 막혀서 못 풀 때 pro로 승격해 재시도하는 최대 횟수(무한 루프·비용 폭주 방지).
 MAX_ESCALATIONS = 2
 MAX_REPEATED_CALLS = 3
+# 변경 0건으로 끝나려는 코드 run을 이어붙이는 최대 횟수(read 루프·선언만 멈춤 대응).
+NUDGE_MAX = 2
 CONTEXT_BLOCK_RATIO = 0.95
 # 이 비율을 넘으면 오래된 대화를 요약해 모델 컨텍스트를 압축한다(비파괴 — 표시/저장용 원본은 유지).
 CONTEXT_COMPACT_RATIO = 0.75
@@ -1464,24 +1466,32 @@ class AgentRuntime:
             await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
             return all_messages
 
-        # ── 이어붙이기 — 모델이 "하겠습니다"만 하고 턴을 끝내는 것을 프로세스가 한 번 밀어준다 ──
-        # 루프는 tool_call이 없으면 즉시 끝난다. 그래서 모델이 선언만 하고 멈추면 run이 종료되고,
-        # 사용자가 "끝난 거야?"라고 물어야 새 run으로 이어지던 문제(실측 19건 중 7건).
-        # triage가 코드 작업으로 보낸 run인데 파일이 하나도 안 바뀌었으면 한 번만 더 실행한다.
-        # 상한 1회 — 무한 루프도 비용 폭주도 없고, 그래도 안 바뀌면 아래에서 정직하게 끝난다.
-        if not state["files_changed"]:
-            await send("continue_nudge", {"reason": "no_change"})
-            # 문구 주의: "실행하라"만 강조하면 사용자가 "바꾸지 마"라고 한 요청에도 모델이
-            # 편집을 정당화한다(실측). 사용자 지시가 프로세스 재촉보다 우선임을 명시한다.
-            all_messages.append({"role": "user", "content":
-                "[프로세스 확인] 아직 파일을 하나도 바꾸지 않았다. "
-                "사용자가 코드 변경을 요청한 경우에만, 설명에서 멈추지 말고 지금 실행해 끝내라. "
-                "조사·설명·확인 요청이거나 사용자가 변경하지 말라고 했다면 아무것도 바꾸지 말고 "
-                "한 줄로만 답하라."})
+        # ── 이어붙이기 — 선언만 하고 멈추거나 읽기만 반복하는 것을 프로세스가 밀어준다 ──
+        # 루프는 tool_call이 없으면 즉시 끝난다. 모델이 "작성합니다"라고만 하고 멈추면 run이
+        # 종료돼 사용자가 "끝났어?"라고 물어야 이어지던 문제(실측), 그리고 write 직전까지 가서
+        # read만 반복하던 문제(Ox의 read 루프, 실측)를 겨냥한다.
+        # 파일 변경 0이 지속되는 동안 최대 NUDGE_MAX회 밀어주되 문구를 점점 강하게 한다.
+        # 진전(파일 변경)이 생기면 즉시 루프를 빠져나가고, 상한에 닿으면 정직하게 끝낸다.
+        nudge = 0
+        while not state["files_changed"] and status == "done" and nudge < NUDGE_MAX:
+            nudge += 1
+            await send("continue_nudge", {"reason": "no_change", "attempt": nudge})
+            if nudge == 1:
+                # 1차: 사용자 지시 우선 — "바꾸지 마"라고 한 요청에 편집을 강요하지 않는다.
+                msg = ("[프로세스 확인] 아직 파일을 하나도 바꾸지 않았다. "
+                       "사용자가 코드 변경을 요청한 경우에만, 설명에서 멈추지 말고 지금 실행해 끝내라. "
+                       "조사·설명·확인 요청이거나 사용자가 변경하지 말라고 했다면 아무것도 바꾸지 말고 "
+                       "한 줄로만 답하라.")
+            else:
+                # 2차 이후: 읽기만 반복하는 상황 — 더 읽지 말고 지금 쓰라고 못박는다.
+                msg = ("[프로세스 확인] 여전히 파일을 바꾸지 않았다. 더 읽지 말고(read/grep/list 금지) "
+                       "지금 write_file 또는 edit_file로 실제 변경을 만들어 끝내라. "
+                       "정말로 변경이 필요 없는 요청이면 그 이유만 한 줄로 답하라.")
+            all_messages.append({"role": "user", "content": msg})
             status = await _run_developer(plan)
-            if status != "done":
-                await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
-                return all_messages
+        if status != "done":
+            await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
+            return all_messages
 
         # 변경 0건 — build/test가 통과해도 그건 이번 run이 검증된 게 아니라 아무것도 안 한 것이다.
         # "작업 완료 — 검증 통과"로 보고하면 모델이 하겠다고만 하고 끝낸 run이 성공으로 둔갑한다.
