@@ -17,6 +17,7 @@ rsi.py가 '판정'만 담당한다면, 이 모듈은 그 판정을 실제로 수
 """
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -47,12 +48,64 @@ def create_worktree(base: Path) -> Path:
     return tmp
 
 
+FORGE_PREFIX = "forge:"
+
+
 def run_candidate_cmd(cmd: str, worktree: Path) -> None:
     """candidate worktree 안에서 자기수정 명령을 실행한다.
-    셸 문자열을 그대로 실행하므로, FORGE 프롬프트/스크립트를 전달할 수 있다."""
+
+    두 가지 모드:
+      - `forge:<goal>` — FORGE 에이전트를 worktree 안에서 headless로 구동해
+        goal(자기수정 프롬프트)을 수행하게 한다. worktree의 backend를 PYTHONPATH로
+        잡고 task_facade.execute(goal, workspace=worktree)를 호출한 뒤 완료를 폴링한다.
+      - 그 외 — 셸 문자열을 그대로 실행한다(스크립트/프롬프트 전달용).
+    """
+    if cmd.startswith(FORGE_PREFIX):
+        goal = cmd[len(FORGE_PREFIX):].strip()
+        if not goal:
+            raise ValueError("forge: 뒤에 자기수정 goal(프롬프트)이 비어 있음")
+        _run_forge(goal, worktree)
+        return
     r = subprocess.run(cmd, cwd=str(worktree), shell=True, text=True, timeout=7200)
     if r.returncode != 0:
         raise RuntimeError(f"candidate-cmd 실패 (exit {r.returncode}): {cmd}")
+
+
+def _run_forge(goal: str, worktree: Path, *, timeout: int = 7200) -> None:
+    """worktree 안에서 FORGE 에이전트를 headless로 구동한다.
+
+    task_facade.execute는 비차단(async)이라 백그라운드에서 돌고 task_id를 반환한다.
+    별도 프로세스로 실행해 worktree의 backend를 PYTHONPATH로 잡고, result().running을
+    폴링해 완료를 기다린다. 실패(final_status != success) 시 RuntimeError를 던진다.
+    """
+    script = (
+        "import asyncio, sys, time\n"
+        "goal, wt = sys.argv[1], sys.argv[2]\n"
+        "sys.path.insert(0, 'backend')\n"
+        "from app.runtime import task_facade\n"
+        "async def _main():\n"
+        "    tid = await task_facade.execute(goal, workspace=wt, auto_approve=True)\n"
+        "    while True:\n"
+        "        r = await task_facade.result(tid)\n"
+        "        if not r['running']:\n"
+        "            return r\n"
+        "        await asyncio.sleep(5)\n"
+        "r = asyncio.run(_main())\n"
+        "print('FORGE final_status:', r['final_status'])\n"
+        "print('FORGE summary:', (r.get('summary') or '')[:500])\n"
+        "sys.exit(0 if r['final_status'] == 'success' else 1)\n"
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(worktree) + os.pathsep + env.get("PYTHONPATH", "")
+    r = subprocess.run(
+        [sys.executable, "-c", script, goal, str(worktree)],
+        cwd=str(worktree), env=env, text=True, timeout=timeout,
+        capture_output=True,
+    )
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"FORGE candidate 실행 실패 (exit {r.returncode}):\n{r.stdout[-2000:]}\n{r.stderr[-2000:]}"
+        )
 
 
 def run_benchmark(worktree: Path, *, repeat: int, json_path: Path, tier: str,
@@ -106,7 +159,8 @@ def write_report(baseline: dict, candidate: dict, decision: dict, *, out: Path,
 def main():
     ap = argparse.ArgumentParser(description="Bounded RSI R1 — candidate worktree orchestration")
     ap.add_argument("--baseline", required=True, help="baseline 집계 JSON (bench.py --json 산출물)")
-    ap.add_argument("--candidate-cmd", required=True, help="candidate worktree에서 실행할 자기수정 명령(셸)")
+    ap.add_argument("--candidate-cmd", required=True,
+                    help="candidate worktree에서 실행할 자기수정 명령. 'forge:<goal>'이면 FORGE 에이전트를 worktree 안에서 headless 구동, 그 외엔 셸 명령")
     ap.add_argument("--repeat", type=int, default=1, help="benchmark task당 반복 횟수")
     ap.add_argument("--tier", default="auto", help="모델 티어: auto|flash|pro|ox")
     ap.add_argument("--task", default="", help="특정 task만(쉼표 구분)")

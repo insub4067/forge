@@ -71,6 +71,24 @@ success_rate 후퇴 → REJECT
 
 PROMOTE 후보가 되어도 현재는 자동 main merge하지 않고 사람 승인을 유지한다.
 
+### R1 orchestration 실행
+
+`backend/rsi_run.py`가 candidate worktree에서 자기수정 → 재벤치마크 → 판정을 수행한다.
+
+```bash
+# baseline 측정 (1회)
+python backend/bench.py --run --repeat 3 --tier auto --json baseline.json
+
+# FORGE 자기수정 후 재벤치마크 (venv에서 실행 — API 비용 발생)
+python backend/rsi_run.py --baseline baseline.json \
+  --candidate-cmd "forge: bench task 21~25의 failing-test debugging 성공률을 높여라" \
+  --repeat 3 --tier auto --json candidate.json --report report.md
+```
+
+- `forge:<goal>` — worktree 안에서 FORGE 에이전트를 headless 구동해 자기수정.
+- 그 외 셸 명령 — 스크립트/프롬프트를 그대로 실행.
+- `report.md`에 PROMOTE/REJECT 판정과 baseline 대비 표가 생성된다. merge는 사람이 결정한다.
+
 ## 확장 방향
 
 25개 task를 기반으로 현실 난이도와 failure-mode coverage를 늘린다.

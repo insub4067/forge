@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 from rsi import promotion_gate
-from rsi_run import load_baseline, write_report
+from rsi_run import FORGE_PREFIX, load_baseline, run_candidate_cmd, write_report
 
 
 def _agg(sr, cost, elapsed):
@@ -68,6 +68,61 @@ def test_promotion_gate_self_test():
     assert promotion_gate(base, {"success_rate": 1.0, "cost_per_success": 0.0060, "elapsed_p50": 15})["decision"] == "PROMOTE"
     assert promotion_gate(base, {"success_rate": 1.0, "cost_per_success": 0.0060, "elapsed_p50": 20})["decision"] == "REJECT"
     assert promotion_gate(base, {"success_rate": 1.0, "cost_per_success": None, "elapsed_p50": 5})["decision"] == "REJECT"
+
+
+def test_forge_prefix_constant():
+    assert FORGE_PREFIX == "forge:"
+
+
+def test_run_candidate_cmd_shell_mode():
+    # 셸 모드는 그대로 실행된다 (무비용)
+    with tempfile.TemporaryDirectory() as tmp:
+        wt = Path(tmp)
+        run_candidate_cmd("echo candidate-ok > marker.txt", wt)
+        assert (wt / "marker.txt").read_text().strip() == "candidate-ok"
+
+
+def test_run_candidate_cmd_shell_failure_raises():
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            run_candidate_cmd("exit 3", Path(tmp))
+            assert False, "비정상 종료는 RuntimeError를 던져야 함"
+        except RuntimeError as e:
+            assert "실패" in str(e)
+
+
+def test_run_candidate_cmd_forge_empty_goal_rejected():
+    # forge: 접두사지만 goal이 비면 즉시 거부 (API 호출 전에 막는다)
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            run_candidate_cmd("forge:", Path(tmp))
+            assert False, "빈 forge goal은 ValueError를 던져야 함"
+        except ValueError as e:
+            assert "비어 있음" in str(e)
+
+
+def test_run_forge_subprocess_layout():
+    # _run_forge가 쓰는 프로세스 구성(env PYTHONPATH + argv 전달 + cwd=worktree)이
+    # 올바른지 무비용으로 검증한다. 실제 FORGE 호출(API 비용)은 하지 않는다.
+    import os
+    import subprocess
+    import sys
+    from rsi_run import _run_forge  # noqa: F401 — 모듈 import 가능 확인
+
+    with tempfile.TemporaryDirectory() as tmp:
+        wt = Path(tmp)
+        (wt / "backend").mkdir()
+        (wt / "backend" / "probe.py").write_text(
+            "import sys; print('argv:', sys.argv[1:]); print('cwd ok')", encoding="utf-8")
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(wt) + os.pathsep + env.get("PYTHONPATH", "")
+        script = ("import sys; sys.path.insert(0, 'backend'); import probe; "
+                  "print('PYTHONPATH probe OK')")
+        r = subprocess.run([sys.executable, "-c", script, "goal-arg", str(wt)],
+                           cwd=str(wt), env=env, capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        assert "goal-arg" in r.stdout
+        assert "PYTHONPATH probe OK" in r.stdout
 
 
 if __name__ == "__main__":

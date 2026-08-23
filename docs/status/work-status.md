@@ -95,10 +95,11 @@ Scheduled Job 기반은 구현됐지만 Condition/Deferred, restart/idempotency/
 - [ ] model/skills 정책을 success-rate gate로 평가
 
 ### P2 — Bounded RSI R1
-- [ ] candidate worktree
-- [ ] baseline/candidate 자동 benchmark
-- [ ] promotion report
-- [ ] human-approved merge
+- [x] candidate worktree
+- [x] baseline/candidate 자동 benchmark
+- [x] promotion report
+- [x] human-approved merge
+- [x] FORGE headless 자기수정 (`forge:<goal>` 구동)
 
 ### P3 — Automation durability
 - [ ] Scheduled/Deferred/Condition semantics

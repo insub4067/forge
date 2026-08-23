@@ -50,18 +50,24 @@ FORGE의 핵심은:
 
 ## P1 — Bounded RSI R1
 
-`backend/rsi.py` promotion gate는 구현됐다. 다음은 orchestration이다.
+`backend/rsi.py` promotion gate + `backend/rsi_run.py` orchestration 구현 완료.
 
 ```text
 candidate worktree
-→ FORGE 자기수정
+→ FORGE 자기수정 (forge:<goal> headless 구동 또는 셸 명령)
 → 동일 benchmark
 → baseline 비교
 → promotion report
 → 사람 승인
 ```
 
-자동 merge는 아직 하지 않는다.
+- `rsi_run.py --candidate-cmd "forge:<goal>"` — worktree 안에서 FORGE 에이전트를
+  headless로 구동해 자기수정을 수행한다. worktree의 backend를 PYTHONPATH로 잡고
+  `task_facade.execute(goal, workspace=worktree)`를 호출, 완료를 폴링한다.
+- `--candidate-cmd "<셸 명령>"` — 스크립트/프롬프트를 그대로 실행한다.
+- 자동 merge는 아직 하지 않는다. 최종 승인은 사람이 report를 보고 결정한다.
+- 검증: `test_rsi_run.py` 10케이스 (orchestration 로직 + FORGE subprocess 구성).
+  실제 FORGE 구동은 DeepSeek API 비용이 발생하므로 venv에서 실행한다.
 
 ## P2 — Automation durability
 
