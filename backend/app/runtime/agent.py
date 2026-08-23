@@ -614,7 +614,7 @@ class AgentRuntime:
         - 일시적 오류(429/5xx/timeout/connection): 백오프(1·2·4초) 후 최대 3회 재시도
         - terminal(잘못된 요청·인증 등): 전파
         긴 실행이 네트워크 블립이나 일시적 API 장애로 통째로 죽지 않게 한다."""
-        stripped = False
+        stripped = session_id in self._strip_reasoning_sessions
         no_think = False
         transient_attempts = 0
         while True:
@@ -1163,6 +1163,7 @@ class AgentRuntime:
 
                 if name in APPROVAL_REQUIRED and session_id:
                     sha = await self._git_sha(ws)
+                    await store.ensure_session(session_id)
                     await store.save_checkpoint(session_id, step, sha)
 
                 diff = ""

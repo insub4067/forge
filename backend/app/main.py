@@ -38,6 +38,15 @@ _COLUMN_PATCHES = [
     "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS tool_visible_tokens INTEGER DEFAULT 0",
     # 컨텍스트 예산을 모델 실제 한도(128k)로 통일 — 옛 256k 세션은 표시가 실제의 절반이었다.
     "UPDATE sessions SET logical_budget = 131072 WHERE logical_budget = 262144",
+    # refinements 테이블 — create_all이 새 테이블을 만들지만, 기존 DB에 모델이 늦게
+    # 추가된 경우를 대비해 idempotent CREATE TABLE로 보강한다(UndefinedTable 방지).
+    "CREATE TABLE IF NOT EXISTS refinements ("
+    "id SERIAL PRIMARY KEY, session_id VARCHAR DEFAULT '', type VARCHAR DEFAULT 'skill', "
+    "scope VARCHAR DEFAULT 'project', target VARCHAR DEFAULT '', proposed_change TEXT DEFAULT '', "
+    "before_text TEXT DEFAULT '', after_text TEXT DEFAULT '', evidence_runs TEXT DEFAULT '[]', "
+    "evidence_json TEXT DEFAULT '{}', failure_pattern VARCHAR DEFAULT '', "
+    "expected_effect VARCHAR DEFAULT '', status VARCHAR DEFAULT 'pending', "
+    "created_at TIMESTAMP DEFAULT now(), decided_at TIMESTAMP)",
 ]
 
 

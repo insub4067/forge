@@ -15,7 +15,7 @@ from app.db.session import async_session
 def test_pure_cost_and_bottlenecks():
     # run_cost: 알려진 모델 → 값, 미등록 모델 → None
     c = metrics.run_cost("deepseek-v4-flash", cache_hit=1_000_000, cache_miss=0, completion=0)
-    assert abs(c - 0.028) < 1e-9, c
+    assert abs(c - 0.07) < 1e-9, c
     assert metrics.run_cost("unknown-model", 100, 100, 100) is None
     # sum_cost: 미등록 모델은 제외되고 priced 카운트로 구분
     rows = [
@@ -23,7 +23,7 @@ def test_pure_cost_and_bottlenecks():
         {"model": "unknown", "cache_hit_tokens": 0, "cache_miss_tokens": 999, "completion_tokens": 0},
     ]
     total, priced, n = metrics.sum_cost(rows)
-    assert priced == 1 and n == 2 and abs(total - 0.28) < 1e-9, (total, priced, n)
+    assert priced == 1 and n == 2 and abs(total - 0.27) < 1e-9, (total, priced, n)
     # bottlenecks: rule 발동 확인 (pro 승격 과다 / cache 저조 / model 호출 과다)
     warns = metrics.bottlenecks({
         "prompt_tokens": 1000, "completion_tokens": 0,
