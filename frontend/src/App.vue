@@ -26,13 +26,13 @@ const busy = ref(false)
 const isAtBottom = ref(true)
 const autoApprove = ref(localStorage.getItem('forge_auto_approve') === '1')
 // 모델 티어(클로드식 선택) — auto: flash+think, 막히면 pro 승격 / pro: 항상 pro / flash: flash만
-const modelTier = ref(localStorage.getItem('forge_model_tier') || 'auto')
+const _savedTier = localStorage.getItem('forge_model_tier') || 'auto'
+const modelTier = ref(_savedTier === 'ox' ? 'auto' : _savedTier)  // Ox 제거 — 기존 ox 세션은 auto로
 const showModelPick = ref(false)
 const MODEL_TIERS = [
   { key: 'auto', label: '자동', desc: 'Flash로 처리하고 막히면 Pro로 승격 (권장·균형)' },
   { key: 'pro', label: '프로', desc: '항상 Pro — 가장 정확, 비용 높음' },
   { key: 'flash', label: '플래시', desc: 'Flash만 — 가장 빠르고 저렴, 승격 없음' },
-  { key: 'ox', label: 'Ox', desc: 'Ox Alpha(실험) — OpenRouter 경유, 모델 벤치마크용' },
 ]
 function pickModel(key) {
   modelTier.value = key
@@ -372,6 +372,15 @@ const TOOL_WORK = {
   write_file: '구현 중', edit_file: '구현 중',
   bash: '실행 중', build_frontend: '검증 중',
   update_tasks: '작업 중', save_skill: '정리 중', ask_user: '답변 대기',
+}
+
+// 하네스가 all_messages에 넣는 프로세스 메시지(role:user)를 사용자 발화와 구분한다.
+// 모델 컨텍스트에는 원문이 남지만, 화면엔 회원님 말풍선 대신 흐린 한 줄로 보인다.
+function processNote(content) {
+  const t = typeof content === 'string' ? content : ''
+  if (t.startsWith('[프로세스 확인]')) return '프로세스 — 변경 없이 끝나려 해 이어서 진행'
+  if (t.startsWith('[검증 실패')) return '프로세스 — 검증 실패, 수리 재시도'
+  return ''
 }
 
 function typingLabel(m) {
@@ -989,6 +998,7 @@ async function loadMessages(isNew = false) {
 
 async function selectRoom(id, isNew = false) {
   stopRunningPoll()
+  stopEventPolling()   // 이전 방의 이벤트 폴러가 새 방을 옛 seq로 폴링하던 버그 방지
   sessionRunning.value = false
   searchQuery.value = ''
   searchResults.value = []
@@ -2348,10 +2358,13 @@ document.addEventListener('visibilitychange', () => {
       <div v-for="(m, i) in messages" :key="i" :data-msg-idx="i" class="msg" :class="m.role">
         <div class="bubble">
           <template v-if="m.role === 'user'">
-            <div v-if="m.images && m.images.length" class="user-images">
-              <img v-for="(img, ii) in m.images" :key="ii" :src="img" class="user-image" @click="openViewer(m.images, ii)" alt="첨부 이미지" />
-            </div>
-            <div v-if="m.content && m.content !== '[이미지]'" class="user-text">{{ m.content }}</div>
+            <div v-if="processNote(m.content)" class="process-note">⚙ {{ processNote(m.content) }}</div>
+            <template v-else>
+              <div v-if="m.images && m.images.length" class="user-images">
+                <img v-for="(img, ii) in m.images" :key="ii" :src="img" class="user-image" @click="openViewer(m.images, ii)" alt="첨부 이미지" />
+              </div>
+              <div v-if="m.content && m.content !== '[이미지]'" class="user-text">{{ m.content }}</div>
+            </template>
           </template>
 
           <template v-if="m.role === 'assistant'">

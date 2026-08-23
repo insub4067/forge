@@ -3542,3 +3542,12 @@ button {
   background: var(--accent-soft);
   color: var(--accent);
 }
+
+/* 하네스 프로세스 메시지 — 사용자 말풍선이 아니라 흐린 안내 한 줄. */
+.msg.user .process-note {
+  font-size: 12px;
+  color: var(--muted);
+  background: none;
+  padding: 2px 4px;
+  text-align: right;
+}
