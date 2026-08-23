@@ -17,6 +17,12 @@ class ModelRouter:
                 "thinking": True,
                 "reasoning_effort": "medium",
             },
+            # 단순 대화 — 최저가 flash no-think
+            "chat": {
+                "model": settings.chat_model or "deepseek-v4-flash",
+                "thinking": False,
+                "reasoning_effort": "low",
+            },
             "vision": {
                 "model": settings.vision_model or "deepseek-v4-flash-vision-exp",
                 "thinking": False,
@@ -25,8 +31,9 @@ class ModelRouter:
         }
         # 실패 시 승격 모델(pro)
         self.developer_pro_model = settings.developer_pro_model or settings.deep_seek_model or "deepseek-v4-pro"
-        # compaction 등 저비용 유틸 요약용 flash 모델
-        self.utility_model = "deepseek-v4-flash"
+        # chat vs code 라우터 + compaction 요약용 최저가 flash
+        self.triage_model = settings.triage_model or "deepseek-v4-flash"
+        self.utility_model = self.triage_model
 
     def select_model(self, agent_type: str, retry_count: int = 0,
                      complexity: str = "normal", escalate: bool = False) -> dict:

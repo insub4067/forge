@@ -8,7 +8,7 @@ import asyncio
 from app.runtime import agent as A
 
 
-def make_runtime(role_status="done"):
+def make_runtime(role_status="done", route_kind="code"):
     rt = A.AgentRuntime()
     calls = []  # (role, escalate)
 
@@ -20,6 +20,10 @@ def make_runtime(role_status="done"):
         return st, 0, 0, {"model": "m", "thinking": False, "reasoning_effort": ""}
 
     rt._run_role = fake_run_role
+
+    async def fake_triage(all_messages):
+        return route_kind, 0, 0
+    rt._triage = fake_triage
 
     A.store.save_agent_run = lambda *a, **k: _noop()
     A.store.update_context_usage = lambda *a, **k: _noop()
@@ -89,6 +93,13 @@ async def main():
     assert roles_of(calls) == ["developer"], roles_of(calls)
     assert data.get("status") == "context_blocked", data
     print("Case E (context limit): OK")
+
+    # Case F — 단순 대화: triage=chat → chat 역할만(developer 호출 안 함, 최저가 flash)
+    rt, calls = make_runtime("done", route_kind="chat")
+    data, _ = await run_case(rt)
+    assert roles_of(calls) == ["chat"], roles_of(calls)
+    assert data.get("status") == "completed", data
+    print("Case F (단순 대화→chat 최저가): OK", roles_of(calls))
 
     print("\n모든 케이스 통과 ✓")
 

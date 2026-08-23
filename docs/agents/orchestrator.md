@@ -2,17 +2,19 @@
 
 ## 역할
 
-역할은 **Developer 하나**뿐이다(+이미지 전처리 Vision). Triage·Chat·Planner·Reviewer·Debugger를
-두지 않는다 — Developer가 대화·질문·코드 작업을 모두 한 컨텍스트에서 처리한다.
+실행 역할은 **Developer**(코드) 하나이고, 앞단에 최저가 라우터 Triage와 단순 대화용 Chat이
+있다. Planner·Reviewer·Debugger는 두지 않는다 — Developer가 설계·구현·검증·수정을 한
+컨텍스트에서 처리한다.
 
 ## 흐름
 
 ```
-User → Developer
-         대화·질문이면 도구 없이 바로 답
-         코드 작업이면: Plan(3줄) → Execute → Verify → PASS: 완료
-                                          └ FAIL: Diagnose → Repair → Verify
-         막히면 pro+think-high로 승격(최대 2회 루프)
+Triage (flash 최저가: chat vs code)
+ ├─ CHAT → Chat (flash no-think 최저가) — 단순 대화
+ └─ CODE → Developer
+             Plan(3줄) → Execute → Verify → PASS: 완료
+                                    └ FAIL: Diagnose → Repair → Verify
+             막히면 pro+think-high로 승격(최대 2회 루프)
 ```
 
 기본 flash+think-medium(Jr). 막힘(max_steps/repeated)일 때만 pro+think-high로 승격하고,

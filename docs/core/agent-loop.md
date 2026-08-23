@@ -10,12 +10,14 @@ FORGE는 단일 LLM 호출형 챗봇이 아니라 **Flash-first / Pro-on-demand*
 ## 역할 파이프라인 (2 roles)
 
 ```text
-User Goal
+User
  ↓
-Developer (flash + thinking medium) — 대화·질문·코드 작업을 모두 처리
-   ↻ Plan(3줄) → Execute → Verify(테스트/빌드) → PASS: 완료
-                                └ FAIL: Diagnose → Repair → Verify
-   ↓ 막히면 pro + think-high로 승격(최대 2회 루프)
+Triage (flash, 최저가 라우터: chat vs code)
+ ├─ CHAT → Chat (flash no-think, 최저가) — 단순 대화·인사·짧은 질문
+ └─ CODE → Developer (flash + thinking medium)
+             ↻ Plan(3줄) → Execute → Verify(테스트/빌드) → PASS: 완료
+                                  └ FAIL: Diagnose → Repair → Verify
+             ↓ 막히면 pro + think-high로 승격(최대 2회 루프)
 (이미지가 있으면 Vision이 먼저 분석해 텍스트로 전달)
 ```
 
@@ -30,12 +32,14 @@ Developer는 execute→verify→repair를 **같은 컨텍스트에서** 돈다. 
 
 | Role | 기본 | Thinking | 승격 |
 |---|---|---|---|
-| **Developer** | `deepseek-v4-flash` | **on / medium** | 막힘(max_steps/repeated) 시 pro + think-high로 승격(최대 2회 루프, Jr→Sr) |
+| Triage | `deepseek-v4-flash` | off / low | 없음 (chat vs code 라우터) |
+| Chat | `deepseek-v4-flash` | off / low | 없음 (단순 대화 최저가) |
+| **Developer** | `deepseek-v4-flash` | **on / medium** | 막힘 시 pro + think-high로 승격(최대 2회 루프, Jr→Sr) |
 | Vision | `deepseek-v4-flash-vision-exp` | off / low | 없음(이미지 전처리) |
 
 핵심 전략(DeepSeek 권고): 무조건 pro를 쓰지 않는다. **기본 flash+think-medium으로 대부분을
 한 번에 완성**하고, 실패할 때만 pro+think-high로 승격한다. 90% 비용을 아끼며 품질을 확보한다.
-`FORGE_DEVELOPER_PRO=1`이면 항상 pro(실험용). 별도 Triage·Chat 역할은 없다 — Developer가 대화도 처리한다.
+`FORGE_DEVELOPER_PRO=1`이면 항상 pro(실험용). 단순 대화는 최저가 flash Chat으로 빠지고, Developer는 코드 작업에만 flash+think를 쓴다.
 
 ## 완료 판정
 

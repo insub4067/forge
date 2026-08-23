@@ -19,7 +19,7 @@ from .. import skills as skills_lib
 from ..db import store
 from ..llm.factory import create_adapter
 from ..orchestrator.model_router import ModelRouter
-from ..tools.registry import APPROVAL_REQUIRED, TOOL_SCHEMAS, execute_tool
+from ..tools.registry import APPROVAL_REQUIRED, CHAT_TOOLS, TOOL_SCHEMAS, execute_tool
 from ..sandbox.executor import DockerSandbox
 
 MAX_STEPS = 30
@@ -596,6 +596,36 @@ class AgentRuntime:
             self._pending_meta.pop(question_id, None)
             self._status_update(session_id, waiting_for=None, pending=None)
 
+    async def _triage(self, all_messages: list[dict]) -> tuple[str, int, int]:
+        """단순 대화(chat) vs 코드 작업(code) 라우터 — 최저가 flash 1단어 분류.
+        (route, prompt_tokens, completion_tokens). 애매하면 code로 보내 안전하게 처리한다."""
+        lines: list[str] = []
+        for m in all_messages[-4:]:
+            content = m.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(c.get("text", "") for c in content
+                                   if isinstance(c, dict) and c.get("type") == "text") or "[이미지]"
+            text = str(content).strip()
+            if text:
+                lines.append(f"{m.get('role', '')}: {text[:400]}")
+        messages = [
+            {"role": "system", "content": (
+                "너는 요청 분류기다. 마지막 사용자 메시지가 파일을 읽거나 고치거나 명령을 "
+                "실행해야 하는 코드/작업 요청이면 CODE, 단순 인사·감사·잡담·짧은 질문이면 CHAT 이다. "
+                "확신이 없으면 CODE. 'CODE' 또는 'CHAT' 한 단어만 답한다.")},
+            {"role": "user", "content": "\n".join(lines)},
+        ]
+        parts: list[str] = []
+        pt = ct = 0
+        async for delta in self._adapter_for(self.router.triage_model).stream_chat(messages):
+            if delta.get("content"):
+                parts.append(delta["content"])
+            if delta.get("usage"):
+                pt += delta["usage"].get("prompt_tokens", 0)
+                ct += delta["usage"].get("completion_tokens", 0)
+        route = "chat" if "CHAT" in "".join(parts).upper() else "code"
+        return route, pt, ct
+
     async def _run_vision(
         self,
         user_msg: dict,
@@ -1005,9 +1035,22 @@ class AgentRuntime:
                 data["content"] = content
             await send("done", data)
 
-        # Developer — 유일한 실행 역할. 대화든 코드든 모두 처리한다(Triage·Chat 없음).
-        #    설계(3줄 계획)+구현+자체검증(테스트/빌드)+수정을 한 컨텍스트에서. 별도 에이전트가
-        #    없어 컨텍스트 재읽기(input token)와 역할 전환 호출이 사라진다. 기본 flash+think-medium.
+        # 0. 라우터 — 단순 대화는 최저가 flash chat으로 빼고, 코드 작업만 Developer로.
+        route_kind, tp, tc = await self._triage(all_messages)
+        await record("triage", tp, tc, {"model": self.router.triage_model, "model_calls": 1})
+        if route_kind == "chat":
+            status, p, c, route = await self._run_role(
+                "chat", all_messages, send, session_id, ws, state, recent_calls,
+                step_base, room_memory, tools=CHAT_TOOLS, skills=skills,
+            )
+            await record("chat", p, c, route)
+            await finish("completed" if status == "done"
+                         else _STATUS_CODES.get(status, "failed"),
+                         "" if status == "done" else self._finish_message(status))
+            return all_messages
+
+        # 1. Developer — 코드 작업 실행 역할. 설계(3줄)+구현+자체검증+수정을 한 컨텍스트에서.
+        #    별도 Planner/Reviewer/Debugger 없이 컨텍스트 재읽기·역할 전환 호출을 없앤다.
         status, p, c, route = await self._run_role(
             "developer", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory, skills=skills
         )

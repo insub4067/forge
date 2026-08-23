@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     developer_model: str = ""      # 통합 Developer(설계+구현+자체검증). 기본 flash+think-medium
     developer_pro_model: str = ""  # 실패 시 승격 모델(기본 deep_seek_model=pro)
     vision_model: str = ""
-    chat_model: str = ""
-    triage_model: str = ""
+    chat_model: str = ""           # 단순 대화 — 최저가 flash no-think
+    triage_model: str = ""         # chat vs code 라우터 — 최저가 flash
     database_url: str = "postgresql+psycopg://forge:forge@localhost:5432/forge"
     redis_url: str = "redis://localhost:6379"
     workspace: str = str(BASE_DIR.parent.parent)
