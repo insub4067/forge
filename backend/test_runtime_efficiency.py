@@ -68,14 +68,14 @@ def test_skill_selection():
 
 def test_stable_prefix():
     # 7. 동일 role 반복 → 안정 프리픽스/해시 불변
-    assert _stable_prefix("planner") == _stable_prefix("planner")
-    assert _stable_prefix_hash("planner") == _stable_prefix_hash("planner")
+    assert _stable_prefix("developer") == _stable_prefix("developer")
+    assert _stable_prefix_hash("developer") == _stable_prefix_hash("developer")
     # BASE_PROMPT가 프리픽스 맨 앞에 온다
-    assert _stable_prefix("planner").startswith(BASE_PROMPT)
+    assert _stable_prefix("developer").startswith(BASE_PROMPT)
     # system prompt는 안정 프리픽스로 시작하고, skills/memory가 바뀌어도 프리픽스는 그대로
-    base = _system_for("planner")
-    with_skills = _system_for("planner", room_memory="방메모리", skills="### skill: x\n내용")
-    prefix = _stable_prefix("planner")
+    base = _system_for("developer")
+    with_skills = _system_for("developer", room_memory="방메모리", skills="### skill: x\n내용")
+    prefix = _stable_prefix("developer")
     assert base.startswith(prefix)
     assert with_skills.startswith(prefix)
     # skills는 프리픽스 '뒤'에만 붙는다(프리픽스 오염 없음)
@@ -83,24 +83,24 @@ def test_stable_prefix():
     print("OK stable prefix cache-friendliness (7)")
 
 
-def test_planner_escalation():
+def test_developer_escalation():
     r = ModelRouter()
-    # 8. Planner SIMPLE → Flash
-    simple = r.select_model("planner", complexity="normal")
-    assert "flash" in simple["model"], simple
-    # 9. Planner COMPLEX → Pro
-    complex_ = r.select_model("planner", complexity="high")
-    assert complex_["model"] == r.planner_pro_model
-    assert "pro" in complex_["model"]
-    # Debugger 반복 실패(retry>=3) → Pro 승격 보존
-    assert r.select_model("debugger", retry_count=3)["model"] == r.debugger_pro_model
-    assert "flash" in r.select_model("debugger", retry_count=0)["model"]
-    print("OK planner flash/pro + debugger escalation (8-9)")
+    # 8. Developer 기본 → Flash + thinking(설계+구현+자체검증)
+    base = r.select_model("developer")
+    assert "flash" in base["model"], base
+    assert base["thinking"] is True and base["reasoning_effort"] == "medium", base
+    # 9. Developer 막힘 → Sr 승격(pro + think-high)
+    esc = r.select_model("developer", escalate=True)
+    assert esc["model"] == r.developer_pro_model and "pro" in esc["model"], esc
+    assert esc["thinking"] is True and esc["reasoning_effort"] == "high", esc
+    # 역할은 developer/vision/chat 3개만
+    assert set(r._policy.keys()) == {"developer", "vision", "chat"}, r._policy.keys()
+    print("OK developer flash+think / Sr(pro) escalation (8-9)")
 
 
 if __name__ == "__main__":
     test_compaction_thresholds()
     test_skill_selection()
     test_stable_prefix()
-    test_planner_escalation()
+    test_developer_escalation()
     print("\n전체 통과")

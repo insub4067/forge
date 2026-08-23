@@ -23,10 +23,10 @@ from ..tools.registry import APPROVAL_REQUIRED, CHAT_TOOLS, TOOL_SCHEMAS, execut
 from ..sandbox.executor import DockerSandbox
 
 MAX_STEPS = 30
-# planner는 "계획"이 목적 — 상세 탐색은 coder로 위임한다. 스텝을 낮춰 과탐색·비용 폭주를 막는다.
-# (실측: pro+high planner가 23 스텝·1.4M 토큰·5.5분을 소비.)
-PLANNER_MAX_STEPS = 12
-_ROLE_MAX_STEPS = {"planner": PLANNER_MAX_STEPS}
+# Developer는 설계+구현+자체검증+수정을 한 루프에서 하므로 step budget을 넉넉히.
+# (옛 구조의 planner+coder+reviewer+debugger 여러 호출을 한 컨텍스트로 합친 것)
+DEVELOPER_MAX_STEPS = 45
+_ROLE_MAX_STEPS = {"developer": DEVELOPER_MAX_STEPS}
 MAX_REPEATED_CALLS = 3
 CONTEXT_BLOCK_RATIO = 0.95
 # 이 비율을 넘으면 오래된 대화를 요약해 모델 컨텍스트를 압축한다(비파괴 — 표시/저장용 원본은 유지).
@@ -34,10 +34,6 @@ CONTEXT_COMPACT_RATIO = 0.75
 COMPACT_KEEP_RECENT = 8
 # 부수효과·승인이 없는 읽기 전용 도구 — 한 응답에 여러 개면 병렬 실행 가능
 READ_ONLY_TOOLS = {"read_file", "list_dir", "grep"}
-# Reviewer↔Debugger 자기수정 루프의 최대 검증 사이클.
-# ModelRouter의 debugger Pro 승격 임계(retry_count>=3)와 맞물려,
-# 마지막(3번째) Debugger 시도가 Pro로 승격된다.
-MAX_REVIEW_CYCLES = 3
 
 # Skill 선택 삽입 한도 — skill이 많아져도 system prompt가 폭증하지 않게 상위 N개만,
 # 총 문자 예산 안에서 삽입한다. 관련 skill이 없으면 아무것도 넣지 않는다.
@@ -221,8 +217,6 @@ class AgentRuntime:
         # reasoning_content 400을 한 번 겪은 세션 — 이후 호출은 미리 reasoning을 벗긴다.
         self._strip_reasoning_sessions: set[str] = set()
         self._auto_approve_sessions: set[str] = set()
-        # 계획을 외부(MCP 호출부)가 제공한 세션 — 내부 planner를 건너뛰고 코딩만 한다.
-        self._planner_off_sessions: set[str] = set()
         # 세션별 컨텍스트 압축 상태: {session_id: {"summary": str, "covered": int}}
         # summary가 all_messages[:covered]를 대체(모델 전송 시에만).
         self._compaction: dict[str, dict] = {}
@@ -510,7 +504,6 @@ class AgentRuntime:
         self._running_sessions.discard(session_id)
         self._injections.pop(session_id, None)
         self._cancel_sessions.discard(session_id)
-        self._planner_off_sessions.discard(session_id)
         self._compaction.pop(session_id, None)
         self._status.pop(session_id, None)
         for pid, meta in list(self._pending_meta.items()):
@@ -535,13 +528,6 @@ class AgentRuntime:
             self._auto_approve_sessions.add(session_id)
         else:
             self._auto_approve_sessions.discard(session_id)
-
-    def set_planner_off(self, session_id: str, enabled: bool) -> None:
-        """이 세션에서 내부 planner를 건너뛴다(계획을 외부 호출부가 제공할 때)."""
-        if enabled:
-            self._planner_off_sessions.add(session_id)
-        else:
-            self._planner_off_sessions.discard(session_id)
 
     def resolve_pending_approvals(self, session_id: str = "") -> int:
         """해당 세션의 대기 승인만 승인 처리한다(자동 승인 켤 때).
@@ -725,8 +711,9 @@ class AgentRuntime:
         tools: list[dict] | None = None,
         skills: str = "",
         complexity: str = "normal",
+        escalate: bool = False,
     ) -> tuple:
-        route = self.router.select_model(role, retry_count, complexity)
+        route = self.router.select_model(role, retry_count, complexity, escalate=escalate)
         tool_schemas = tools if tools is not None else TOOL_SCHEMAS
         await send("role_start", {
             "role": role, "model": route["model"], "thinking": route["thinking"],
@@ -1068,7 +1055,7 @@ class AgentRuntime:
                 data["content"] = content
             await send("done", data)
 
-        # 0. Triage — 코드 작업 여부 + 복잡도(planner 모델 승격 판단)
+        # 0. Triage — 코드 작업(agent) vs 일반 대화(chat) 라우팅(경량 flash 분류기).
         triage_route, complexity, tp, tc = await self._triage(all_messages)
         await record("triage", tp, tc, {"model": self.router.triage_model, "model_calls": 1})
         if triage_route == "chat":
@@ -1083,94 +1070,28 @@ class AgentRuntime:
                 await finish("completed")
             return all_messages
 
-        # 1. Planner — COMPLEX 작업에서만 실행한다. SIMPLE(한두 단계 수정)은 coder가
-        #    바로 실행해 planner의 과탐색·컨텍스트 재전송(토큰 폭주)을 없앤다.
-        #    빈 task여도 아래 reviewer가 1회 검토 후 완료하므로 흐름은 안전하다.
-        if complexity == "high" and not settings.planner_off and session_id not in self._planner_off_sessions:
-            status, p, c, route = await self._run_role(
-                "planner", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory,
-                skills=skills, complexity=complexity,
-            )
-            await record("planner", p, c, route)
-            step_base += MAX_STEPS
-            if status != "done":
-                await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
-                return all_messages
-
-        # 2. Coder
+        # 1. Developer — 올인원. 설계(3줄 계획)+구현+자체검증(테스트/빌드)+수정을 한 컨텍스트에서.
+        #    Planner/Reviewer/Debugger를 별도 에이전트로 두지 않아 컨텍스트 재읽기(input token)와
+        #    역할 전환 호출이 사라진다. 기본 flash+think-medium.
         status, p, c, route = await self._run_role(
-            "coder", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory, skills=skills
+            "developer", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory, skills=skills
         )
-        await record("coder", p, c, route)
-        step_base += MAX_STEPS
+        await record("developer", p, c, route)
+
+        # 2. 실패 시에만 pro+think-high로 1회 승격 재시도(DeepSeek 권고 — 저비용·고품질).
+        #    막힌 경우(max_steps/repeated)에만 재시도해 무한 루프·비용 폭주를 막는다.
+        if status in ("max_steps", "repeated") and not settings.developer_pro:
+            step_base += DEVELOPER_MAX_STEPS
+            status, p, c, route = await self._run_role(
+                "developer", all_messages, send, session_id, ws, state, recent_calls,
+                step_base, room_memory, skills=skills, escalate=True,
+            )
+            await record("developer", p, c, route)
+
         if status != "done":
             await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
             return all_messages
-
-        # 실험용: reviewer/debugger 자기수정 루프를 생략(coder 1패스로 종료).
-        # "weak+loop vs strong 1패스" cost-per-success 비교용. 기본 off.
-        if settings.no_review:
-            await finish("completed", "reviewer/debugger 생략(no_review) — coder 1패스 완료.")
-            return all_messages
-
-        # 3. Reviewer ↔ Debugger 자기수정 루프 (상태 기반 반복)
-        #    Reviewer가 task를 done/debug로, Debugger가 review로 되돌린다.
-        #    모든 task가 done이 될 때까지, 최대 MAX_REVIEW_CYCLES회 반복.
-        review_cycle = 0
-        debug_attempts = 0
-        tasks: list[dict] = []
-        final_status = "completed"
-        prev_snapshot: list[tuple] | None = None
-        while True:
-            status, p, c, route = await self._run_role(
-                "reviewer", all_messages, send, session_id, ws, state, recent_calls, step_base, room_memory, skills=skills
-            )
-            await record("reviewer", p, c, route)
-            step_base += MAX_STEPS
-            if status != "done":
-                await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
-                return all_messages
-
-            tasks = await store.list_tasks(session_id) if session_id else []
-            unfinished = [t for t in tasks if t.get("status") != "done"]
-            if not unfinished:
-                final_status = "completed"
-                break
-
-            # 진전 없음 가드: reviewer가 태스크 상태를 전혀 바꾸지 못했고 debug도 없으면
-            # 재실행해도 같은 응답만 재생성된다(실측: 4연속 동일 출력 중복 저장).
-            # 즉시 review_limit로 종료해 중복·비용 낭비를 막는다.
-            snapshot = [(t.get("title"), t.get("status")) for t in tasks]
-            no_debug = not any(t.get("status") == "debug" for t in tasks)
-            if no_debug and prev_snapshot is not None and snapshot == prev_snapshot:
-                final_status = "review_limit"
-                break
-            prev_snapshot = snapshot
-
-            review_cycle += 1
-            if review_cycle > MAX_REVIEW_CYCLES:
-                final_status = "review_limit"
-                break
-
-            # debug task가 있으면 Debugger로 수정 후 재검토(review 상태로 되돌림).
-            if any(t.get("status") == "debug" for t in tasks):
-                debug_attempts += 1
-                # retry_count가 임계(3)에 도달하면 마지막 시도가 Pro로 승격된다.
-                status, p, c, route = await self._run_role(
-                    "debugger", all_messages, send, session_id, ws, state,
-                    recent_calls, step_base, room_memory, retry_count=debug_attempts, skills=skills,
-                )
-                await record("debugger", p, c, route)
-                step_base += MAX_STEPS
-                if status != "done":
-                    await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
-                    return all_messages
-            # debug는 없지만 아직 done이 아니면(review 등) 루프 재진입 → Reviewer 재실행
-
-        if final_status == "review_limit":
-            await finish("review_limit", self._review_limit_message(tasks, state, debug_attempts))
-        else:
-            await finish("completed", "모든 작업을 완료했습니다.")
+        await finish("completed", "작업을 완료했습니다.")
         return all_messages
 
     @staticmethod
@@ -1182,20 +1103,3 @@ class AgentRuntime:
         if status == "repeated":
             return "동일한 도구 호출이 반복되어 중단했습니다."
         return "최대 실행 단계를 초과했습니다."
-
-    @staticmethod
-    def _review_limit_message(tasks: list[dict], state: dict, attempts: int) -> str:
-        lines = [f"자동 수정 한도({MAX_REVIEW_CYCLES}회)에 도달해 종료했습니다."]
-        unfinished = [t for t in (tasks or []) if t.get("status") != "done"]
-        if unfinished:
-            lines.append("남은 문제:")
-            for t in unfinished:
-                lines.append(f"- {t.get('title', '')} ({t.get('status', '')})")
-        errors = (state or {}).get("errors") or []
-        if errors:
-            lines.append("관찰된 오류:")
-            for e in errors[-5:]:
-                lines.append(f"- {e}")
-        lines.append(f"자동 수정 시도: {attempts}회")
-        lines.append("새 세션에서 남은 문제를 직접 확인하거나 더 구체적인 지시를 주세요.")
-        return "\n".join(lines)

@@ -1433,10 +1433,7 @@ function newAssistant() {
 
 const ROLE_LABELS = {
   triage: '분류',
-  planner: '계획',
-  coder: '구현',
-  reviewer: '검토',
-  debugger: '디버그',
+  developer: '개발',
   chat: '응답',
   vision: '이미지 분석',
 }

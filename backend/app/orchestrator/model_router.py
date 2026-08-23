@@ -2,32 +2,20 @@ from ..config import settings
 
 
 class ModelRouter:
-    """Agent 타입과 태스크 상태를 기반으로 모델·thinking·effort를 선택한다.
+    """올인원 구조의 모델 선택. 역할은 Developer(통합)·Vision·Chat 3개.
 
+    비용 원칙: 기본은 flash. Developer는 설계+구현+자체검증을 하므로 thinking medium을 켠다.
+    실패 시에만 pro+think-high로 승격한다(escalate) — 90% 비용을 아끼며 품질을 확보.
     정책은 런타임에 get_policy/update_policy로 조회·변경할 수 있다.
     """
 
     def __init__(self):
         self._policy: dict[str, dict] = {
-            "planner": {
-                "model": settings.planner_model or "deepseek-v4-flash",
+            # 통합 Developer — 설계 + 구현 + 자체검증(Reviewer/Debugger 역할 내재)
+            "developer": {
+                "model": settings.developer_model or settings.coder_model or "deepseek-v4-flash",
                 "thinking": True,
                 "reasoning_effort": "medium",
-            },
-            "coder": {
-                "model": settings.coder_model or "deepseek-v4-flash",
-                "thinking": False,
-                "reasoning_effort": "low",
-            },
-            "reviewer": {
-                "model": settings.reviewer_model or "deepseek-v4-flash",
-                "thinking": True,
-                "reasoning_effort": "medium",
-            },
-            "debugger": {
-                "model": settings.debugger_model or "deepseek-v4-flash",
-                "thinking": False,
-                "reasoning_effort": "low",
             },
             "vision": {
                 "model": settings.vision_model or "deepseek-v4-flash-vision-exp",
@@ -40,57 +28,29 @@ class ModelRouter:
                 "reasoning_effort": "low",
             },
         }
-        self.debugger_pro_model = settings.deep_seek_model or "deepseek-v4-pro"
-        self.planner_pro_model = settings.planner_pro_model or settings.deep_seek_model or "deepseek-v4-pro"
+        # 실패 시 승격 모델(pro)
+        self.developer_pro_model = settings.developer_pro_model or settings.deep_seek_model or "deepseek-v4-pro"
         self.triage_model = settings.triage_model or "deepseek-v4-flash"
 
-    def select_model(
-        self,
-        agent_type: str,
-        retry_count: int = 0,
-        complexity: str = "normal",
-    ) -> dict:
-        base = dict(self._policy.get(agent_type, self._policy["coder"]))
+    def select_model(self, agent_type: str, retry_count: int = 0,
+                     complexity: str = "normal", escalate: bool = False) -> dict:
+        base = dict(self._policy.get(agent_type, self._policy["developer"]))
 
-        if agent_type == "debugger" and (retry_count >= 3 or complexity == "high"):
-            base.update(
-                {
-                    "model": self.debugger_pro_model,
-                    "thinking": True,
-                    "reasoning_effort": "high",
-                }
-            )
-
-        # 실험용: coder를 pro로 승격(강한 단일 패스 vs weak+loop 비교).
-        if agent_type == "coder" and settings.coder_pro:
-            base.update({"model": self.planner_pro_model, "thinking": True, "reasoning_effort": "medium"})
-
-        # planner는 flash가 기본. 복잡한 작업(triage 판정)일 때만 pro로 승격.
-        # planner_flash 실험 플래그가 켜지면 승격을 건너뛰고 flash 유지(비용 실험).
-        if agent_type == "planner" and complexity == "high" and not settings.planner_flash:
-            base.update(
-                {
-                    "model": self.planner_pro_model,
-                    "thinking": True,
-                    "reasoning_effort": "high",
-                }
-            )
-
+        # Developer 승격: 실패 재시도(escalate) 또는 항상-pro 옵션일 때 pro+think-high.
+        if agent_type == "developer" and (escalate or settings.developer_pro):
+            base.update({
+                "model": self.developer_pro_model,
+                "thinking": True,
+                "reasoning_effort": "high",
+            })
         return base
 
     def get_policy(self) -> dict:
-        return {
-            "roles": {k: dict(v) for k, v in self._policy.items()},
-            "debugger_pro_model": self.debugger_pro_model,
-        }
+        return {"roles": {k: dict(v) for k, v in self._policy.items()},
+                "developer_pro_model": self.developer_pro_model}
 
-    def update_policy(
-        self,
-        role: str,
-        model: str | None = None,
-        thinking: bool | None = None,
-        reasoning_effort: str | None = None,
-    ) -> bool:
+    def update_policy(self, role: str, model: str | None = None,
+                      thinking: bool | None = None, reasoning_effort: str | None = None) -> bool:
         if role not in self._policy:
             return False
         p = self._policy[role]

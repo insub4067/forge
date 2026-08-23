@@ -23,8 +23,8 @@ async def execute(goal: str, workspace: str = "", auto_approve: bool = False, pl
     await store.ensure_session(sid, goal[:40] or "task", workspace or None)
     runtime.set_auto_approve(sid, auto_approve)
     runtime.try_begin(sid)  # 새 세션이라 항상 성공
+    # 계획을 주면 Developer의 컨텍스트에 실어 그대로 따르게 한다(별도 planner 없음).
     if plan.strip():
-        runtime.set_planner_off(sid, True)
         content = f"[상위 에이전트가 제공한 계획]\n{plan.strip()}\n\n[목표]\n{goal}"
     else:
         content = goal

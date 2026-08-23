@@ -15,14 +15,12 @@ class Settings(BaseSettings):
     deep_seek_api_key: str = ""
     deep_seek_model: str = "deepseek-v4-pro"
     llm_provider: str = "deepseek"
-    planner_model: str = ""
-    coder_model: str = ""
-    reviewer_model: str = ""
-    debugger_model: str = ""
+    coder_model: str = ""  # 하위호환 — developer_model 미설정 시 fallback
+    developer_model: str = ""      # 통합 Developer(설계+구현+자체검증). 기본 flash+think-medium
+    developer_pro_model: str = ""  # 실패 시 승격 모델(기본 deep_seek_model=pro)
     vision_model: str = ""
     chat_model: str = ""
     triage_model: str = ""
-    planner_pro_model: str = ""
     database_url: str = "postgresql+psycopg://forge:forge@localhost:5432/forge"
     redis_url: str = "redis://localhost:6379"
     workspace: str = str(BASE_DIR.parent.parent)
@@ -34,16 +32,10 @@ class Settings(BaseSettings):
     # 앱 레벨 토큰 게이트(defense-in-depth). 설정 시 모든 /api 요청에 토큰 요구.
     # 미설정이면 무동작 — Cloudflare Access + 127.0.0.1 바인딩에만 의존(auth.py 참고).
     auth_token: str = ""
-    # planner를 COMPLEX 작업에서도 pro로 승격하지 않고 flash 유지(비용 실험용). 기본 False.
-    planner_flash: bool = False
-    # planner를 COMPLEX에서도 아예 건너뛴다(planner 필요성 실험용). 기본 False.
-    planner_off: bool = False
     # skill 주입 전면 비활성(skill 효과 A/B 실험용). 기본 False.
     skills_off: bool = False
-    # reviewer/debugger 자기수정 루프 생략(coder 1패스). weak+loop vs strong 1패스 실험용. 기본 False.
-    no_review: bool = False
-    # coder를 pro 모델로(강한 단일 패스 실험용). 기본 False.
-    coder_pro: bool = False
+    # Developer를 항상 pro로(실험용). 기본 False — 평소 flash+think-medium, 실패 시에만 pro 승격.
+    developer_pro: bool = False
     # Web Push (VAPID). public_key는 브라우저 구독용(비밀 아님). private key는 PEM 파일 경로.
     vapid_public_key: str = "BEdgt7HlWXy3-F1M2MKCkcBrOuW0uWoUvg58WzYFA7z1GBVu9IRGy15NlRP-A1cWINwTO4x4n0HMOmgiukK3HCQ"
     vapid_private_key_path: str = str(BASE_DIR / "vapid_private.pem")

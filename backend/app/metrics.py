@@ -39,15 +39,12 @@ def bottlenecks(agg: dict) -> list[str]:
     """집계에서 비용 낭비 가능성이 큰 패턴을 rule로 표시(진단용 — 정책 자동 변경 없음)."""
     out: list[str] = []
     total_tokens = agg.get("prompt_tokens", 0) + agg.get("completion_tokens", 0)
-    role_tokens = agg.get("role_tokens", {})
-    planner = role_tokens.get("planner", 0)
-    if total_tokens and planner / total_tokens > 0.40:
-        out.append("Planner 토큰 비중이 40%를 넘음 — thinking effort 하향 또는 탐색 축소 후보")
 
-    successes = agg.get("successful", 0)
-    debugger_calls = agg.get("role_calls", {}).get("debugger", 0)
-    if successes and debugger_calls / successes > 1.0:
-        out.append("성공 세션당 Debugger가 평균 1회 초과 — 초기 코드 품질/Reviewer 기준 점검 필요")
+    # Developer Sr 승격(pro) 비율이 높으면 flash 단독으로 자주 막힌다는 신호.
+    sessions_n = agg.get("sessions", 0)
+    pro_sessions = agg.get("pro_sessions", 0)
+    if sessions_n and pro_sessions / sessions_n > 0.5:
+        out.append("세션 절반 이상이 pro로 승격됨 — flash Developer가 자주 막힘(프롬프트/작업 분해 점검)")
 
     ratio = agg.get("cache_hit_ratio", 0)
     if total_tokens and ratio < 0.30:

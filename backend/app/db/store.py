@@ -393,9 +393,7 @@ async def session_metrics(session_id: str) -> dict:
         runs = result.scalars().all()
     agg = _aggregate_runs(runs)
     agg["final_status"] = (sess.final_status if sess else "") or ("running" if sess and sess.running else "")
-    agg["planner_calls"] = agg["role_calls"].get("planner", 0)
-    agg["reviewer_calls"] = agg["role_calls"].get("reviewer", 0)
-    agg["debugger_calls"] = agg["role_calls"].get("debugger", 0)
+    agg["developer_calls"] = agg["role_calls"].get("developer", 0)
     skills = [r.selected_skills for r in runs if r.selected_skills]
     agg["selected_skills"] = skills[0] if skills else ""
     return agg
@@ -484,26 +482,21 @@ async def metrics_summary() -> dict:
 
     # 세션 단위 파생 지표 — 권위 있는 세션 목록(srows)을 기준으로 순회
     pro_sessions = 0
-    debugger_sessions = 0
-    review_first_pass = 0
+    first_pass = 0  # Sr(pro) 승격 없이 완료 = Developer가 한 번에 성공
     success_tokens = 0
     success_model_calls = 0
     success_elapsed = 0
     for sess in srows:
         runs = by_session.get(sess.id, [])
         has_pro = any("pro" in (r.model or "").lower() for r in runs)
-        has_debugger = any(r.role == "debugger" for r in runs)
         if has_pro:
             pro_sessions += 1
-        if has_debugger:
-            debugger_sessions += 1
         if sess.final_status == "completed":
             success_tokens += sum(r.prompt_tokens + r.completion_tokens for r in runs)
             success_model_calls += sum(r.model_calls for r in runs)
             success_elapsed += sum(r.elapsed_ms for r in runs)
-            # Coder→Reviewer→completed(Debugger 없이) = 첫 리뷰 통과
-            if not has_debugger:
-                review_first_pass += 1
+            if not has_pro:
+                first_pass += 1
 
     status_counts: dict[str, int] = {}
     for x in srows:
@@ -518,8 +511,7 @@ async def metrics_summary() -> dict:
         "avg_model_calls_per_success": round(success_model_calls / successful, 2) if successful else 0,
         "avg_elapsed_ms_per_success": round(success_elapsed / successful) if successful else 0,
         "pro_escalation_rate": round(pro_sessions / total, 3) if total else 0,
-        "debugger_activation_rate": round(debugger_sessions / total, 3) if total else 0,
-        "review_first_pass_rate": round(review_first_pass / successful, 3) if successful else 0,
+        "review_first_pass_rate": round(first_pass / successful, 3) if successful else 0,
         "status_counts": status_counts,
     })
     return agg

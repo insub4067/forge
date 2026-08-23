@@ -24,15 +24,14 @@ def test_pure_cost_and_bottlenecks():
     ]
     total, priced, n = metrics.sum_cost(rows)
     assert priced == 1 and n == 2 and abs(total - 0.28) < 1e-9, (total, priced, n)
-    # bottlenecks: rule 발동 확인
+    # bottlenecks: rule 발동 확인 (pro 승격 과다 / cache 저조 / model 호출 과다)
     warns = metrics.bottlenecks({
         "prompt_tokens": 1000, "completion_tokens": 0,
-        "role_tokens": {"planner": 500},  # 50% > 40%
-        "cache_hit_ratio": 0.1,           # < 30%
-        "successful": 2, "role_calls": {"debugger": 3},  # 1.5 > 1
-        "total_model_calls": 100, "sessions": 2,          # 50/session > 20
+        "cache_hit_ratio": 0.1,                   # < 30%
+        "sessions": 2, "pro_sessions": 2,          # 100% > 50% 승격
+        "total_model_calls": 100,                  # 50/session > 20
     })
-    assert len(warns) == 4, warns
+    assert len(warns) == 3, warns
     print("OK pure cost/bottlenecks")
 
 
@@ -57,18 +56,18 @@ async def test_db_aggregation():
     b = "mtest-" + uuid.uuid4().hex[:8]
     try:
         await _seed(a, "completed", [
-            dict(role="planner", model="deepseek-v4-flash", prompt_tokens=1000, completion_tokens=50,
+            dict(role="developer", model="deepseek-v4-flash", prompt_tokens=1000, completion_tokens=50,
                  cache_hit_tokens=100, cache_miss_tokens=900, model_calls=3, tool_calls=2,
                  retries=1, compactions=1, selected_skill_count=2, selected_skills="a, b"),
-            dict(role="coder", model="deepseek-v4-flash", prompt_tokens=500, completion_tokens=200,
+            dict(role="developer", model="deepseek-v4-flash", prompt_tokens=500, completion_tokens=200,
                  cache_hit_tokens=300, cache_miss_tokens=200, model_calls=2, tool_calls=4),
-            dict(role="reviewer", model="deepseek-v4-flash", prompt_tokens=400, completion_tokens=30,
+            dict(role="triage", model="deepseek-v4-flash", prompt_tokens=400, completion_tokens=30,
                  cache_hit_tokens=200, cache_miss_tokens=200, model_calls=1),
         ])
         await _seed(b, "failed", [
-            dict(role="planner", model="deepseek-v4-pro", prompt_tokens=800, completion_tokens=100,
+            dict(role="developer", model="deepseek-v4-flash", prompt_tokens=800, completion_tokens=100,
                  cache_hit_tokens=0, cache_miss_tokens=800, model_calls=5, retries=2),
-            dict(role="debugger", model="deepseek-v4-pro", prompt_tokens=600, completion_tokens=80,
+            dict(role="developer", model="deepseek-v4-pro", prompt_tokens=600, completion_tokens=80,
                  model_calls=4),
         ])
 
@@ -81,14 +80,13 @@ async def test_db_aggregation():
         assert ma["cache_hit_tokens"] == 600 and ma["cache_miss_tokens"] == 1300
         assert abs(ma["cache_hit_ratio"] - round(600 / 1900, 3)) < 1e-6
         # 3. Flash planner 기록 / 9. skill 기록
-        assert ma["planner_calls"] == 1 and ma["pro_calls"] == 0
+        assert ma["developer_calls"] == 2 and ma["pro_calls"] == 0
         assert ma["selected_skills"] == "a, b"
-        assert ma["debugger_calls"] == 0
 
-        # 2. failed 세션 집계 / 4. Pro planner / 5. debugger / 8. retry
+        # 2. failed 세션 집계 / Sr 승격(developer pro) / retry
         mb = await store.session_metrics(b)
         assert mb["final_status"] == "failed"
-        assert mb["pro_calls"] == 2 and mb["debugger_calls"] == 1
+        assert mb["developer_calls"] == 2 and mb["pro_calls"] == 1
         assert mb["total_retries"] == 2
 
         # 비용: flash/pro 모두 가격표에 있으므로 priced == 전체
