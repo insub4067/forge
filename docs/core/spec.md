@@ -1,164 +1,147 @@
 # FORGE — 요구사항 정의서
 
-**문서 버전** v0.4  
-**기준일** 2026-08-22  
-**목표** 개인 개발 환경에서 사용하는 셀프호스팅 Agent Runtime 기반 코딩 AI 플랫폼
+> 기준: 2026-08-23 `main`
 
 ## 1. 제품 목표
 
 FORGE는 특정 LLM에 종속된 챗봇이 아니라 LLM을 판단 엔진으로 사용하는 실행 Runtime이다.
 
+핵심 가치는 **싼 모델 자체가 아니라, 저렴한 모델로도 결과 품질을 보장하는 Harness 프로세스**다.
+
+> 모델의 자기확신을 신뢰하지 않고, 실행·검증·수리·재검증을 프로세스로 강제해 실제 작업 성공률을 확보한다.
+
+최적화 우선순위:
+
+1. success rate / 결과 품질 유지·향상
+2. deterministic verification을 통과한 완료
+3. cost per successfully completed task 감소
+4. elapsed 감소
+5. human intervention 감소
+
+비용 감소로 성공률이 떨어지면 regression이다.
+
+## 2. 실행 모델
+
 ```text
-요구사항 → Triage(chat/code) → [Chat | Developer(Plan→Execute→Verify→Repair)] → Done
+Goal → Triage → [Chat | Developer]
+                    ↓
+             Plan → Execute → Self-verify/Repair
+                    ↓
+             Strict Verification Gate
+               ├─ PASS → completed
+               └─ FAIL → bounded repair → verification_failed
 ```
 
-최상위 효율 원칙:
+Developer는 Flash+thinking을 기본으로 하고 막힐 때만 Pro로 승격한다. 별도 Planner/Reviewer/Debugger를 기본 파이프라인에 두지 않는다.
 
-> 동일하거나 더 높은 성공률을 유지하면서 더 적은 토큰·API 호출·시간·비용으로 작업을 완료한다.
+## 3. 현재 구현 범위
 
-대표 지표는 `cost per successfully completed task`다.
+- DeepSeek/OpenRouter provider와 Flash/Pro/Vision routing
+- read/list/grep/write/edit/bash/ask_user/update_tasks/save_skill/build_frontend
+- approval, cancel, runtime injection
+- Docker Sandbox + Host opt-in
+- PostgreSQL session/message/task/agent-run persistence
+- step-level history persistence
+- JSONL event log / event polling / status recovery
+- **Durable Auto Resume** + crash-loop guard + `AUTO_RESUME=0`
+- Strict Verification Gate + bounded repair
+- verified completion 경로의 auto commit/push
+- context pruning / compaction / cache telemetry
+- Curated/Learned/Project 3-tier Skills
+- HTTP/WebSocket application auth(`FORGE_AUTH_TOKEN`)
+- deterministic R0 benchmark(21 tasks)와 benchmark quality test
+- bounded RSI promotion gate(R1 판정부)
+- 모바일 PWA / Git / Files / Skills / Metrics / Kanban / Vision
+- Mac Terminal / Screen / Camera PoC
+- Scheduled Job 기반
 
-## 2. 현재 v1 범위
+## 4. 품질 보증 정책
 
-구현됨:
+`completed`는 모델의 문장이 아니라 프로세스가 결정한다.
 
-- DeepSeek V4 Flash/Pro/Vision 라우팅
-- 올인원 Developer(설계+구현+자체검증+수정) — flash+think 기본, 막히면 pro 승격(최대 2회 루프)
-- 단순 대화는 최저가 flash Chat으로 분기
-- read/list/grep/write/edit/bash/ask_user/update_tasks/save_skill
-- 승인 게이트, 질문, cancel, runtime injection
-- Docker Sandbox, git checkpoint/diff
-- PostgreSQL session/message/task/agent-run 영속화
-- context usage, pruning, compaction, cache telemetry
-- selective Skills + session search
-- SSE + `/status` polling 기반 모바일 원격 제어
-- JSONL durable event/action log
-- run crash/restart 중단 감지 및 사용자 가시화
-- metrics API와 세션별 비용/효율 집계
-- workspace 필수 선택과 파일 API 경계 제한
+- 감지된 build/test를 실제 실행한다.
+- 실패 시 제한된 횟수만 repair한다.
+- 검증 실패 상태에서 commit/push하지 않는다.
+- 검증 결과를 장기적으로 `PASSED / FAILED / UNAVAILABLE`로 분리한다.
+- 테스트를 실행할 수 없었다는 사실을 테스트 성공으로 기록하지 않는다.
 
-아직 미구현 또는 부분 구현:
+## 5. Model Policy
 
-- 서버 재시작 후 실제 실행 stack resume
-- Redis Streams 기반 worker queue/event replay
-- Tool Script/RPC Mode
-- Scheduled/Condition Jobs + Web Push
-- SSH/Docker ExecutionBackend 추상화
-- isolated subagents
-
-## 3. Model Policy
-
-| Role | 기본 정책 |
+| 역할 | 정책 |
 |---|---|
-| Triage | Flash, non-thinking (chat vs code 라우터) |
-| Chat | Flash, non-thinking (단순 대화 최저가) |
-| Developer | Flash + medium thinking; 막힘 시 Pro + high로 승격(최대 2회 루프) |
-| Vision | Flash Vision, non-thinking (이미지 전처리) |
+| Triage | Flash, 경량 분류 |
+| Chat | Flash, non-thinking |
+| Developer | Flash + thinking 기본, 막힘 시 Pro 승격 |
+| Vision | Vision model, 필요할 때만 |
 
-강한 모델을 기본으로 쓰지 않는다. 성공률 데이터가 뒷받침될 때만 escalation한다.
+강한 모델을 기본으로 쓰지 않는 이유는 비용 자체가 아니라 **Harness가 검증을 담당하기 때문에 가능한 모델 효율화**다. 모델 정책 변경은 benchmark 성공률을 먼저 통과해야 한다.
 
-## 4. Tool 정책
+## 6. Context / Skills
 
-자동 실행: `read_file`, `list_dir`, `grep`  
-승인 필요: `write_file`, `edit_file`, `bash`, `save_skill`
+- provider prompt token 기준 pressure
+- 75% compaction / 95% hard block 정책
+- 긴 tool result model-free pruning
+- stable prefix/cache telemetry
+- Curated → Learned(`~/.forge/skills`) → Project(`<workspace>/.forge/skills`) 3계층
+- 충돌 시 Project가 높은 authority
+- 관련 Skill만 선택적으로 주입
 
-읽기 전용 다중 호출은 병렬 prefetch할 수 있다. mutation 실행 전 git SHA checkpoint를 남긴다.
+## 7. Reliability
 
-파일/디렉터리 조회 API는 session의 `workspace_path` 경계를 벗어날 수 없다.
+- provider retry/recovery
+- repeated tool guard
+- concurrent run guard
+- bounded escalation/repair
+- step-level persistence
+- 서버 재시작 시 unfinished run 자동 재개
+- resume 중 재충돌에 대한 loop guard
+- SSE 단절 시 status/event polling 복구
 
-## 5. Context Management
+남은 핵심: resume 시 권한이 재시작 전보다 확대되지 않도록 approval/capability 경계를 강화한다.
 
-- Logical Budget 기본값: 설정 기반
-- provider 실측 `prompt_tokens`를 context pressure 기준으로 사용
-- 75%: 비파괴 compaction 시도
-- 95%: compaction 불가 시 hard block
-- 긴 tool 결과는 model-free pruning
-- DB/history 원본과 model surface를 분리
-- stable prefix hash 및 cache hit/miss 기록
-- Skills는 관련 상위 N개만 선택 삽입
+## 8. Evaluation / RSI
 
-## 6. Reliability
+R0 benchmark는 fixture → Agent → deterministic checker로 동작하며 LLM-as-a-judge를 사용하지 않는다.
 
-- reasoning_content 호환 오류 자동 회복
-- 429/5xx/timeout/connection backoff retry
-- 동일 tool 반복 차단
-- Developer 막힘 시 Pro 승격 최대 2회(MAX_ESCALATIONS)
-- 동일 session 동시 run 금지
-- approval/question 600초 timeout
-- cancel 시 pending wait 해제
-- run crash 시 오류 메시지 저장
-- 서버 재시작 시 `sessions.running` 잔여 run reconcile
+승격 판단은 사전식이다.
 
-주의: reconcile은 실제 run resume이 아니라 중단 감지 및 상태 정리다.
+```text
+success_rate 후퇴 → reject
+success 유지 → cost_per_success 비교
+비용 동률 → elapsed 비교
+동률 → 변경할 이유가 없으므로 reject
+```
 
-## 7. Remote Operation
+`backend/rsi.py`에는 promotion gate가 구현돼 있지만 candidate worktree 실행/merge는 아직 자동화하지 않는다. 최종 승인은 사람에게 둔다.
 
-PWA는 IDE 복제가 아니라 Agent 지휘 화면이다.
+## 9. Remote / Automation
 
-지원:
+PWA는 IDE 복제가 아니라 Agent 지휘·복구 인터페이스다.
 
-- 세션/워크스페이스
-- live role/activity
-- approval/question
-- runtime steering
-- Kanban task
-- Git changes/history/branches
-- file browser
-- Skills 관리
-- context/metrics
-- 재접속 후 status polling
+- 세션 / 예약 / 맥
+- Terminal / Screen / Camera
+- Git / Files / Skills / Metrics
+- Scheduled Job 기반
 
-## 8. Streaming / Status
+Condition/Deferred Job, timezone/idempotency/restart semantics는 계속 고도화한다.
 
-SSE 이벤트는 `{seq,type,data}` 형식이다. runtime의 `send()` 이벤트는 JSONL durable log에도 기록된다.
+## 10. 보안
 
-별도 status API는 `running`, `role`, `activity`, `waiting_for`, idle 정보를 제공한다.
+- `FORGE_AUTH_TOKEN`으로 HTTP/WebSocket 보호
+- mutation approval
+- workspace boundary
+- Docker 기본, Host 명시적 opt-in
+- Zero Trust/VPN은 application auth를 대체하지 않음
+- Host Terminal은 원격 shell과 동일한 위험도로 취급
 
-향후 durable replay의 authoritative backend는 별도 worker/queue 단계에서 구현한다.
+## 11. 다음 우선순위
 
-## 9. 데이터/계측
+1. verification 3상태와 commit/push invariant 강화
+2. resume-safe approval/capability
+3. benchmark 확대 및 실제 비교 데이터 축적
+4. bounded RSI candidate worktree/promotion pipeline
+5. Scheduler durable semantics
+6. Tool Script/RPC
+7. ExecutionBackend
 
-핵심 저장 대상:
-
-- sessions
-- messages
-- tasks
-- checkpoints
-- agent_runs
-
-집계 지표:
-
-- success rate
-- prompt/completion/cache token
-- model/tool call
-- retries/compactions
-- Pro escalation
-- review first-pass
-- debugger activation
-- elapsed
-- estimated cost(가격 설정이 있을 때)
-
-API:
-
-- `GET /api/metrics/summary`
-- `GET /api/rooms/{id}/metrics`
-
-## 10. 보안/운영 원칙
-
-- API key는 서버 측 보관
-- mutation은 approval 정책 적용
-- Docker 실행은 non-root/resource 제한
-- workspace 밖 파일 접근 차단
-- action/event log 유지
-- 외부 공개 시 반드시 Cloudflare/Tailscale 등 별도 접근 제어 사용
-
-## 11. 개발 우선순위
-
-1. 실제 benchmark 데이터 축적
-2. durable worker/resume/event replay
-3. Tool Script/RPC로 model round-trip 절감
-4. Scheduled/Condition Jobs + Push
-5. ExecutionBackend 확장
-6. subagent는 비용 대비 실익 확인 후 도입
-
-Vector DB, 거대한 plugin framework, multi-agent는 실제 병목이 확인되기 전까지 기본 해법으로 사용하지 않는다.
+Vector DB, 무분별한 Multi-Agent, 거대한 plugin framework는 실측 병목이 생기기 전 기본 해법으로 사용하지 않는다.
