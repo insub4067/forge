@@ -273,6 +273,26 @@ def _last_assistant_text(messages: list[dict]) -> str:
     return ""
 
 
+def _plan_to_tasks(plan: str, limit: int = 8) -> list[dict]:
+    """Planner 계획의 번호 목록(1. / 2) …)을 칸반 태스크로 뽑는다.
+
+    모델이 update_tasks를 안 불러도 칸반이 채워지게 하는 강제 장치(multi 모드 전용).
+    '## 완료 조건' 뒤의 번호까지 섞여 들어오는 것을 막으려 상위 limit개만, 계획 본문에서만
+    추출한다(완료 조건 섹션은 잘라낸다)."""
+    body = re.split(r"##\s*완료\s*조건", plan or "", maxsplit=1)[0]
+    steps = re.findall(r"^\s*\d+[.)]\s+(.+)$", body, re.MULTILINE)
+    out, seen = [], set()
+    for s in steps:
+        title = s.strip().rstrip(".")[:80]
+        key = title.lower()
+        if title and key not in seen:
+            seen.add(key)
+            out.append({"title": title, "status": "todo"})
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _format_question(text: str, line_len: int = 56) -> str:
     """질문 텍스트를 문장 단위로 줄바꿈해 팝업 가독성을 높인다.
 
@@ -800,6 +820,10 @@ class AgentRuntime:
                                          has_image=has_image,
                                          tier=self._model_tier.get(session_id, "auto"))
         tool_schemas = tools if tools is not None else TOOL_SCHEMAS
+        # 이 role에 실제로 허용된 도구. LLM에 안 준 도구를 이름만 지어내 호출하면(환각) 거부한다.
+        # chat 경로는 읽기 전용 도구만 받는데, 모델이 edit_file 등을 호출해 무검증 편집·커밋이
+        # 나가던 것을 막는다(실측 — chat run이 파일 9개 편집·커밋).
+        allowed_tools = {t["function"]["name"] for t in tool_schemas}
         await send("role_start", {
             "role": role, "model": route["model"], "thinking": route["thinking"],
             "prefix_hash": _stable_prefix_hash(role),
@@ -1015,6 +1039,16 @@ class AgentRuntime:
                     return "repeated", total_prompt, total_completion, route
 
                 await send("tool_call", {"name": name, "args": args})
+
+                # 이 role에 허용되지 않은 도구는 실행하지 않는다 — 무검증 편집·커밋 차단.
+                if name not in allowed_tools:
+                    result = (f"[거부] '{name}'은(는) 이 작업에서 쓸 수 없는 도구입니다. "
+                              "코드 변경이 필요하면 대화가 아니라 작업 요청으로 다시 보내세요.")
+                    await send("tool_result", {"name": name, "result": result})
+                    all_messages.append(
+                        {"role": "tool", "tool_call_id": tc["id"], "content": result}
+                    )
+                    continue
 
                 if name == "ask_user":
                     answer = await self._ask_user(args, send, session_id)
@@ -1465,6 +1499,13 @@ class AgentRuntime:
             plan = _last_assistant_text(planner_msgs) if p_status == "done" else ""
 
             if p_status == "done" and plan:
+                # 칸반 강제 — 계획 단계를 태스크로 자동 등록한다. 모델이 update_tasks를 안 불러도
+                # 칸반이 비지 않는다(다중 파일 작업인데 태스크 0이던 문제). 이후 developer가
+                # update_tasks로 갱신하면 merge_tasks가 신원을 맞춰 이어간다.
+                auto_tasks = _plan_to_tasks(plan)
+                if auto_tasks and session_id and not await store.list_tasks(session_id):
+                    saved = await store.replace_tasks(session_id, auto_tasks)
+                    await send("task_update", {"tasks": saved})
                 # 2b. Developer — 계획을 받아 실행(+승격 루프).
                 status = await _run_developer(plan)
                 if status == "done":

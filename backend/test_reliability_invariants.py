@@ -148,6 +148,15 @@ async def main():
     assert c["count"] == 0
     print(f"이어붙임 상한 {A.NUDGE_MAX}회 + 그래도 변경 0 → completed_unverified: OK")
 
+    # ── 칸반 강제: planner 계획 → 태스크 자동 추출 ──
+    plan = "## 계획\n1. 모델 라우터에 planner 추가\n2) 역할 프롬프트 작성\n3. 테스트\n\n## 완료 조건\n1. 전부 통과"
+    tasks = A._plan_to_tasks(plan)
+    assert [t["title"] for t in tasks] == ["모델 라우터에 planner 추가", "역할 프롬프트 작성", "테스트"], tasks
+    assert all(t["status"] == "todo" for t in tasks)          # 완료 조건 섹션(1. 전부 통과)은 제외
+    assert A._plan_to_tasks("계획 없음 그냥 문장") == []       # 번호 목록 없으면 빈 목록
+    assert len(A._plan_to_tasks("\n".join(f"{i}. 단계{i}" for i in range(20)))) == 8  # 상위 8개 상한
+    print("칸반 강제: planner 계획 번호목록 → 태스크(완료조건 제외·상한8): OK")
+
     # ── vision 라우팅 invariant: 이번 턴에 이미지가 있을 때만 vision ──
     # (세션 초반 스크린샷 하나가 이후 텍스트 작업까지 계속 vision으로 끌고 가던 실제 버그.)
     img_msg = {"role": "user", "content": [{"type": "text", "text": "이거 고쳐"},
