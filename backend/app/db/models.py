@@ -30,6 +30,9 @@ class Session(Base):
     # 이 세션의 승인 정책(사용자가 정한 것). durable resume가 이 값을 복원해
     # "재시작으로 권한이 확대되지 않는다"는 invariant를 지킨다. 기본 False(안전).
     auto_approve: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 이 세션의 모델 티어(사용자가 정한 것). durable resume가 이 값을 복원해
+    # 재시작 후에도 같은 모델 정책으로 이어간다. 기본 "auto".
+    model_tier: Mapped[str] = mapped_column(String, default="auto")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

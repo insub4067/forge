@@ -226,7 +226,7 @@ async def main():
 
     # ── resume 권한 invariant + workspace 가드 ──
     from app.api import routes
-    calls = {"aa": None}
+    calls = {"aa": None, "tier": None}
 
     async def fake_load_history(sid):
         return [{"role": "user", "content": "x"}]
@@ -234,21 +234,26 @@ async def main():
     async def fake_get_aa(sid):
         return False  # 재시작 전 auto_approve=False였다
 
+    async def fake_get_tier(sid):
+        return "pro"  # 재시작 전 model_tier=pro였다
+
     async def fake_run(history, emit, sid, ws):
         return history
 
     orig = (routes.store.load_history, routes.store.get_session_auto_approve,
-            routes.store.set_session_final_status, routes.store.mark_running,
-            routes.store.save_history, routes.runtime.run,
-            routes.runtime.set_auto_approve, routes.runtime.cleanup_session,
-            routes._notify_done)
+            routes.store.get_session_model_tier, routes.store.set_session_final_status,
+            routes.store.mark_running, routes.store.save_history, routes.runtime.run,
+            routes.runtime.set_auto_approve, routes.runtime.set_model_tier,
+            routes.runtime.cleanup_session, routes._notify_done)
     routes.store.load_history = fake_load_history
     routes.store.get_session_auto_approve = fake_get_aa
+    routes.store.get_session_model_tier = fake_get_tier
     routes.store.set_session_final_status = lambda *a, **k: _noop()
     routes.store.mark_running = lambda *a, **k: _noop()
     routes.store.save_history = lambda *a, **k: _noop()
     routes.runtime.run = fake_run
     routes.runtime.set_auto_approve = lambda sid, v: calls.__setitem__("aa", v)
+    routes.runtime.set_model_tier = lambda sid, v: calls.__setitem__("tier", v)
     routes.runtime.cleanup_session = lambda sid: None
 
     async def fake_notify(sid, h):
@@ -257,7 +262,9 @@ async def main():
 
     await routes.resume_run("s1", "/tmp")
     assert calls["aa"] is False, f"재개는 저장된 auto_approve(False)를 복원해야 함(True 강제 금지), got {calls['aa']}"
+    assert calls["tier"] == "pro", f"재개는 저장된 model_tier(pro)를 복원해야 함, got {calls['tier']}"
     print("resume 권한 invariant: 재시작 전 auto_approve=False → 재개도 False(권한 확대 없음): OK")
+    print("resume 모델 티어 invariant: 재시작 전 model_tier=pro → 재개도 pro 복원: OK")
 
     # resume 권한 확대 방지 강화 — auto_approve=True였던 세션도 그대로 True 복원(무인 위임 유지)
     calls["aa"] = None
@@ -285,10 +292,10 @@ async def main():
     print("resume 후 승인 게이트: OK — 수동 세션은 여전히 approval_request로 pause")
 
     (routes.store.load_history, routes.store.get_session_auto_approve,
-     routes.store.set_session_final_status, routes.store.mark_running,
-     routes.store.save_history, routes.runtime.run,
-     routes.runtime.set_auto_approve, routes.runtime.cleanup_session,
-     routes._notify_done) = orig
+     routes.store.get_session_model_tier, routes.store.set_session_final_status,
+     routes.store.mark_running, routes.store.save_history, routes.runtime.run,
+     routes.runtime.set_auto_approve, routes.runtime.set_model_tier,
+     routes.runtime.cleanup_session, routes._notify_done) = orig
 
     # workspace 가드 조건(순수 로직) — 루트·없음·비디렉터리는 재개 대상 아님
     def resumable(ws):

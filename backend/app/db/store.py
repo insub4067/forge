@@ -233,6 +233,23 @@ async def get_session_auto_approve(session_id: str) -> bool:
         return bool(sess.auto_approve) if sess else False
 
 
+async def set_session_model_tier(session_id: str, tier: str) -> None:
+    """세션의 모델 티어를 영속화한다 — durable resume가 이 값을 복원해
+    재시작 후에도 같은 모델 정책으로 이어간다."""
+    async with async_session() as s:
+        sess = await s.get(Session, session_id)
+        if sess:
+            sess.model_tier = tier if tier in ("auto", "pro", "flash") else "auto"
+            await s.commit()
+
+
+async def get_session_model_tier(session_id: str) -> str:
+    """세션의 모델 티어를 읽는다. 모르면 "auto"(기본 정책)."""
+    async with async_session() as s:
+        sess = await s.get(Session, session_id)
+        return sess.model_tier if sess and sess.model_tier else "auto"
+
+
 async def reconcile_interrupted_runs() -> int:
     """서버 시작 시, running=True로 남은 세션은 재시작으로 중단된 run이다.
     복구 안내 메시지를 히스토리에 남기고 플래그를 내린다. 정리한 세션 수를 반환."""

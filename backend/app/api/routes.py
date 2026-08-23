@@ -158,6 +158,9 @@ async def resume_run(session_id: str, workspace_path: str | None) -> None:
         # 아니었으면 새 위험 작업은 approval_request로 pause되어 사용자 승인을 기다린다.
         restored_aa = await store.get_session_auto_approve(session_id)
         runtime.set_auto_approve(session_id, restored_aa)
+        # 모델 티어도 재시작 전 사용자가 정한 값을 복원한다 — 재시작 후 같은 모델 정책으로 이어간다.
+        restored_tier = await store.get_session_model_tier(session_id)
+        runtime.set_model_tier(session_id, restored_tier)
 
         async def _noop(_evt: dict) -> None:
             return None
@@ -216,6 +219,8 @@ async def chat(req: Request):
         await store.ensure_session(session_id, message[:40], workspace_path)
     # 승인 정책 영속화 — durable resume가 이 값을 복원해 권한이 확대되지 않게 한다.
     await store.set_session_auto_approve(session_id, _auto_approve)
+    # 모델 티어 영속화 — durable resume가 이 값을 복원해 같은 모델 정책으로 이어간다.
+    await store.set_session_model_tier(session_id, str(body.get("model_tier", "auto")))
 
     # 다중 이미지 지원(image_urls). 단일 image_url도 하위호환.
     image_urls = body.get("image_urls") or ([body["image_url"]] if body.get("image_url") else [])
