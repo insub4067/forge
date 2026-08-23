@@ -182,7 +182,11 @@ CHAT_TOOLS = [
 
 # build_frontend는 host에서 npm run build를 직접 실행(Docker 우회) — 승인 필요.
 APPROVAL_REQUIRED = {"write_file", "edit_file", "bash", "save_skill", "build_frontend"}
-BLOCKED_COMMANDS = ["rm -rf", "git push", "sudo ", "chmod 777"]
+# host 모드에서 bash가 호스트에 직접 닿으므로, FORGE를 실행 중인 백엔드 프로세스를
+# 스스로 죽이는 것을 막는다(자기 세션 자멸·완전 다운 방지). 백엔드 변경 적용을 위한
+# 재시작은 FORGE가 아니라 사람이/슈퍼바이저가 한다. 빌드는 build_frontend 도구를 쓴다.
+BLOCKED_COMMANDS = ["rm -rf", "git push", "sudo ", "chmod 777",
+                    "kill ", "killall", "pkill", "uvicorn"]
 
 
 def _resolve(workspace: str, input_path: str) -> Path:

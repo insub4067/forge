@@ -96,6 +96,7 @@ BASE_PROMPT = """당신은 FORGE 에이전틱 코딩 에이전트의 일부입�
 - 목표에 필요한 최소한의 파일만 읽는다. 전수 탐색하지 말고, 충분히 파악되면 즉시 다음 단계로 넘어간다.
 - 도구 호출 전에 진행 상황을 짧은 텍스트로 설명한다.
 - 같은 도구를 같은 인자로 반복 호출하지 않는다.
+- 로직(분기·루프·파서·문자열 매칭·경계값·money/보안 경로)을 만들거나 고치면, 통과 케이스가 아니라 **자기 로직을 깨는 테스트**를 쓴다. 부분매칭 대신 정확 일치, happy-path 대신 뒤집힌 케이스·빈 입력·경계값을 노린다. 자기가 떠올린 경우만 검증하면 자기 맹점을 그대로 물려받는다 — 실패를 유도하는 테스트가 진짜 검증이다.
 
 ## 환경
 - 워크스페이스: 로컬 마운트 디렉터리
@@ -1166,8 +1167,12 @@ class AgentRuntime:
                     )
                     await record("reviewer", p, c, route)
                     step_base += REVIEWER_MAX_STEPS
-                    review_pass = (r_status == "done"
-                                   and "PASS" in _last_assistant_text(all_messages).upper())
+                    # reviewer.md 규약: 마지막 줄이 정확히 PASS 또는 FAIL:로 시작한다.
+                    # 전체 부분검색은 "does not pass"·"통과(pass) 못함" 같은 FAIL 본문에
+                    # 걸려 판정을 뒤집으므로, 마지막 줄만 본다.
+                    _lines = _last_assistant_text(all_messages).strip().splitlines()
+                    _verdict = _lines[-1].strip().upper() if _lines else ""
+                    review_pass = r_status == "done" and _verdict.startswith("PASS")
                     if not review_pass:
                         # 리뷰 피드백(FAIL 내용)이 컨텍스트에 남아 있어 Developer가 그대로 보고 수정.
                         status = await _run_developer(plan)

@@ -110,6 +110,14 @@ async def main():
     assert data.get("status") == "completed", data
     print("Case D (Reviewer PASS → 재수정 없음): OK", roles)
 
+    # Case D2 — FAIL 본문에 'pass' 단어가 있어도 FAIL로 판정(마지막 줄만 본다).
+    #   전체 부분검색이면 여기서 PASS로 뒤집혀 재수정을 건너뛰는 버그가 난다.
+    rt, calls = make_runtime(review_text="FAIL: 경계 테스트를 pass하지 못함")
+    rt.set_agent_mode("s1", "multi")
+    data, mode, roles, _ = await run_case(rt, calls)
+    assert roles == ["planner", "developer", "reviewer", "developer"], roles
+    print("Case D2 (FAIL 본문에 pass 포함 → 여전히 FAIL): OK", roles)
+
     # Case E — 명시적 single + complex 키워드: 사용자 명시가 auto 판정보다 우선
     rt, calls = make_runtime()
     rt.set_agent_mode("s1", "single")
