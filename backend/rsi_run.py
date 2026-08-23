@@ -97,6 +97,8 @@ def _run_forge(goal: str, worktree: Path, *, timeout: int = 7200) -> None:
     )
     env = dict(os.environ)
     env["PYTHONPATH"] = str(worktree) + os.pathsep + env.get("PYTHONPATH", "")
+    # candidate는 벤치 측정용 — worktree에서 커밋/push하지 않는다(detached HEAD 사고 방지).
+    env["AUTO_COMMIT"] = "0"
     r = subprocess.run(
         [sys.executable, "-c", script, goal, str(worktree)],
         cwd=str(worktree), env=env, text=True, timeout=timeout,
@@ -162,7 +164,7 @@ def main():
     ap.add_argument("--candidate-cmd", required=True,
                     help="candidate worktree에서 실행할 자기수정 명령. 'forge:<goal>'이면 FORGE 에이전트를 worktree 안에서 headless 구동, 그 외엔 셸 명령")
     ap.add_argument("--repeat", type=int, default=1, help="benchmark task당 반복 횟수")
-    ap.add_argument("--tier", default="auto", help="모델 티어: auto|flash|pro|ox")
+    ap.add_argument("--tier", default="auto", help="모델 티어: auto|flash|pro")
     ap.add_argument("--task", default="", help="특정 task만(쉼표 구분)")
     ap.add_argument("--complex", action="store_true", help="COMPLEX task만 실행")
     ap.add_argument("--json", default="", help="candidate 집계 JSON 저장 경로")
