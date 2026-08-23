@@ -55,31 +55,6 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
-            "name": "explore",
-            "description": "여러 읽기 전용 조회(read_file/list_dir/grep)를 한 번에 실행하고 집계 결과를 받는다. 무엇을 읽을지 미리 정해졌으면(예: 후보 파일 여러 개 읽기, 여러 위치 grep, list_dir+read 조합) 개별 호출 대신 이걸로 묶어 모델 왕복과 컨텍스트를 줄인다. 순차 판단이 필요하면(먼저 grep 결과를 보고 다음을 정함) 개별 호출을 쓴다. 쓰기·실행 불가(읽기 전용).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "operations": {
-                        "type": "array",
-                        "description": "실행할 읽기 전용 조회 목록(최대 20개, 병렬 실행).",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "tool": {"type": "string", "enum": ["read_file", "list_dir", "grep"]},
-                                "args": {"type": "object", "description": "그 도구의 인자. read_file/list_dir:{path}, grep:{pattern, include?}"},
-                            },
-                            "required": ["tool", "args"],
-                        },
-                    },
-                },
-                "required": ["operations"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "write_file",
             "description": "Create or overwrite a file with the given content.",
             "parameters": {
@@ -203,7 +178,7 @@ TOOL_SCHEMAS: list[dict] = [
 # chat 에이전트는 읽기·질문만 — 코드 수정/실행 도구는 제외한다.
 CHAT_TOOLS = [
     t for t in TOOL_SCHEMAS
-    if t["function"]["name"] in {"read_file", "list_dir", "grep", "explore", "ask_user"}
+    if t["function"]["name"] in {"read_file", "list_dir", "grep", "ask_user"}
 ]
 
 # build_frontend는 host에서 npm run build를 직접 실행(Docker 우회) — 승인 필요.
@@ -308,33 +283,6 @@ async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]
         out: list[str] = []
         _grep(p, str(args["pattern"]), args.get("include"), out)
         return "\n".join(out[:100]) or "검색 결과 없음", ""
-    if name == "explore":
-        # 여러 읽기 전용 조회를 한 번에 병렬 실행하고 집계 결과를 한 번에 반환한다
-        # (모델 왕복·tool 메시지 수↓). 쓰기/실행은 불가 — 읽기 전용만 허용.
-        import asyncio as _asyncio
-        ops = args.get("operations", [])
-        if not isinstance(ops, list) or not ops:
-            return "operations 목록이 비었습니다.", ""
-        _allowed = {"read_file", "list_dir", "grep"}
-
-        async def _one(op):
-            t = str(op.get("tool", ""))
-            if t not in _allowed:
-                return t, f"허용되지 않는 op(읽기 전용만): {t}"
-            try:
-                res, _ = await execute_tool(t, op.get("args", {}) or {}, workspace)
-            except Exception as e:
-                res = f"오류: {e}"
-            return t, res
-
-        picked = ops[:20]  # 상한 20 — 과도한 배치 방지
-        results = await _asyncio.gather(*[_one(o) for o in picked])
-        parts = []
-        for i, ((t, res), op) in enumerate(zip(results, picked), 1):
-            a = op.get("args", {}) or {}
-            label = a.get("path") or a.get("pattern") or ""
-            parts.append(f"── [{i}] {t} {label} ──\n{res}")
-        return "\n\n".join(parts), ""
     if name == "save_skill":
         import re as _re
         from .. import skills as skills_lib
