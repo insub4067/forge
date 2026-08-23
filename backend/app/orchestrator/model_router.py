@@ -52,11 +52,6 @@ class ModelRouter:
                      has_image: bool = False, tier: str = "") -> dict:
         base = dict(self._policy.get(agent_type, self._policy["developer"]))
 
-        # 사용자가 Ox 티어를 고르면 모델만 Ox로 교체(다른 조건 무시) — 순수 모델 스왑 실험.
-        # reasoning 기본 enabled+medium(§Ox Alpha). 벤치마크·비교를 위한 명시적 선택.
-        if tier == "ox":
-            return {"model": settings.ox_model, "thinking": True, "reasoning_effort": "medium"}
-
         # Developer + 이미지: 텍스트 모델(flash/pro)은 이미지를 못 받으므로(400) vision 모델로 실행.
         # 승격 시에도 이미지를 잃는 text-pro로 넘기지 않는다 — vision 계열 pro 모델이 없어
         # 같은 vision 모델로 재시도한다(무한 루프·비용 폭주는 상한 루프가 막는다).

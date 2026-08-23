@@ -1563,7 +1563,6 @@ function phaseStatus(p) {
 // 작성 중 어떤 모델이 답하는지 한눈에 — 모델명을 짧은 배지로.
 function shortModel(m) {
   if (!m) return ''
-  if (m.includes('ox-alpha') || m.startsWith('stealth/')) return 'Ox'
   if (m.includes('pro')) return 'Pro'
   if (m.includes('vision')) return 'Vision'
   if (m.includes('flash')) return 'Flash'
