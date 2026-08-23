@@ -1125,9 +1125,13 @@ class AgentRuntime:
             if os.path.isdir(d) and glob.glob(os.path.join(d, "test_*.py")):
                 venv_py = os.path.join(d, ".venv", "bin", "python")
                 interp = venv_py if os.path.isfile(venv_py) else (shutil.which("python3") or shutil.which("python"))
+                # pytest가 설치돼 있을 때만 — 미설치 시 exit 1을 '테스트 실패'로 오인해
+                # 정상 작업을 막는 거짓 실패를 방지한다(신뢰성엔 거짓 실패가 더 해롭다).
                 if interp:
-                    checks.append((f"pytest{f' ({sub})' if sub else ''}",
-                                   [interp, "-m", "pytest", "-q"], d))
+                    chk = await _sh([interp, "-c", "import pytest"], d, timeout=20)
+                    if chk[0] == 0:
+                        checks.append((f"pytest{f' ({sub})' if sub else ''}",
+                                       [interp, "-m", "pytest", "-q"], d))
 
         if not checks:
             return True, "검증 대상 없음(test/build 미검출)"
