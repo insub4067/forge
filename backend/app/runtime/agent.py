@@ -1797,13 +1797,16 @@ class AgentRuntime:
         async def finish(status: str, content: str = "") -> None:
             # 성공 완료 시 하네스가 장부를 마감한다 — 모델이 잊어도 신뢰성 보장:
             # 남은 task done 처리(칸반), 변경 자동 commit+push(커밋 누락 방지).
-            # completed(검증됨)와 completed_unverified(검증 대상 없음) 둘 다 커밋 대상.
+            # completed(검증됨)와 completed_unverified(검증 대상 없음) 둘 다 마감 대상.
             # verification_failed는 여기 안 걸려 절대 커밋되지 않는다(invariant).
-            # 변경 0건이면 마감할 장부가 없다 — 태스크를 done으로 올리지도, 커밋하지도 않는다
-            # (읽기 전용 요청이거나, 모델이 하겠다고만 하고 안 한 경우).
-            if status in ("completed", "completed_unverified") and state["files_changed"]:
+            if status in ("completed", "completed_unverified"):
+                # 태스크 마감은 '완료 상태'이면 무조건 한다 — 변경이 이전 run에서 났고 마지막
+                # 턴이 무변경(예: "끝났니?" 확인)이면, run 단위 files_changed 게이트가 태스크를
+                # working에 가둬 멈춘 것처럼 보였다. 완료면 칸반도 완료로 마감한다.
                 await self._finalize_tasks(session_id, send)
-                await self._autocommit(ws, goal, send, state["files_changed"])
+                # 자동 커밋은 이번 run에 실제 변경이 있을 때만(빈 커밋 방지).
+                if state["files_changed"]:
+                    await self._autocommit(ws, goal, send, state["files_changed"])
             # done 이벤트를 보내면서 세션 final_status를 영속화(성공 정의·집계 기준).
             if session_id:
                 await store.set_session_final_status(session_id, status)
