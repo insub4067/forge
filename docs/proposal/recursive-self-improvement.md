@@ -162,9 +162,12 @@ RSI가 실제로 cost per successful task를 낮추는지를 RSI 스스로 계�
 
 ## 12. 단계
 
-### R0 — Benchmark 자동화 (선결)
-- 작업 채점을 결정적으로, fixture repo 격리, N회 반복, `run_benchmark` 하네스.
-- 이게 없으면 나머지 전부 무의미. **여기부터 시작한다.**
+### R0 — Benchmark 자동화 (선결) — ✅ 구현됨
+- `backend/bench.py` + `backend/bench_tasks.py`: 21개 결정적 task(카테고리 21종, COMPLEX 5),
+  fixture 격리, N회 반복, 채점(테스트/파일/grep), 집계·JSON 출력, 세션 자동 정리.
+- `backend/test_bench_quality.py`: 정답 노출·다양성·trivial 비중·중복·상태오염 검사.
+- 실험 플래그(기본 off): `FORGE_PLANNER_FLASH/PLANNER_OFF/SKILLS_OFF`로 Pro/Flash/No-Planner·skills on/off A/B.
+- `backend/rsi.py` `promotion_gate`: 사전식 판정(success_rate→cost→elapsed) 코드화, self-test 통과.
 
 ### R1 — 수동 candidate 평가
 - 사람이 프롬프트/config 변경안을 worktree에 적용 → `run_benchmark`로 baseline 대비 게이트 판정.
