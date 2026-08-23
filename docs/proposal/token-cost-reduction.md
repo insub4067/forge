@@ -19,7 +19,8 @@ planner 토큰의 93.6%가 단일 마라톤 세션에서 나왔다. 즉 비용�
 - 남은 검증: No-Planner variant 벤치(5 COMPLEX×2)로 성공률 하락 폭 확인. 외부계획 경로는 계획 도움이 있어 bare No-Planner보다 성공률이 높을 것(상한).
 
 ### L2. planner flash (COMPLEX에서 pro 대신 flash)
-- 구현됨: `FORGE_PLANNER_FLASH=1`. 기본 off.
+- 상태(2026-08-24 정정): `FORGE_PLANNER_FLASH` 플래그는 코드에 없다(제거됨). 현재 planner 역할은
+  기본이 flash+think-medium이라 플래그 없이도 flash로 돈다(`model_router.py`). 아래 실측은 옛 플래그 기준 기록.
 - **실측(COMPLEX 5×2)**: pro $0.00592 → flash **$0.00480 (−19%)**, 성공 3/3 유지(표본 작음).
 - L1이 적용되면 무의미(planner 자체가 없음). L1을 못 쓰는 전체위임 경로의 차선책.
 

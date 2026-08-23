@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import delete, func, select, update
 
 from .models import (AgentRun, Checkpoint, Message, PushDevice, Refinement, ScheduledJob,
-                     Session, Task, VisionAnalysis)
+                     Session, Task)
 from .session import async_session
 
 
@@ -465,26 +465,6 @@ async def set_session_final_status(session_id: str, final_status: str) -> None:
         if sess:
             sess.final_status = final_status
             await s.commit()
-
-
-async def save_vision_analysis(
-    session_id: str,
-    task_id: str,
-    analysis_result: str,
-    image_path: str = "",
-    issues: str = "",
-) -> None:
-    async with async_session() as s:
-        s.add(
-            VisionAnalysis(
-                session_id=session_id,
-                task_id=task_id,
-                image_path=image_path,
-                analysis_result=analysis_result,
-                issues=issues,
-            )
-        )
-        await s.commit()
 
 
 async def session_agent_runs(session_id: str) -> list[dict]:

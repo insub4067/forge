@@ -87,18 +87,6 @@ class AgentRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
-class VisionAnalysis(Base):
-    __tablename__ = "vision_analysis"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    session_id: Mapped[str] = mapped_column(String, default="")
-    task_id: Mapped[str] = mapped_column(String, default="")
-    image_path: Mapped[str] = mapped_column(String, default="")
-    analysis_result: Mapped[str] = mapped_column(Text, default="")
-    issues: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-
 class Task(Base):
     __tablename__ = "tasks"
 
