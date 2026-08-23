@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     deep_seek_api_key: str = ""
     deep_seek_model: str = "deepseek-v4-pro"
     llm_provider: str = "deepseek"
+    # OpenRouter(멀티프로바이더 실험) — 모델 문자열에 "/"가 있으면 이 키로 OpenRouter를 호출한다.
+    # 키는 기존 .env의 OX_ALPHA_API_KEY를 재사용(Ox가 OpenRouter였음).
+    ox_alpha_api_key: str = ""
+    openrouter_base: str = "https://openrouter.ai/api/v1"
     # 잔액 표시용 환율(USD→CNY 근사). DeepSeek 잔액 API는 CNY로 반환한다.
     usd_cny_rate: float = 7.2
     # 잔액 영역 탭 시 안내하는 충전 화면 URL(DeepSeek 플랫폼).
