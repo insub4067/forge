@@ -124,6 +124,31 @@ BASE_PROMPT = """당신은 FORGE 에이전틱 코딩 에이전트의 일부입�
 - save_skill의 scope는 기본 project다. 프로젝트 특화 절차(그 저장소의 규약·빌드·구조)는 project로, 특정 파일명·경로·도메인에 묶이지 않고 여러 코드베이스에서 재사용 가능한 명백히 범용적인 절차만 global로 저장한다. 판단이 애매하면 project. 단순 메모나 일회성 해결은 Skill로 저장하지 않는다."""
 
 
+def _compress_command_output(command: str, output: str) -> str | None:
+    """명령 종류별 deterministic 압축(LLM-free). 성공이 구조적으로 명확한 출력만 강하게
+    줄이고, 실패·불명확은 None을 반환해 기본 prune(에러 tail 보존)에 맡긴다.
+    confidence-aware — 오류 분석 정보를 지우지 않는 것이 원칙(요청 22)."""
+    cmd = (command or "").lower()
+    if not output or len(output) < 800:
+        return None  # 작은 출력은 그대로
+    lines = [ln for ln in output.splitlines() if ln.strip()]
+    # 테스트 — 전부 통과면 요약 한 줄, 실패가 있으면 원본 보존(None)
+    if any(k in cmd for k in ("pytest", "npm test", "npm run test", "vitest", "go test")):
+        has_fail = re.search(r"\b(\d+)\s+(failed|error)", output) or "FAILED" in output
+        passed = re.search(r"\b(\d+)\s+passed", output)
+        if passed and not has_fail:
+            last = next((ln for ln in reversed(lines) if "passed" in ln), lines[-1])
+            return f"[테스트 전부 통과] {last.strip()}"
+        return None  # 실패 — traceback 보존
+    # git status — 변경 목록만
+    if "git status" in cmd and len(lines) > 15:
+        changed = [ln for ln in lines if re.match(r"\s*[AMDR?]{1,2}\s", ln) or ln[:1] in "MADR?"]
+        head_lines = changed[:30] if changed else lines[:30]
+        extra = max(0, len(lines) - len(head_lines))
+        return "[git status] " + f"{len(changed) or len(lines)}개 변경\n" + "\n".join(head_lines) + (f"\n... {extra}줄 생략 ..." if extra else "")
+    return None
+
+
 def _prune_tool_result(text: str, head: int = 1400, tail: int = 900) -> str:
     """모델에 보낼 도구 결과를 축약한다(model-free pruning).
 
@@ -1130,8 +1155,11 @@ class AgentRuntime:
                     {"name": name, "result": result[:20_000], "diff": diff[:10_000]},
                 )
 
+                # bash는 명령 종류별 압축을 먼저 시도(성공 명확 시 강하게, 실패는 원본 보존).
+                _ca = _compress_command_output(args.get("command", ""), result) if name == "bash" else None
+                _content = _ca if _ca is not None else _prune_tool_result(result)
                 all_messages.append(
-                    {"role": "tool", "tool_call_id": tc["id"], "content": _prune_tool_result(result)}
+                    {"role": "tool", "tool_call_id": tc["id"], "content": _content}
                 )
 
         return "max_steps", total_prompt, total_completion, route
