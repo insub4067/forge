@@ -110,7 +110,20 @@ def _print_report(agg: dict):
 
 
 # ── 실제 실행 (LLM 비용 발생 — --run 에서만 진입) ────────────────────────────
-async def _run_one(task: dict, idx: int) -> dict:
+async def _cleanup_session(sid: str):
+    """bench 세션이 라이브 telemetry를 오염시키지 않게 삭제(agent_runs 포함).
+    delete_room은 agent_runs를 안 지우므로 여기서 직접 지운다."""
+    from sqlalchemy import delete
+    from app.db import store
+    from app.db.session import async_session
+    from app.db.models import AgentRun
+    async with async_session() as s:
+        await s.execute(delete(AgentRun).where(AgentRun.session_id == sid))
+        await s.commit()
+    await store.delete_room(sid)
+
+
+async def _run_one(task: dict, idx: int, keep: bool) -> dict:
     from app.api.routes import runtime  # 지연 import — self-test는 이 경로를 안 탄다
     from app.db import store
     from app.metrics import sum_cost
@@ -146,16 +159,19 @@ async def _run_one(task: dict, idx: int) -> dict:
             success = False
         rows = await store.session_agent_runs(sid)
         cost, priced, total = sum_cost(rows)
-        return {"code": task["code"], "success": success, "cost": cost if priced else None,
-                "elapsed_s": round(elapsed, 1)}
+        result = {"code": task["code"], "success": success, "cost": cost if priced else None,
+                  "elapsed_s": round(elapsed, 1)}
+    if not keep:
+        await _cleanup_session(sid)  # 라이브 telemetry 보호(기본 정리)
+    return result
 
 
-async def _run_all(repeat: int) -> dict:
+async def _run_all(repeat: int, keep: bool) -> dict:
     results = []
     for task in BENCH_TASKS:
         for i in range(repeat):
             print(f"실행: task {task['code']} ({task['kind']}) #{i + 1}/{repeat} …")
-            results.append(await _run_one(task, i))
+            results.append(await _run_one(task, i, keep))
     return aggregate(results)
 
 
@@ -191,9 +207,10 @@ def main():
     ap.add_argument("--run", action="store_true", help="실제 runtime 실행(DeepSeek API 비용 발생)")
     ap.add_argument("--repeat", type=int, default=1, help="task당 반복 횟수")
     ap.add_argument("--self-test", action="store_true", help="채점·집계만 검증(무비용)")
+    ap.add_argument("--keep", action="store_true", help="bench 세션을 DB에 보존(기본은 정리해 telemetry 보호)")
     args = ap.parse_args()
     if args.run:
-        agg = asyncio.run(_run_all(args.repeat))
+        agg = asyncio.run(_run_all(args.repeat, args.keep))
         _print_report(agg)
     else:
         _self_test()
