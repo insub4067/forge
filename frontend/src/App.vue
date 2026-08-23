@@ -1412,10 +1412,6 @@ document.addEventListener('visibilitychange', () => {
               </div>
               <div v-if="m.content && m.content !== '[이미지]'" class="user-text">{{ m.content }}</div>
             </template>
-            <div v-if="(busy || sessionRunning) && i === messages.length - 1" class="typing">
-              <span class="typing-label">{{ busy ? '작성 중' : liveActivityText() }}</span>
-              <span class="typing-dots"><i></i><i></i><i></i></span>
-            </div>
           </template>
 
           <template v-if="m.role === 'assistant'">
@@ -1533,6 +1529,20 @@ document.addEventListener('visibilitychange', () => {
               </button>
             </div>
           </template>
+        </div>
+      </div>
+
+      <!-- 대기큐 채팅처럼 마지막 메시지가 사용자면, 작성 중 표시가 사용자 말풍선 안에
+           들어가 보였다. 어시스턴트 쪽(왼쪽) 별도 말풍선으로 띄운다. -->
+      <div
+        v-if="(busy || sessionRunning) && messages.length && messages[messages.length - 1].role === 'user'"
+        class="msg assistant"
+      >
+        <div class="bubble">
+          <div class="typing">
+            <span class="typing-label">{{ busy ? '작성 중' : liveActivityText() }}</span>
+            <span class="typing-dots"><i></i><i></i><i></i></span>
+          </div>
         </div>
       </div>
     </main>
