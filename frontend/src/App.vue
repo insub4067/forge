@@ -239,6 +239,16 @@ const showSessionDetail = ref(false)
 const showRunHistory = ref(false)
 const showAllRuns = ref(false)
 const showErrorLog = ref(false)
+// 잔액 영역 탭 → "충전 화면으로 이동하시겠습니까?" 팝업
+const showTopUpConfirm = ref(false)
+function openTopUpConfirm() {
+  if (adminBalance.value && adminBalance.value.ok) showTopUpConfirm.value = true
+}
+function goTopUp() {
+  const url = (adminBalance.value && adminBalance.value.top_up_url) || 'https://platform.deepseek.com/top_up'
+  window.open(url, '_blank', 'noopener')
+  showTopUpConfirm.value = false
+}
 const sessionRuns = ref([])
 const sessionMetrics = ref(null)
 const AVAILABLE_MODELS = ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
@@ -530,6 +540,8 @@ async function openSessionDetail() {
   showSessionDetail.value = true
   sessionRuns.value = []
   sessionMetrics.value = null
+  // 세션 사용량 아래에 DeepSeek 잔액을 함께 보여준다(캐시로 인한 부하는 없음).
+  loadBalance()
   // 방 목록을 새로고침해 컨텍스트 윈도우(used_tokens)를 최신값으로 반영(옛값 0% 방지).
   await loadRooms()
   try {
@@ -2427,6 +2439,18 @@ document.addEventListener('visibilitychange', () => {
       </div>
     </div>
 
+    <!-- 잔액 탭 → 충전 화면 이동 확인 팝업 -->
+    <div v-if="showTopUpConfirm" class="modal-overlay" @click="showTopUpConfirm = false">
+      <div class="modal" @click.stop>
+        <div class="modal-head">충전 안내</div>
+        <div class="modal-question">충전 화면으로 이동하시겠습니까?</div>
+        <div class="modal-options">
+          <button @click="showTopUpConfirm = false">취소</button>
+          <button @click="goTopUp">충전 화면으로 이동</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 승인 요청 복구 모달(스트림 끊긴 뒤에도 승인/거부 가능) -->
     <div v-if="activeApproval" class="modal-overlay">
       <div class="modal" @click.stop>
@@ -2617,13 +2641,17 @@ document.addEventListener('visibilitychange', () => {
         <button @click="showAdmin = false">닫기</button>
       </div>
       <div class="admin-body">
-        <div v-if="adminBalance && adminBalance.balance_infos" class="admin-section">
+        <div v-if="adminBalance && adminBalance.ok" class="admin-section">
           <div class="admin-stat-title">DeepSeek 잔액</div>
-          <div v-for="b in adminBalance.balance_infos" :key="b.currency" class="admin-row">
-            <span>{{ b.currency }}</span>
-            <span class="admin-big">${{ b.total_balance }}</span>
+          <div class="admin-row">
+            <span>USD 근사</span>
+            <span class="admin-big">${{ adminBalance.usd }}</span>
           </div>
-          <a class="admin-charge" href="https://platform.deepseek.com" target="_blank" rel="noopener">충전하러 가기</a>
+          <div class="admin-row">
+            <span>{{ adminBalance.currency }}</span>
+            <span class="mono">{{ adminBalance.total }}</span>
+          </div>
+          <a class="admin-charge" :href="adminBalance.top_up_url" target="_blank" rel="noopener">충전하러 가기</a>
         </div>
         <div v-if="adminBalance && adminBalance.error" class="admin-section">
           <div class="admin-stat-title">DeepSeek 잔액</div>
@@ -2741,6 +2769,20 @@ document.addEventListener('visibilitychange', () => {
           <div class="admin-sub">
             prompt {{ formatTokens(sessionTokenTotals().prompt) }} · completion {{ formatTokens(sessionTokenTotals().completion) }}
           </div>
+        </div>
+
+        <div class="admin-section">
+          <div class="admin-stat-title">DeepSeek 잔액</div>
+          <button class="balance-box" @click="openTopUpConfirm" aria-label="충전 화면으로 이동">
+            <template v-if="adminBalance && adminBalance.ok">
+              <div class="admin-big">${{ adminBalance.usd }}</div>
+              <div class="admin-sub">
+                {{ adminBalance.currency }} {{ adminBalance.total }} · 탭하면 충전 화면으로 이동
+              </div>
+            </template>
+            <div v-else-if="adminBalance && adminBalance.error" class="admin-sub">잔액 조회 실패: {{ adminBalance.error }}</div>
+            <div v-else class="admin-sub">잔액 불러오는 중…</div>
+          </button>
         </div>
 
         <div v-if="sessionMetrics" class="admin-section">

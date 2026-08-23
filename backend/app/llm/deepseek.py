@@ -70,3 +70,19 @@ class DeepSeekAdapter:
 
                     if delta:
                         yield delta
+
+    async def fetch_balance(self) -> dict:
+        """계정 잔액 조회 — GET /user/balance (DeepSeek 공식 API).
+
+        balance_infos: 통화별 잔액 목록(보통 CNY 1건). 실패 시 RuntimeError.
+        """
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15, connect=10)) as client:
+            resp = await client.get(
+                f"{self.base}/user/balance",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"잔액 조회 오류 {resp.status_code}: {resp.text[:300]}"
+                )
+            return resp.json()

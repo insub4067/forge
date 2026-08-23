@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     deep_seek_api_key: str = ""
     deep_seek_model: str = "deepseek-v4-pro"
     llm_provider: str = "deepseek"
+    # 잔액 표시용 환율(USD→CNY 근사). DeepSeek 잔액 API는 CNY로 반환한다.
+    usd_cny_rate: float = 7.2
+    # 잔액 영역 탭 시 안내하는 충전 화면 URL(DeepSeek 플랫폼).
+    top_up_url: str = "https://platform.deepseek.com/top_up"
     coder_model: str = ""  # 하위호환 — developer_model 미설정 시 fallback
     developer_model: str = ""      # 통합 Developer(설계+구현+자체검증). 기본 flash+think-medium
     developer_pro_model: str = ""  # 실패 시 승격 모델(기본 deep_seek_model=pro)

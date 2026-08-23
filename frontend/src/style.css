@@ -480,6 +480,27 @@ header .todo-btn {
   margin-top: 4px;
 }
 
+/* 세션 사용량 아래 잔액 표시 — 클릭 가능(탭 → 충전 안내 팝업) */
+.balance-box {
+  width: 100%;
+  text-align: left;
+  background: var(--panel-2);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.balance-box:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.balance-box .admin-big {
+  margin: 0;
+}
+
 .admin-charge {
   display: block;
   text-align: center;

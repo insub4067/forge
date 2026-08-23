@@ -6,6 +6,7 @@ import subprocess
 import shutil
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from ..db import store
 from .. import errors as error_log
 from .. import metrics as metrics_calc
 from .. import skills as skills_lib
+from ..llm.factory import create_adapter
 from ..runtime.agent import AgentRuntime
 from ..tools.registry import _resolve
 
@@ -675,19 +677,41 @@ async def get_model_policy():
     return runtime.router.get_policy()
 
 
+# 잔액 조회는 DeepSeek API rate를 아끼려고 짧게 캐시한다(실패 시 캐시하지 않음).
+_balance_cache: dict = {"ts": 0.0, "data": None}
+BALANCE_CACHE_TTL = 60.0
+
+
 @router.get("/admin/balance")
 async def admin_balance():
+    """DeepSeek 계정 잔액 — CNY 원본 + USD 환산값 + 충전 화면 URL."""
+    global _balance_cache
+    if _balance_cache["data"] and time.monotonic() - _balance_cache["ts"] < BALANCE_CACHE_TTL:
+        return _balance_cache["data"]
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.get(
-                "https://api.deepseek.com/user/balance",
-                headers={"Authorization": f"Bearer {settings.deep_seek_api_key}"},
-            )
-            if r.status_code == 200:
-                return r.json()
-            return {"error": f"HTTP {r.status_code}"}
+        adapter = create_adapter(settings.deep_seek_model)
+        raw = await adapter.fetch_balance()
+        infos = raw.get("balance_infos") or []
+        total = sum(float(i.get("total_balance") or 0) for i in infos)
+        currency = infos[0].get("currency", "") if infos else ""
+        # 잔액 API는 계정 통화로 반환한다(이 계정은 USD). CNY면 설정 환율로 근사 환산.
+        if currency == "CNY":
+            usd = round(total / settings.usd_cny_rate, 2) if total else 0.0
+        else:
+            usd = round(total, 2)
+        data = {
+            "ok": True,
+            "currency": currency,
+            "total": total,
+            "usd": usd,
+            "infos": infos,
+            "top_up_url": settings.top_up_url,
+        }
+        _balance_cache = {"ts": time.monotonic(), "data": data}
+        return data
     except Exception as err:
-        return {"error": str(err)}
+        error_log.record("balance_fetch_failed", str(err), "")
+        return {"ok": False, "error": str(err)}
 
 
 @router.put("/admin/model-policy/{role}")
