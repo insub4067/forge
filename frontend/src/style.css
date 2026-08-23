@@ -676,6 +676,17 @@ header .todo-btn {
   font-size: 14px;
 }
 
+.kanban-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kanban-head button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .kanban-board {
   flex: 1;
   display: flex;

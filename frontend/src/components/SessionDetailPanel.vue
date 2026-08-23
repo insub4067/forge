@@ -24,6 +24,51 @@ const ctxBreakdown = ref(null)  // 마지막 LLM 호출의 context 영역 분해
 const toolUsage = ref([])  // 도구별 호출 횟수(어떤 툴 몇 번)
 const CTX_LABELS = { system_base_role: 'System·규칙', memory: '메모리', skills: 'Skills', history: '대화', tool_results: '도구 결과' }
 const showRunHistory = ref(false)
+const capturing = ref(false)
+
+// 전체화면 스크린샷 — 브라우저 내장 getDisplayMedia로 화면/창/탭을 캡처해 PNG로 저장.
+// 별도 의존성 없이 전체 화면(모니터)을 담는다. 사용자가 캡처 대상을 선택해야 한다.
+async function captureScreenshot() {
+  if (capturing.value) return
+  capturing.value = true
+  let stream = null
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { mediaSource: 'screen' },
+      audio: false,
+    })
+    const video = document.createElement('video')
+    video.srcObject = stream
+    video.muted = true
+    await video.play()
+    // 첫 프레임이 준비될 때까지 대기 — 안 그러면 검은 화면이 찍힌다.
+    await new Promise((resolve) => {
+      if (video.videoWidth) return resolve()
+      video.addEventListener('loadeddata', resolve, { once: true })
+    })
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    canvas.getContext('2d').drawImage(video, 0, 0)
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+    if (!blob) throw new Error('PNG 변환 실패')
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `forge-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (err) {
+    // 사용자가 캡처를 취소한 경우(NotAllowedError)는 조용히 무시, 그 외만 알림.
+    if (err && err.name !== 'NotAllowedError' && err.name !== 'AbortError') {
+      alert('스크린샷 실패: ' + (err.message || err))
+    }
+  } finally {
+    // 화면 점유 해제 — 트랙을 정지하지 않으면 캡처 표시가 계속 남는다.
+    if (stream) stream.getTracks().forEach((t) => t.stop())
+    capturing.value = false
+  }
+}
 
 function formatTokens(n) {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
@@ -105,7 +150,10 @@ onMounted(async () => {
   <div class="kanban-overlay">
     <div class="kanban-head">
       <span class="kanban-title">{{ roomTitle }} · 사용량</span>
-      <button @click="emit('close')">닫기</button>
+      <div class="kanban-head-actions">
+        <button :disabled="capturing" @click="captureScreenshot">{{ capturing ? '캡처 중…' : '스크린샷' }}</button>
+        <button @click="emit('close')">닫기</button>
+      </div>
     </div>
     <div class="admin-body">
       <div class="admin-section">
