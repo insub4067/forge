@@ -3442,6 +3442,11 @@ button {
   .rooms-overlay.peek:hover .rooms-panel {
     transform: translateX(0);
   }
+  /* PC(넓은 화면): 맥 화면 뷰에서도 X를 우측 상단으로 */
+  .mac-ov-close {
+    top: calc(env(safe-area-inset-top) + 10px);
+    bottom: auto;
+  }
 }
 
 /* 모델 선택 시트(클로드식 바텀시트) */
