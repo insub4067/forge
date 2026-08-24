@@ -22,6 +22,7 @@ from .. import metrics as metrics_calc
 from . import memory_guard
 from . import refine
 from . import tool_store
+from ..security import preflight as security_preflight
 from ..llm.factory import create_adapter
 from ..orchestrator.model_router import ModelRouter
 from ..tools.registry import APPROVAL_REQUIRED, CHAT_TOOLS, TOOL_SCHEMAS, execute_tool
@@ -2121,6 +2122,30 @@ class AgentRuntime:
             if saved and saved["covered"] <= len(all_messages):
                 self._compaction[session_id] = saved
         room_memory = _load_room_memory(ws)
+        # Security preflight — 주입 설정 표면/추적 시크릿을 결정적 스캔. 관찰 전용(fail-open):
+        # 실행을 막지 않고 findings가 있을 때만 이벤트 한 건 표면화한다. 어떤 예외도 run에
+        # 영향을 주지 않는다. HIGH→approval 게이팅은 의도적으로 후속(벤치 재측정 필요).
+        try:
+            tracked: list[str] = []
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "-C", ws, "ls-files", "-z",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                )
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
+                tracked = [p for p in out.decode("utf-8", "replace").split("\0") if p]
+            except (OSError, asyncio.TimeoutError, ValueError):
+                tracked = []  # git 없거나 느리면 tracked 스캔만 생략(injection 스캔은 유지)
+            _pf = security_preflight.scan_workspace(ws, tracked_files=tracked)
+            if _pf:
+                _level, _line = security_preflight.summarize(_pf)
+                await send("security_preflight", {
+                    "level": _level, "summary": _line,
+                    "findings": [{"severity": f.severity, "category": f.category,
+                                  "path": f.path, "detail": f.detail} for f in _pf[:20]],
+                })
+        except Exception as _pf_err:  # noqa: BLE001 — preflight는 절대 run을 깨지 않는다
+            error_log.record("security_preflight", str(_pf_err), "")
         # 요청과 관련된 skill만 선택 삽입(전량 삽입 금지 — skill이 많아질수록 절감).
         skills = _select_skills(ws, goal)
         skill_names = re.findall(r"### skill: (.+)", skills)
