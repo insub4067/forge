@@ -144,6 +144,10 @@ const screenOn = ref(false)
 const screenSrc = ref('')
 const screenErr = ref('')
 let screenSeq = 0
+const remoteCtrl = ref(false) // 원격제어(마우스/키보드) 활성화
+const remoteErr = ref('')
+let screenImg = null // 현재 표시된 이미지 요소(좌표 스케일링용)
+let screenNatural = { w: 0, h: 0 } // 원본 캡처 해상도
 const caffeineOn = ref(false)
 const camOn = ref(false)
 const camSrc = ref('')
@@ -199,7 +203,9 @@ function screenTick() {
   if (!screenOn.value) return
   screenSrc.value = `/api/mac/screen?d=1&t=${Date.now()}_${screenSeq++}`
 }
-function onScreenLoad() {
+function onScreenImgLoad(e) {
+  screenImg = e.target
+  screenNatural = { w: e.target.naturalWidth || 0, h: e.target.naturalHeight || 0 }
   screenErr.value = ''
   if (screenOn.value) setTimeout(screenTick, 500)
 }
@@ -207,6 +213,69 @@ function onScreenError() {
   screenErr.value = '화면을 가져오지 못했습니다. 시스템 설정 › 개인정보 보호 › 화면 기록에서 백엔드(터미널/파이썬)에 권한을 허용하세요.'
   screenOn.value = false
 }
+// 표시된 이미지 좌표 → 실제 화면 좌표 변환
+function toScreenXY(ev) {
+  if (!screenImg || !screenNatural.w) return null
+  const r = screenImg.getBoundingClientRect()
+  const sx = (ev.clientX - r.left) / r.width
+  const sy = (ev.clientY - r.top) / r.height
+  return {
+    x: Math.round(sx * screenNatural.w),
+    y: Math.round(sy * screenNatural.h),
+  }
+}
+async function macSend(payload) {
+  try {
+    const r = await fetch('/api/mac/input', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!r.ok) {
+      const t = await r.text()
+      remoteErr.value = t.includes('unsupported') ? '원격제어는 macOS 백엔드에서만 지원합니다.' : `입력 실패: ${t}`
+    }
+  } catch (err) {
+    remoteErr.value = '입력 전송 실패: ' + err.message
+  }
+}
+function onScreenClick(ev) {
+  if (!remoteCtrl.value) return
+  const p = toScreenXY(ev)
+  if (!p) return
+  macSend({ type: 'click', x: p.x, y: p.y, button: ev.button === 2 ? 'right' : 'left', clicks: ev.detail || 1 })
+}
+function onScreenMove(ev) {
+  if (!remoteCtrl.value) return
+  const p = toScreenXY(ev)
+  if (p) macSend({ type: 'move', x: p.x, y: p.y })
+}
+function onScreenWheel(ev) {
+  if (!remoteCtrl.value) return
+  ev.preventDefault()
+  macSend({ type: 'scroll', dy: Math.round(ev.deltaY) })
+}
+function onScreenKey(ev) {
+  if (!remoteCtrl.value) return
+  // 키 코드 매핑 (macOS key code)
+  const map = {
+    Enter: 36, Tab: 48, Escape: 53, Backspace: 51, Delete: 117,
+    ArrowUp: 126, ArrowDown: 125, ArrowLeft: 123, ArrowRight: 124,
+    Home: 115, End: 119, PageUp: 116, PageDown: 121,
+    ' ': 49, '.': 47, ',': 43, '/': 44, ';': 41, "'": 39,
+    '[': 33, ']': 30, '\\': 42, '-': 27, '=': 24, '`': 50,
+  }
+  const code = map[ev.key]
+  if (code !== undefined) {
+    ev.preventDefault()
+    macSend({ type: 'key', key: code })
+  } else if (ev.key.length === 1) {
+    // 일반 문자는 텍스트 입력으로 전달
+    ev.preventDefault()
+    macSend({ type: 'text', text: ev.key })
+  }
+}
+
 function closeMacView() {
   stopScreen()
   stopTerminal()
@@ -523,13 +592,27 @@ watch(
   <div v-if="macView" class="mac-overlay" :class="{ 'is-screen': macView === 'screen' }">
     <template v-if="macView === 'screen'">
       <div v-if="screenErr" class="mac-screen-err">{{ screenErr }}</div>
+      <div class="mac-remote-bar">
+        <label class="mac-remote-toggle">
+          <input type="checkbox" :checked="remoteCtrl" @change="toggleRemote" />
+          <span>원격제어</span>
+        </label>
+        <span v-if="remoteCtrl" class="mac-remote-hint">클릭·이동·스크롤·키보드 입력 활성</span>
+        <span v-if="remoteErr" class="mac-remote-err">{{ remoteErr }}</span>
+      </div>
       <img
         v-show="!screenErr && screenSrc"
         :src="screenSrc"
         class="mac-screen-video"
+        :class="{ 'remote-on': remoteCtrl }"
         alt="맥 화면"
-        @load="onScreenLoad"
+        @load="onScreenImgLoad"
         @error="onScreenError"
+        @click="onScreenClick"
+        @mousemove="onScreenMove"
+        @wheel="onScreenWheel"
+        @keydown="onScreenKey"
+        tabindex="0"
       />
     </template>
     <div v-else-if="macView === 'terminal'" class="term-wrap">

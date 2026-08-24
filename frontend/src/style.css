@@ -2616,6 +2616,43 @@ footer .image-preview-row {
   height: 100%;
   object-fit: contain;
 }
+.mac-screen-video.remote-on {
+  cursor: crosshair;
+  outline: 2px solid var(--accent, #4f8cff);
+  outline-offset: -2px;
+}
+.mac-remote-bar {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 20px;
+  color: #fff;
+  font-size: 13px;
+}
+.mac-remote-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+.mac-remote-hint {
+  color: #9fe0a0;
+}
+.mac-remote-err {
+  color: #ff9d9d;
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* 우측 하단 닫기 X 하나만 — 영상 위에 떠 있음 */
 .mac-ov-close {
   position: absolute;

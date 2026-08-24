@@ -636,6 +636,69 @@ async def mac_screen(display: int = 1, max_px: int = 1600):
         return Response(content=str(err).encode(), status_code=500)
 
 
+@router.post("/mac/input")
+async def mac_input(req: Request):
+    """macOS 원격제어 입력(마우스/키보드). '손쉬운 사용' 권한이 필요하다."""
+    if sys.platform != "darwin":
+        return Response(content=b"unsupported", status_code=501)
+    body = await req.json()
+    kind = body.get("type")  # move | click | scroll | key | text
+    x = body.get("x")
+    y = body.get("y")
+    button = body.get("button", "left")
+    clicks = int(body.get("clicks", 1))
+    dx = body.get("dx", 0)
+    dy = body.get("dy", 0)
+    key = body.get("key")
+    text = body.get("text")
+
+    # 마우스(이동/클릭/스크롤)는 cliclick 바이너리가 필요하다. 없으면 cryptic 실패 대신
+    # 설치 안내를 명확히 반환한다(키보드/텍스트는 osascript라 cliclick 없이도 동작).
+    if kind in ("move", "click", "scroll") and not shutil.which("cliclick"):
+        return Response(
+            content="cliclick 미설치 — 마우스 제어를 쓰려면 'brew install cliclick' 후 백엔드를 재시작하세요.".encode(),
+            status_code=503,
+        )
+
+    try:
+        if kind == "move":
+            await _mac_run(["cliclick", f"m:{int(x)},{int(y)}"])
+        elif kind == "click":
+            b = {"left": "c", "right": "rc", "middle": "dc"}.get(button, "c")
+            await _mac_run(["cliclick", f"{b}:{int(x)},{int(y)}"])
+        elif kind == "scroll":
+            # dy>0 위로 스크롤, dy<0 아래로
+            await _mac_run(["cliclick", f"w:{int(dy)}"])
+        elif kind == "key":
+            await _mac_run(["osascript", "-e",
+                f'tell application "System Events" to key code {int(key)}'])
+        elif kind == "text":
+            # 텍스트는 클립보드 경유로 안전하게 입력
+            await _mac_run(["osascript", "-e",
+                f'set the clipboard to "{_esc_apple(text)}"'])
+            await _mac_run(["osascript", "-e",
+                'tell application "System Events" to keystroke "v" using command down'])
+        else:
+            return Response(content=f"unknown type: {kind}".encode(), status_code=400)
+        return {"ok": True}
+    except Exception as err:
+        return Response(content=str(err).encode(), status_code=500)
+
+
+def _esc_apple(s: str) -> str:
+    return (s or "").replace("\\", "\\\\").replace('"', '\\"')
+
+
+async def _mac_run(args):
+    proc = await asyncio.create_subprocess_exec(
+        *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await asyncio.wait_for(proc.communicate(), timeout=8)
+    if proc.returncode != 0:
+        msg = stderr.decode(errors="ignore").strip() or "command failed"
+        raise RuntimeError(msg)
+
+
 @router.post("/push/subscribe")
 async def push_subscribe(req: Request):
     body = await req.json()
