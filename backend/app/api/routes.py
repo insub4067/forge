@@ -179,6 +179,18 @@ async def resume_run(session_id: str, workspace_path: str | None) -> None:
         runtime.cleanup_session(session_id)
 
 
+def _describe_error(err: Exception) -> str:
+    """예외를 사람이 읽을 수 있는 한 줄로. httpx 스트리밍 예외(연결 끊김·타임아웃)와
+    CancelledError는 str()이 빈 문자열이라, 그대로 두면 "중단했습니다: " 뒤가 비어 원인을
+    알 수 없었다(실측). 빈 메시지면 타입명으로 대체하고, 네트워크류는 친화적 문구로 바꾼다."""
+    import httpx as _httpx
+    if isinstance(err, (_httpx.RemoteProtocolError, _httpx.ReadError, _httpx.ReadTimeout,
+                        _httpx.ConnectError, _httpx.WriteError, _httpx.StreamError)):
+        return "모델 응답 스트림이 끊겼습니다(네트워크 불안정). 다시 시도해 주세요."
+    text = str(err).strip()
+    return text or f"{type(err).__name__}"
+
+
 def _inline_upload(url: str) -> str:
     """`/uploads/<name>` URL을 base64 data URI로 바꾼다.
 
@@ -280,15 +292,16 @@ async def chat(req: Request):
             await store.save_history(session_id, new_history)
             await _notify_done(session_id, new_history)
         except Exception as err:
-            error_log.record("agent_run", str(err), session_id)
+            msg = _describe_error(err)
+            error_log.record("agent_run", msg, session_id)
             # 크래시해도 응답이 조용히 사라지지 않게 오류 메시지를 히스토리에 남긴다.
             history.append({
                 "role": "assistant",
-                "content": f"작업 중 오류가 발생해 중단했습니다: {str(err)[:300]}",
+                "content": f"작업 중 오류가 발생해 중단했습니다: {msg[:300]}",
             })
             await store.save_history(session_id, history)
             await queue.put(
-                {"seq": 0, "type": "error", "data": {"message": str(err)}}
+                {"seq": 0, "type": "error", "data": {"message": msg}}
             )
         finally:
             await store.mark_running(session_id, False)

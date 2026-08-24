@@ -67,3 +67,28 @@ if __name__ == "__main__":
         if n.startswith("test_") and callable(f):
             f()
     print("첨부 이미지 전달 테스트 통과 ✓")
+
+
+def test_describe_error_never_empty():
+    """중단 메시지가 절대 비지 않는다 — httpx 스트리밍 예외·CancelledError는 str()이 빈
+    문자열이라, 그대로 두면 '중단했습니다: ' 뒤가 비어 원인을 알 수 없었다(실측 사고)."""
+    import asyncio
+    import httpx
+    from app.api.routes import _describe_error
+
+    # 네트워크류 → 친화적 문구
+    for exc in (httpx.RemoteProtocolError(""), httpx.ReadError(""), httpx.ReadTimeout(""),
+                httpx.ConnectError("")):
+        msg = _describe_error(exc)
+        assert "스트림이 끊겼" in msg and "다시 시도" in msg, (type(exc).__name__, msg)
+
+    # 빈 메시지 예외 → 최소한 타입명은 남는다(빈 문자열 금지)
+    assert _describe_error(ValueError("")) == "ValueError"
+    assert _describe_error(asyncio.CancelledError()) == "CancelledError"
+
+    # 정상 메시지는 그대로 보존
+    assert _describe_error(RuntimeError("DeepSeek API 오류 400")) == "DeepSeek API 오류 400"
+
+    # 어떤 예외든 결과가 비지 않는다
+    for exc in (Exception(), RuntimeError(""), KeyError()):
+        assert _describe_error(exc).strip(), type(exc).__name__
