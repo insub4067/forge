@@ -404,25 +404,65 @@ async function onPullEnd() {
   }
 }
 
-let touchStartX = 0
-let touchStartY = 0
-function onRoomTouchStart(e) {
-  touchStartX = e.touches[0].clientX
-  touchStartY = e.touches[0].clientY
+// 손가락을 따라 실시간 이동하는 드래그 추적 스와이프.
+// touchmove 중 transform을 직접 갱신하고, touchend에서 이동 거리·방향으로 열림/닫힘을 결정한다.
+const SWIPE_DEL_W = 84
+let swipeEl = null          // 드래그 중인 아이템 DOM
+let swipeKey = null         // 'r:<id>' | 'j:<id>'
+let swipeStartX = 0
+let swipeStartY = 0
+let swipeActive = false     // 가로 스와이프로 확정됨
+let swipeFromOpen = false   // 시작 시 이미 열려 있었나
+let swipeX = 0              // 현재 translateX
+function swipeIsOpen(key) {
+  const isRoom = key.startsWith('r:')
+  return isRoom ? swipedRoomId.value === key.slice(2) : swipedJobId.value === key.slice(2)
 }
-function onRoomTouchEnd(r, e) {
-  const dx = e.changedTouches[0].clientX - touchStartX
-  const dy = e.changedTouches[0].clientY - touchStartY
-  if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
-    swipedRoomId.value = dx < 0 ? r.id : null
-  }
+function onSwipeStart(key, e) {
+  if (swipeEl) return
+  const t = e.touches[0]
+  swipeStartX = t.clientX
+  swipeStartY = t.clientY
+  swipeEl = e.currentTarget
+  swipeKey = key
+  swipeActive = false
+  swipeFromOpen = swipeIsOpen(key)
+  swipeEl.style.transition = 'none'
+  swipeEl.style.transform = swipeFromOpen ? `translateX(${-SWIPE_DEL_W}px)` : ''
+  swipeX = swipeFromOpen ? -SWIPE_DEL_W : 0
 }
-function onJobTouchEnd(j, e) {
-  const dx = e.changedTouches[0].clientX - touchStartX
-  const dy = e.changedTouches[0].clientY - touchStartY
-  if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
-    swipedJobId.value = dx < 0 ? j.id : null
+function onSwipeMove(e) {
+  if (!swipeEl) return
+  const t = e.touches[0]
+  const dx = t.clientX - swipeStartX
+  const dy = t.clientY - swipeStartY
+  if (!swipeActive) {
+    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
+    if (Math.abs(dy) > Math.abs(dx)) { resetSwipe(); return }  // 세로 스크롤로 판정 → 취소
+    swipeActive = true
   }
+  e.preventDefault()  // 스와이프 중 세로 스크롤·고무줄을 막는다
+  swipeX = Math.max(-SWIPE_DEL_W, Math.min(0, (swipeFromOpen ? -SWIPE_DEL_W : 0) + dx))
+  swipeEl.style.transform = `translateX(${swipeX}px)`
+}
+function onSwipeEnd() {
+  if (!swipeEl || !swipeActive) { resetSwipe(); return }
+  const open = swipeX <= -SWIPE_DEL_W / 2
+  const id = swipeKey.slice(2)
+  if (swipeKey.startsWith('r:')) swipedRoomId.value = open ? id : null
+  else swipedJobId.value = open ? id : null
+  swipeEl.style.transition = 'transform .22s cubic-bezier(.22,1,.36,1)'
+  swipeEl.style.transform = open ? `translateX(${-SWIPE_DEL_W}px)` : ''
+  resetSwipe()
+}
+function onSwipeCancel() { resetSwipe() }
+function resetSwipe() {
+  if (swipeEl) { swipeEl.style.transition = ''; swipeEl.style.transform = '' }
+  swipeEl = null
+  swipeKey = null
+  swipeActive = false
+  swipeFromOpen = false
+  swipeX = 0
 }
 
 // ─── 방 메뉴(이름 변경·워크스페이스·삭제) ───
@@ -526,8 +566,10 @@ watch(
               class="room-item"
               :class="{ active: r.id === currentRoomId, swiped: swipedRoomId === r.id }"
               @click="selectRoom(r.id)"
-              @touchstart="onRoomTouchStart"
-              @touchend="onRoomTouchEnd(r, $event)"
+              @touchstart="onSwipeStart('r:' + r.id, $event)"
+              @touchmove="onSwipeMove"
+              @touchend="onSwipeEnd"
+              @touchcancel="onSwipeCancel"
             >
               <span v-if="r.running" class="room-spinner" title="작업 중"></span>
               <span v-else-if="r.final_status" class="room-status" :class="statusClass(r.final_status)" :title="r.final_status"></span>
@@ -558,8 +600,10 @@ watch(
             <div
               class="job-item"
               :class="{ off: !j.enabled, swiped: swipedJobId === j.id }"
-              @touchstart="onRoomTouchStart"
-              @touchend="onJobTouchEnd(j, $event)"
+              @touchstart="onSwipeStart('j:' + j.id, $event)"
+              @touchmove="onSwipeMove"
+              @touchend="onSwipeEnd"
+              @touchcancel="onSwipeCancel"
             >
               <div class="job-main">
                 <div class="job-name">{{ j.name }}</div>

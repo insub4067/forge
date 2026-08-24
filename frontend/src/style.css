@@ -280,6 +280,7 @@ header .todo-btn {
   background: var(--panel);
   transition: transform 0.2s;
   position: relative;
+  touch-action: pan-y;
 }
 
 .room-item.swiped {
@@ -2482,6 +2483,7 @@ footer .image-preview-row {
   background: var(--panel);
   position: relative;
   transition: transform 0.2s;
+  touch-action: pan-y;
 }
 .job-item.swiped {
   transform: translateX(-84px);
