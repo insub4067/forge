@@ -96,6 +96,7 @@ async def get_room(session_id: str) -> dict | None:
             "workspace_locked": sess.workspace_locked,
             "mode": sess.mode,
             "used_tokens": sess.used_tokens,
+            "auto_approve": sess.auto_approve,
         }
 
 
@@ -199,6 +200,7 @@ async def list_rooms() -> list[dict]:
                 "running": sess.running,
                 "final_status": sess.final_status,
                 "scheduled": sess.id in job_sids,
+                "auto_approve": sess.auto_approve,
             }
             for sess, count in result.all()
         ]
@@ -481,6 +483,13 @@ def merge_gates(existing: list[dict], incoming: list[dict]) -> list[dict]:
                 "evidence": "{}",
                 "failure_reason": str(g.get("failure_reason") or ""),
             })
+    # append-preserving(P0-2): 모델이 payload에서 빠뜨린 기존 gate는 조용히 삭제하지 않고
+    # 그대로 보존한다. 요구사항을 실수로 누락하는 것만으로 완료 조건(gate)이나 process-owned
+    # evidence(passed/failed)가 사라지면 안 된다. 제거가 필요하면 모델이 그 gate를 다시 보내며
+    # status=abandoned로 명시 전이해야 한다(그건 위 incoming 경로에서 처리·기록된다).
+    for e in existing:
+        if e.get("id") not in used:
+            out.append(dict(e))
     return out
 
 

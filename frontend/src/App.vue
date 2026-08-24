@@ -518,12 +518,13 @@ async function selectRoom(id, isNew = false) {
   await loadTasks()
   await loadGates()
   await loadRefinements()
-  // 승인 정책을 UI 토글에 맞춰 세션에 sync — 다른 경로로 시작된 세션도 "자동 승인"이 실제
-  // 반영되게(예전엔 UI는 on인데 세션은 여전히 물어봐서 어긋났다).
-  fetch(`/api/sessions/${id}/auto-approve`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled: autoApprove.value }),
-  }).catch(() => {})
+  // 승인 정책은 '읽기'로 수렴한다 — 세션 전환은 정책을 쓰는 동작이 아니다(권한 확대 금지).
+  // 서버에 저장된 이 세션의 auto_approve를 UI에 반영. 사용자가 토글을 직접 바꿀 때만 POST한다.
+  const r = currentRoom()
+  if (r && typeof r.auto_approve === 'boolean') {
+    autoApprove.value = r.auto_approve
+    localStorage.setItem('forge_auto_approve', r.auto_approve ? '1' : '0')
+  }
   checkRunning()
 }
 
@@ -1875,7 +1876,7 @@ document.addEventListener('visibilitychange', () => {
         <p class="sheet-note">자동: 요청마다 작업/채팅 자동 판단 · 작업: 항상 코드 수정·검증·커밋 · 채팅: 읽기전용 대화</p>
         <input v-model="budgetUsd" @change="saveBudget" class="modal-field" type="number" min="0" step="0.5"
                inputmode="decimal" placeholder="작업 비용 상한 $ (비우면 기본 $2, 0=무제한)" />
-        <p class="sheet-note">작업 1회 비용이 이 상한을 넘으면 안전하게 중단합니다(runaway 비용 방지).</p>
+        <p class="sheet-note">작업 1회 비용이 이 상한을 넘으면 안전하게 중단합니다(runaway 비용 방지). 모든 세션 공통 기본값입니다.</p>
         <button class="sheet-save" @click="saveRoomSettings">저장</button>
       </div>
     </div>

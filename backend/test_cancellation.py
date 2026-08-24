@@ -30,3 +30,17 @@ async def test_host_normal_completion_still_works(tmp_path):
     sb = DockerSandbox(workspace=str(tmp_path))
     out = await sb._run_host("echo forge-ok", 30)
     assert "forge-ok" in out
+
+
+async def test_gate_verify_blocks_dangerous(tmp_path):
+    # P0-1: acceptance gate 검증은 bash와 동일한 안전 경계를 거친다 — 위험 명령은 실행 전 차단.
+    # (예전엔 gate가 host /bin/sh -c로 직접 나가 _is_dangerous·approval·sandbox를 우회했다.)
+    sb = DockerSandbox(workspace=str(tmp_path))
+    for bad in ["rm -rf /", "rm -rf ~", "git push --force origin main", ":(){ :|:& };:"]:
+        rc, out = await sb.run_verify(bad)
+        assert rc == 126 and "차단" in out, bad
+    # 정상 검증 명령은 (exit_code, output) 튜플을 반환한다(host 모드에서 실제 실행).
+    import app.sandbox.executor as ex
+    if ex.settings.sandbox_mode == "host":
+        rc, out = await sb.run_verify("echo GATE_OK")
+        assert rc == 0 and "GATE_OK" in out

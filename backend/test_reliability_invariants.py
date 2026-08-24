@@ -56,9 +56,10 @@ def make_rt(verify_states, dev_status="done", changed=True, change_from=1):
         return verify_states[min(i, len(verify_states) - 1)], "report"
     rt._verify = fake_verify
 
-    async def fake_autocommit(ws, goal, send, paths=None):
+    async def fake_autocommit(ws, goal, send, paths=None, push=True):
         committed["count"] += 1
         committed["paths"] = paths
+        committed["push"] = push
     rt._autocommit = fake_autocommit
 
     async def fake_finalize(sid, send):
@@ -100,7 +101,8 @@ async def main():
     # ── commit invariant + 3상태 완료 매핑 ──
     rt, c = make_rt(["passed"])
     assert await run_once(rt) == "completed" and c["count"] == 1
-    print("passed → completed + commit: OK")
+    assert c["push"] is True, "completed는 push까지"   # P0-3
+    print("passed → completed + commit + push: OK")
 
     rt, c = make_rt(["failed", "failed"])  # 지속 실패
     assert await run_once(rt) == "verification_failed" and c["count"] == 0
@@ -113,7 +115,8 @@ async def main():
     rt, c = make_rt(["unavailable"])  # 검증 대상 없음
     st = await run_once(rt)
     assert st == "completed_unverified" and c["count"] == 1, (st, c)
-    print("unavailable → completed_unverified + commit(성공으로 기록 안 함): OK")
+    assert c["push"] is False, "completed_unverified는 로컬 commit만, push 금지"  # P0-3
+    print("unavailable → completed_unverified + commit + NO push: OK")
 
     # bounded repair: failed가 지속돼도 _verify 호출은 2회(최초+수리 후)뿐 — 무한 루프 없음
     rt, c = make_rt(["failed", "failed", "failed"])
@@ -135,27 +138,14 @@ async def main():
     assert c["paths"] == ["app.py"], c["paths"]
     print("커밋 경로는 에이전트가 바꾼 파일뿐: OK")
 
-    # ── 이어붙이기: 선언만 하고 멈춘 턴을 프로세스가 한 번 밀어준다 ──
-    # ("제거하겠습니다"만 하고 도구를 안 불러 run이 끝나던 문제 — 사용자가 물어야 이어지던 것.)
-    rt, c = make_rt(["passed"], changed=True, change_from=2)
-    st = await run_once(rt)
-    assert st == "completed", st
-    assert c["dev_calls"] == 2, c["dev_calls"]      # 원 1회 + 이어붙임 1회에 변경 발생 → 즉시 종료
-    print("변경 없이 끝나려 하면 이어붙이고, 변경 생기면 즉시 완료: OK")
-
-    # 진전(파일 변경)이 생기면 남은 상한을 쓰지 않고 바로 빠져나온다
-    rt, c = make_rt(["passed"], changed=True, change_from=3)
-    st = await run_once(rt)
-    assert st == "completed" and c["dev_calls"] == 3, c["dev_calls"]  # 원 1 + nudge 2에서 변경
-    print("상한(2회)까지 이어붙여 변경 유도: OK")
-
-    # 상한까지 이어붙여도 변경 0이면 멈추고 정직하게 끝낸다(무한 루프 없음)
+    # ── 변경 0건이면 continue_nudge 없이 정직하게 끝낸다 ──
+    # (넛지는 제거됨 — Ox 겨냥 레거시. 이제 재촉 없이 한 번에 끝내고, 완료 판정은 gate가 한다.)
     rt, c = make_rt(["passed"], changed=False)
     st = await run_once(rt)
     assert st == "completed_unverified", st
-    assert c["dev_calls"] == 1 + A.NUDGE_MAX, c["dev_calls"]  # 원 1 + 상한
-    assert c["count"] == 0
-    print(f"이어붙임 상한 {A.NUDGE_MAX}회 + 그래도 변경 0 → completed_unverified: OK")
+    assert c["dev_calls"] == 1, c["dev_calls"]   # 재촉 없이 developer 1회로 끝
+    assert c["count"] == 0                        # 변경 0건이면 커밋/푸시 없음
+    print("변경 0건 → developer 1회(재촉 없음) → completed_unverified + NO commit: OK")
 
     # ── 칸반 강제: planner 계획 → 태스크 자동 추출 ──
     plan = "## 계획\n1. 모델 라우터에 planner 추가\n2) 역할 프롬프트 작성\n3. 테스트\n\n## 완료 조건\n1. 전부 통과"

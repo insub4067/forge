@@ -507,6 +507,12 @@ class AgentRuntime:
         return measured_input > budget * CONTEXT_COMPACT_RATIO
 
     @staticmethod
+    def _effective_budget(override: float | None, default: float) -> float:
+        """세션별 예산 override 해석(순수): None=미설정→default, 0=무제한, 양수=cap.
+        0.0이 falsy라 'x or default'로 하면 0(무제한)이 default로 새는 버그를 막는다."""
+        return override if override is not None else default
+
+    @staticmethod
     def _over_budget(spent: float, cap: float) -> bool:
         """예산 판정(순수) — 상한 cap이 설정(>0)돼 있고 누적 비용이 넘으면 True. cap 0이면 무제한."""
         return bool(cap) and cap > 0 and spent > cap
@@ -1098,7 +1104,8 @@ class AgentRuntime:
                     incr = metrics_calc.run_cost(
                         route["model"], hit, miss, usage.get("completion_tokens", 0)) or 0.0
                     self._run_cost[session_id] = self._run_cost.get(session_id, 0.0) + incr
-                    cap = self._budget.get(session_id) or settings.session_budget_usd
+                    cap = self._effective_budget(
+                        self._budget.get(session_id), settings.session_budget_usd)
                     if self._over_budget(self._run_cost[session_id], cap):
                         await send("budget_exceeded", {
                             "spent": round(self._run_cost[session_id], 4), "cap": cap})
@@ -1345,8 +1352,11 @@ class AgentRuntime:
             error_log.record("mark_verifying", str(err), session_id)
 
     async def _autocommit(self, ws: str, goal: str, send: EventSink,
-                          paths: list[str] | None = None) -> None:
-        """성공 완료 시 git 워크스페이스면 자동 commit(+push) — 커밋 누락 방지.
+                          paths: list[str] | None = None, push: bool = True) -> None:
+        """성공 완료 시 git 워크스페이스면 자동 commit(+선택적 push) — 커밋 누락 방지.
+
+        push=False면 로컬 commit만 하고 origin push는 하지 않는다 — 미검증(completed_unverified)
+        결과가 자동으로 원격에 나가지 않게 하는 안전장치(검증된 것만 배포 경로로).
 
         **에이전트가 실제로 바꾼 경로만** stage·commit한다. `git add -A`는 사람이 편집 중이던
         미커밋 변경까지 에이전트 커밋으로 밀어 올려 push해 버린다(실제 사고 2건).
@@ -1396,10 +1406,11 @@ class AgentRuntime:
             rc, _ = await _g("commit", "-m", msg, "--", *rel, timeout=30)
             committed = rc == 0
             pushed = False
-            if committed:
+            if committed and push:
                 rc, _ = await _g("push", timeout=90)
                 pushed = rc == 0
-            await send("autocommit", {"committed": committed, "pushed": pushed, "message": msg})
+            await send("autocommit", {"committed": committed, "pushed": pushed, "message": msg,
+                                      "push_skipped": committed and not push})
         except Exception as err:
             error_log.record("autocommit", str(err), "")
 
@@ -1561,15 +1572,17 @@ class AgentRuntime:
         gates = await store.list_gates(session_id)
         if not gates:
             return "none", ""
-        import shutil
 
-        async def _sh(command: str, cwd: str, timeout: int = 120) -> tuple[int, str]:
+        # gate 검증은 bash 도구와 '동일한' 안전 경계로 실행한다(P0-1: host /bin/sh 직접 실행 제거).
+        # DockerSandbox.run_verify가 _is_dangerous·sandbox_mode·workspace 한정·timeout·취소 정리를
+        # 적용하고 (exit_code, output)을 반환한다. gate가 bash보다 높은 권한을 갖지 못한다.
+        sandbox = DockerSandbox(workspace=ws)
+
+        async def _sh(command: str, cwd: str = "", timeout: int = 120) -> tuple[int, str]:
             try:
-                proc = await asyncio.create_subprocess_exec(
-                    "/bin/sh", "-c", command, cwd=cwd,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-                out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-                return proc.returncode, out.decode(errors="replace")
+                return await sandbox.run_verify(command, timeout=timeout)
+            except asyncio.CancelledError:
+                raise
             except Exception as err:
                 return -1, f"실행 오류: {err}"
 
@@ -1855,8 +1868,11 @@ class AgentRuntime:
                 # working에 가둬 멈춘 것처럼 보였다. 완료면 칸반도 완료로 마감한다.
                 await self._finalize_tasks(session_id, send)
                 # 자동 커밋은 이번 run에 실제 변경이 있을 때만(빈 커밋 방지).
+                # push는 completed(충분히 검증됨)만 — completed_unverified(검증 대상 없음/일부 게이트
+                # 미검증)는 로컬 commit만 하고 origin에 자동 배포하지 않는다(검증된 것만 배포 경로).
                 if state["files_changed"]:
-                    await self._autocommit(ws, goal, send, state["files_changed"])
+                    await self._autocommit(ws, goal, send, state["files_changed"],
+                                           push=(status == "completed"))
             # done 이벤트를 보내면서 세션 final_status를 영속화(성공 정의·집계 기준).
             if session_id:
                 await store.set_session_final_status(session_id, status)

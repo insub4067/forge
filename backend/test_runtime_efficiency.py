@@ -106,6 +106,32 @@ def test_project_shrinks_after_compaction():
     print("OK projection shrinks after compaction (10-11)")
 
 
+def test_merge_gates_ledger():
+    # P0-2: 한번 생성된 acceptance gate는 모델이 payload에서 누락하는 것만으로 삭제되지 않는다.
+    # process-owned evidence(passed/failed)는 모델 재선언으로 되돌아가지 않는다.
+    from app.db.store import merge_gates
+    existing = [
+        {"id": 1, "title": "A", "description": "", "verification_method": "", "expected_result": "",
+         "status": "passed", "evidence": '{"x":1}', "failure_reason": ""},
+        {"id": 2, "title": "B", "description": "", "verification_method": "", "expected_result": "",
+         "status": "pending", "evidence": "{}", "failure_reason": ""},
+        {"id": 3, "title": "C", "description": "", "verification_method": "", "expected_result": "",
+         "status": "failed", "evidence": '{"y":2}', "failure_reason": "boom"},
+        {"id": 4, "title": "D", "description": "", "verification_method": "", "expected_result": "",
+         "status": "working", "evidence": "{}", "failure_reason": ""},
+    ]
+    # 모델이 A/B/C만 재전송(D 누락) + passed A를 working으로, failed C를 working으로 되돌리려 시도
+    incoming = [{"title": "A", "status": "working"},
+                {"title": "B", "status": "working"},
+                {"title": "C", "status": "working"}]
+    out = {g["title"]: g for g in merge_gates(existing, incoming)}
+    assert "D" in out and out["D"]["id"] == 4, "누락된 gate D는 삭제되지 않고 보존"
+    assert out["A"]["status"] == "passed" and out["A"]["evidence"] == '{"x":1}', "passed+evidence 보호"
+    assert out["C"]["status"] == "failed" and out["C"]["evidence"] == '{"y":2}', "failed+evidence 보호"
+    assert out["B"]["status"] == "working", "pending은 모델이 갱신 가능"
+    print("OK gate ledger append-preserving + evidence 보호 (P0-2)")
+
+
 def test_over_budget():
     # 예산 가드레일 판정: 상한이 설정(>0)돼 있고 누적 비용이 넘으면 중단.
     ob = AgentRuntime._over_budget
@@ -114,7 +140,15 @@ def test_over_budget():
     assert ob(5.0, 0) is False         # 상한 0 = 무제한
     assert ob(5.0, 0.0) is False       # 0.0도 무제한
     assert ob(1.0, 1.0) is False       # 경계(같음) → 아직 안 넘음
-    print("OK 예산 가드레일 판정")
+    # 세션 override 해석: None=default, 0=무제한, 양수=cap (P0-5: 0이 default로 새면 안 됨)
+    eb = AgentRuntime._effective_budget
+    assert eb(None, 2.0) == 2.0        # 미설정 → default
+    assert eb(0.0, 2.0) == 0.0         # 0 → 무제한(0 유지, default로 안 샘)
+    assert eb(1.5, 2.0) == 1.5         # 양수 → 그 값
+    # 결합: override 0이면 아무리 써도 안 넘음(무제한)
+    assert ob(999.0, eb(0.0, 2.0)) is False
+    assert ob(2.5, eb(None, 2.0)) is True   # 미설정 → default 2.0 초과
+    print("OK 예산 가드레일 판정 + override(0=무제한)")
 
 
 def test_drop_orphan_tools():
@@ -181,6 +215,7 @@ if __name__ == "__main__":
     test_skill_selection()
     test_stable_prefix()
     test_project_shrinks_after_compaction()
+    test_merge_gates_ledger()
     test_over_budget()
     test_drop_orphan_tools()
     test_browser_check_local_only()

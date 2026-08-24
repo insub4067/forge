@@ -148,8 +148,8 @@ def _make_run_rt(gates, verify_states):
 
     rt._verify = fake_verify
 
-    async def fake_autocommit(ws, goal, send, files):
-        commits.append(list(files))
+    async def fake_autocommit(ws, goal, send, files, push=True):
+        commits.append({"files": list(files), "push": push})
     rt._autocommit = fake_autocommit
 
     async def noop(*a, **k):
@@ -220,8 +220,9 @@ async def test_run_partial_gate_honest():
     assert data.get("status") == "completed_unverified", data
     # 미완료 gate를 조용히 생략하지 않는다(정직 표기).
     assert "다크모드" in data.get("content", ""), data
-    assert commits != [], commits  # completed_unverified는 커밋 대상
-    print("run(partial gate): OK — 부분 통과는 completed_unverified + 미완료 gate 명시")
+    assert commits != [], commits  # completed_unverified는 로컬 커밋 대상
+    assert commits[0]["push"] is False, "completed_unverified는 push 금지(P0-3)"
+    print("run(partial gate): OK — completed_unverified + 미완료 gate 명시 + NO push")
 
 
 async def test_run_integration_fail_blocks():
@@ -240,7 +241,8 @@ async def test_run_gate_all_passed_completed():
     data = await _run_rt(rt)
     assert data.get("status") == "completed", data
     assert commits != [], commits
-    print("run(all passed): OK — 전부 통과 시 completed")
+    assert commits[0]["push"] is True, "completed는 commit+push(P0-3)"
+    print("run(all passed): OK — 전부 통과 시 completed + push")
 
 
 async def main():

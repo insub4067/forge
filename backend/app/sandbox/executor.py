@@ -107,3 +107,69 @@ class DockerSandbox:
                 pass
             raise
         return stdout.decode(errors="replace")
+
+    async def run_verify(self, command: str, timeout: int = 120) -> tuple[int, str]:
+        """acceptance gate 검증 명령 실행 — bash 도구와 '동일한' 안전 경계를 적용하고
+        (exit_code, output)을 반환한다. gate가 host /bin/sh로 직접 나가 승인·sandbox·
+        dangerous-command 정책을 우회하던 구멍(P0-1)을 막는다: _is_dangerous 차단,
+        sandbox_mode 준수(docker면 컨테이너·network none·workspace 마운트, host면 그룹세션),
+        timeout, 취소 시 프로세스 그룹 정리. bash보다 높은 권한을 갖지 않는다."""
+        if _is_dangerous(command):
+            return 126, "(차단됨: 파괴적/위험 명령으로 판단되어 실행하지 않았습니다.)"
+        if settings.sandbox_mode == "host":
+            return await self._run_host_checked(command, timeout)
+        args = [
+            "docker", "run", "--rm", "--network", "none",
+            "--memory", "512m", "--cpus", "1", "--pids-limit", "256",
+            "--user", "1000:1000",
+            "-v", f"{self.workspace}:/workspace",   # bash(write=True)와 동일 권한 — 그 이상 아님
+            "-w", "/workspace",
+            self.image, "bash", "-c", command,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            return 124, f"(타임아웃 {timeout}초 초과, 강제 종료)"
+        except asyncio.CancelledError:
+            proc.kill()
+            try:
+                await proc.communicate()
+            except Exception:
+                pass
+            raise
+        return proc.returncode, stdout.decode(errors="replace")
+
+    async def _run_host_checked(self, command: str, timeout: int) -> tuple[int, str]:
+        """_run_host와 같되 (exit_code, output)을 반환한다(gate 검증용). 프로세스 그룹으로
+        실행해 타임아웃·취소 시 자식까지 정리한다."""
+        import os
+        import signal
+        real_cmd = command.replace("/workspace", self.workspace)
+        proc = await asyncio.create_subprocess_shell(
+            real_cmd, cwd=self.workspace,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            start_new_session=True,
+        )
+        def _kill_group():
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except Exception:
+                proc.kill()
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            _kill_group()
+            await proc.communicate()
+            return 124, f"(타임아웃 {timeout}초 초과, 강제 종료)"
+        except asyncio.CancelledError:
+            _kill_group()
+            try:
+                await proc.communicate()
+            except Exception:
+                pass
+            raise
+        return proc.returncode, stdout.decode(errors="replace")
