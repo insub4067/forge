@@ -2412,8 +2412,10 @@ class AgentRuntime:
         gstate = s.get("gate_state")
         vstate = s.get("generic_verification")
 
-        lines = ["완료했습니다." if s.get("status") == "completed"
-                 else "작업은 완료했습니다. 다만 일부 항목은 검증하지 못했습니다."]
+        # 헤더 앞뒤로 빈 줄 — 앞선 진행 설명과 최종 보고를 떼어 놓고, 결론과 근거 목록도
+        # 붙어 읽히지 않게 한다(모바일에서 한 덩어리로 뭉쳐 보였다).
+        lines = ["", "완료했습니다." if s.get("status") == "completed"
+                 else "작업은 완료했습니다. 다만 일부 항목은 검증하지 못했습니다.", ""]
         for r in verified:
             lines.append(f"✓ {r['title']}")
         for r in failed:

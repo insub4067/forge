@@ -133,7 +133,9 @@ def test_completion_summary_formatter():
                                        {"title": "실패메시지", "status": "passed"}],
              "unverified_requirements": [], "failed_requirements": [],
              "commit_status": True, "push_status": True})
-    assert r.startswith("완료했습니다.")
+    # 헤더 앞뒤 빈 줄 — 앞선 진행 설명·근거 목록과 결론이 붙어 읽히지 않게(모바일 가독성).
+    head = r.split("\n")
+    assert head[0] == "" and head[1] == "완료했습니다." and head[2] == "", head[:3]
     assert "✓ 로그인" in r and "✓ 실패메시지" in r
     assert "✓ 기존 테스트·빌드 통과" in r and "✓ 최종 회귀 확인" in r
     assert "commit·push 완료" in r
