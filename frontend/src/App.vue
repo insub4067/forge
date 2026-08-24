@@ -1245,8 +1245,8 @@ watch(input, (v) => {
   })
 })
 
-async function onFileChange(e) {
-  const files = Array.from(e.target.files || [])
+// 파일(이미지/텍스트) 처리 공통 경로 — 파일 선택(onFileChange)과 드래그앤드롭(onDrop)이 함께 사용
+async function handleFiles(files) {
   for (const file of files) {
     if (file.type.startsWith('image/')) {
       // 이미지 → 업로드(여러 장 누적)
@@ -1267,7 +1267,36 @@ async function onFileChange(e) {
       } catch {}
     }
   }
+}
+
+async function onFileChange(e) {
+  await handleFiles(Array.from(e.target.files || []))
   e.target.value = ''
+}
+
+// 드래그앤드롭 첨부
+const dragActive = ref(false)
+let dragCounter = 0
+
+function onDragOver(e) {
+  if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+    e.preventDefault()
+    dragCounter++
+    dragActive.value = true
+  }
+}
+
+function onDragLeave() {
+  dragCounter = Math.max(0, dragCounter - 1)
+  if (dragCounter === 0) dragActive.value = false
+}
+
+async function onDrop(e) {
+  e.preventDefault()
+  dragCounter = 0
+  dragActive.value = false
+  const files = Array.from(e.dataTransfer?.files || [])
+  if (files.length) await handleFiles(files)
 }
 
 function removeImage(idx) {
@@ -1591,7 +1620,7 @@ document.addEventListener('visibilitychange', () => {
         <span class="task-bar-count">{{ taskBar.pos }}/{{ taskBar.total }}</span>
       </div>
       <input ref="fileInput" type="file" multiple accept="image/*,.md,.txt,.log,.json,.csv,.yml,.yaml,.toml,.py,.js,.ts,.jsx,.tsx,.vue,.html,.css,.sh,.xml,.java,.go,.rs,.c,.cpp,.h,.sql,text/*" hidden @change="onFileChange" />
-      <div class="composer">
+      <div class="composer" :class="{ 'drag-over': dragActive }" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
     <div v-if="attachedText" class="file-chip">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
       <span class="file-chip-name">{{ attachedText.name }}</span>

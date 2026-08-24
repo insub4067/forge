@@ -1622,6 +1622,12 @@ footer .image-preview-row {
   border-color: var(--accent);
 }
 
+.composer.drag-over {
+  border-color: var(--accent);
+  border-style: dashed;
+  background: var(--accent-soft);
+}
+
 .composer-row {
   display: flex;
   align-items: center;
