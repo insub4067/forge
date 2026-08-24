@@ -1,137 +1,100 @@
-# FORGE Priority Roadmap
+# FORGE Roadmap Priority
 
-## 최상위 원칙
+> 2026-08-24 current source 기준. 이미 구현된 P0를 다시 계획하지 않는다.
 
-FORGE의 경쟁력은 "싼 모델"이 아니다.
+## North Star
 
-> **저렴한 모델을 강한 Harness로 통제해, 모델 단독 능력보다 높은 완료 신뢰성과 품질을 만드는 프로세스**가 핵심이다.
+> **“이 변경 때문에 사용자가 내일부터 FORGE에 더 자주 실제 일을 맡기고, 확인·개입 부담이 줄어드는가?”**
 
-따라서 모든 변경은 다음 순서로 평가한다.
+기능 수, agent 수, provider 수는 KPI가 아니다.
 
-```text
-1. success_rate / correctness
-2. verified completion reliability
-3. cost_per_success
-4. elapsed
-5. human intervention
-```
+## P0 — Daily-use Reliability / Dogfooding
 
-Flash 사용률이나 token 감소는 보조 지표다. 품질이 떨어지면 최적화가 아니다.
+현재 가장 가치 있는 일은 새로운 topology가 아니라 실사용에서 신뢰 결함을 잡는 것이다.
 
-# P0 — Verification / Completion Reliability
+- gate semantic coverage: 요구사항을 충분히 대표하는지 external checker와 비교
+- gate false-negative: 잘못된 gate가 맞는 코드를 막는 비율
+- false completion / unverified completion 추적
+- human intervention/ask_user/approval 빈도
+- Project Memory saved/rejected 품질
+- startup DB/schema/resume 오류가 broad exception에 묻히지 않게 가시성 강화
+- 모바일에서 activity/task/final report가 중복·과잉 표시되지 않는지 계속 dogfood
 
-현재 Strict Verification Gate가 구현됐다. 다음은 의미를 엄밀하게 만든다.
+성공 조건: 사용자가 “완료”를 다시 수동 검증하는 빈도와 작업 중 개입이 감소한다.
 
-- `PASSED / FAILED / UNAVAILABLE` 3상태
-- test runner/config 오류를 PASS로 오판하지 않음
-- failed/unavailable completion policy 명시
-- verification 실패 시 commit/push 금지 invariant
-- deterministic reliability regression test
+## P1 — Provider Independence
 
-# P1 — Durable Resume Safety
+현재 main은 DeepSeek only다. 다음 확장점은 새 Agent가 아니라 provider boundary다.
 
-실제 Auto Resume은 구현됐다. 다음 단계는 재시작이 권한 확대로 이어지지 않게 하는 것이다.
-
-- resume-safe approval/capability
-- 기존 승인 범위와 새 위험 작업 구분
-- resume 재충돌 loop guard 회귀 테스트
-- restart 지점별 deterministic test
-
-# P2 — Benchmark / Eval 확대
-
-현재 R0 21-task deterministic harness를 현실적인 난이도로 확대한다.
-
-- multi-file / integration / debugging / ambiguous task
-- long-running/resume failure mode
-- 동일 fixture로 model/harness 비교
-- 외부 Claude Code/Codex 등과 비교 가능한 공통 checker
-
-목표는 비용표가 아니라 **저가 모델 + Harness가 품질을 실제로 유지하는지 증명하는 것**이다.
-
-# P3 — Bounded RSI R1
-
-현재 promotion gate는 구현됐다.
-
-다음:
+최소 목표:
 
 ```text
-baseline
-→ candidate worktree
-→ 변경
-→ 동일 benchmark
-→ success/cost/elapsed gate
-→ report
-→ 사람 승인
+AgentRuntime
+→ Provider Adapter
+   ├─ DeepSeek
+   └─ OpenAI-compatible
 ```
 
-자동 main merge는 당분간 하지 않는다.
+내부 vLLM/SGLang 또는 다른 외부 provider를 같은 Harness에서 benchmark할 수 있게 한다. 과거 Ling/OpenRouter 실험의 실패를 무시하고 재도입하지 않는다.
 
-# P4 — Scheduled / Condition / Deferred Jobs
+승격 기준: verified success non-regression → cost_per_verified_task → elapsed.
 
-예약 기반은 구현 중이다. 제품 기능 추가보다 durable semantics를 먼저 완성한다.
+## P2 — Persistent Execution / Automation
 
-- restart
-- idempotency
-- timezone/DST
-- duplicate execution 방지
-- 실패/재시도 이력
-- Web Push 운영 검증
+현재 Auto Resume와 Scheduled Jobs는 동작한다. 다음은 “정확히 언제/누가 run을 소유하는가”를 더 단단하게 만드는 단계다.
 
-# P5 — Tool Script / RPC
+- Deferred/Condition watcher
+- condition state/idempotency
+- worker ownership/crash semantics
+- independent worker/queue가 필요한 범위만 PoC
+- scheduler/worker와 approval/budget 경계 통합
 
-읽기/탐색 왕복을 묶어 model call을 줄인다. 단, success rate를 유지한다는 benchmark가 선행돼야 한다.
+Temporal/Celery 같은 대형 workflow infra부터 넣지 않는다.
 
-# P6 — Evaluation-Driven Model Routing
+## P3 — Bounded Fresh Workers
 
-Flash-first/Pro escalation 정책을 고정 신념으로 두지 않는다. task class별 실제 성공률과 `cost_per_success`로 정책을 조정한다.
+Parallelism은 속도보다 **context isolation + verified throughput**을 위해서만 도입한다.
 
-Harness가 품질을 보장하기 때문에 싼 모델을 적극 사용할 수 있지만, 필요한 곳에서는 강한 모델을 쓰는 것이 맞다.
+초기:
 
-# P7 — Skills Optimization
+- read-only/research leaf
+- self-contained task packet
+- 2 workers 정도부터
+- file ownership/isolated worktree 없이는 동시 mutation 금지
+- final integration verification 필수
 
-Curated/Learned/Project 3-tier 구조는 구현됐다.
+10-agent swarm은 비목표다.
 
-다음은 Skill 수 증가가 아니라 효과 측정이다.
+## P4 — Tool / Execution Optimization
 
-- selected skill별 성공률
-- model/tool calls 변화
-- 비용/elapsed 변화
-- 반복적으로 무가치한 Skill 제거/병합
+- Tool Script/RPC: 실제 round-trip bottleneck이 재현될 때 A/B
+- ExecutionBackend(Local/Docker/SSH): remote target 요구가 생길 때 최소 interface
+- Web search/fetch: local source로 해결할 수 없는 최신 문서 요구가 반복될 때 safe bounded tool
 
-# P8 — ExecutionBackend / Security
+Architecture wishlist가 아니라 measured need로 시작한다.
 
-- Local/Host/Docker 경계 정리
-- 필요 시 SSHBackend
-- workspace/path invariant
-- Host Terminal/Screen/Camera authorization 지속 검증
-- secret/audit 정책
+## Deferred / Optional
 
-# P9 — Productization
+- Tauri Desktop host
+- WebRTC Screen/Camera
+- full browser/computer-use
+- home camera registry/condition detection
+- large plugin ecosystem
+- auto main merge
+- speculative decoding/on-prem tuning(실제 내부 inference hardware가 생길 때)
 
-Tauri Desktop Host, 배포/업데이트, App/PWA 경험은 Agent 품질 기반이 안정된 뒤 고도화한다.
+## Already Done — 다시 계획하지 말 것
 
-# 당분간 하지 않을 것
-
-- 실측 근거 없는 Vector DB
-- 역할 수를 늘리기 위한 Multi-Agent
-- 거대한 plugin framework
-- 자동 main merge RSI
-- 모델 자체 fine-tuning
-- Kubernetes/대규모 observability stack
-
-# 장기 목표
-
-```text
-저렴한 모델
-+ 최소한의 Agent 구조
-+ 강한 Tool 실행
-+ deterministic verification
-+ durable recovery
-+ benchmark-driven routing
-+ bounded self-improvement
-= 믿고 맡길 수 있는 autonomous development runtime
-```
-
-FORGE는 가장 싼 시스템을 목표로 하지 않는다.
-
-**같은 비용에서 더 많은 '검증된 성공 작업'을 만들고, 더 저렴한 모델에서도 결과 품질을 유지할 수 있는 Harness**를 목표로 한다.
+- verification 3-state
+- Acceptance Gate Ledger + recovery + completion policy
+- structured/persistent CompletionSummary
+- failed/unverified commit/push policy
+- resume-safe auto_approve/model_tier
+- fresh Planner/Reviewer context
+- large-file symbol tools/tool-result pruning
+- compaction persistence
+- evidence-bound Project Memory
+- R0 25 tasks / R1 candidate worktree/no-op reject
+- Scheduled one-shot/daily/interval foundations
+- MCP stdio high-level task facade
+- Mac Terminal/Screen/Input PoC

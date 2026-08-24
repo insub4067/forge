@@ -1,105 +1,93 @@
 # FORGE MCP 연결 가이드
 
-외부 AI 에이전트(Claude Desktop·Claude Code·Cursor·기타 MCP 클라이언트)를 FORGE에 연결해
-코딩 작업을 위임하는 방법. 설계·운영은 [`mcp-server.md`](mcp-server.md), 배경은
-[`../proposal/forge-mcp-agent-runtime.md`](../proposal/forge-mcp-agent-runtime.md).
+외부 MCP 클라이언트가 FORGE에 코딩 작업을 위임하는 방법. 운영 의미는 [`mcp-server.md`](mcp-server.md)를 먼저 본다.
 
-## 0. 선행 조건
+## 선행 조건
 
-- FORGE backend가 설치돼 있고 `.venv`가 준비됨(`backend/.venv`).
-- PostgreSQL 실행 중, `.env`에 `DEEP_SEEK_API_KEY` 설정(기존 backend와 동일).
-- MCP 서버는 별도 uvicorn 없이 단독 실행된다 — DB·API 키만 있으면 된다.
+- `backend/.venv` 준비
+- PostgreSQL 실행
+- `.env`에 DeepSeek API key 설정
 
-## 1. 연결 방식
+MCP 서버는 uvicorn 없이 독립 stdio process로 실행되지만 DB와 같은 Runtime 설정을 사용한다.
 
-FORGE MCP는 **stdio JSON-RPC 2.0** 서버다. 클라이언트가 프로세스를 띄우고 stdin/stdout으로
-통신한다. 실행은 래퍼 스크립트 하나로 끝난다(cwd 자동 처리):
+## 실행/등록
 
+직접:
+
+```bash
+cd /path/to/forge/backend
+.venv/bin/python -m app.mcp.server
 ```
-/Users/insub/Desktop/forge/backend/run_mcp.sh
-```
 
-## 2. 클라이언트별 등록
+`run_mcp.sh`를 쓰는 설치라면 client의 command를 그 스크립트로 지정한다.
 
-### Claude Desktop
-
-`claude_desktop_config.json`(macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`)에:
+Claude Desktop 예:
 
 ```json
 {
   "mcpServers": {
     "forge": {
-      "command": "/Users/insub/Desktop/forge/backend/run_mcp.sh"
+      "command": "/path/to/forge/backend/.venv/bin/python",
+      "args": ["-m", "app.mcp.server"],
+      "cwd": "/path/to/forge/backend"
     }
   }
 }
 ```
 
-저장 후 Claude Desktop 재시작. 도구 목록에 `forge_execute` 등이 뜨면 성공.
-
-### Claude Code (CLI)
+Claude Code 예:
 
 ```bash
-claude mcp add forge -- /Users/insub/Desktop/forge/backend/run_mcp.sh
+claude mcp add forge -- /path/to/forge/backend/run_mcp.sh
 ```
 
-`claude mcp list`로 확인, `/mcp`로 상태 조회.
-
-### Cursor / 기타 MCP 클라이언트
-
-대부분 `command` + `args`(옵션) 형식이다. command에 위 래퍼 경로를 지정한다.
-직접 파이썬을 지정하려면:
-
-```json
-{ "command": "/Users/insub/Desktop/forge/backend/.venv/bin/python",
-  "args": ["-m", "app.mcp.server"],
-  "cwd": "/Users/insub/Desktop/forge/backend" }
-```
-
-(래퍼를 쓰면 `cwd` 지정이 필요 없다.)
-
-## 3. 연결 검증 (클라이언트 없이 수동)
-
-터미널에서 직접 JSON-RPC를 흘려 확인한다:
+## 수동 연결 확인
 
 ```bash
 printf '%s\n%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-  | /Users/insub/Desktop/forge/backend/run_mcp.sh
+  | /path/to/forge/backend/run_mcp.sh
 ```
 
-`serverInfo.name == "forge"`와 도구 4개가 나오면 정상.
+`serverInfo.name == "forge"`와 도구 4개가 보이면 transport는 정상이다.
 
-## 4. 사용 흐름 (에이전트 관점)
+## 사용
 
-```
-forge_execute(goal="로그인 버그를 찾아 수정하고 테스트까지", workspace="/projects/app")
-   → { "task_id": "...", "status": "running" }        # 즉시 반환(비차단)
+```text
+forge_execute(goal, workspace, plan?, images?, auto_approve?)
+→ task_id
+
 forge_status(task_id)
-   → { "running": true, "role": "coder", ... }         # 진행 폴링
-forge_result(task_id)                                    # 완료 후
-   → { "final_status": "completed", "summary": "...", "cost": 0.001, "total_tokens": 13030 }
-forge_cancel(task_id)                                    # 필요 시 중단
+→ running / current role / waiting state
+
+forge_result(task_id)
+→ final_status / summary / cost / tokens
+
+forge_cancel(task_id)
 ```
 
-`goal`과 `workspace`는 필수. `auto_approve`(기본 false)를 true로 주면 쓰기·실행 도구를
-자동 승인한다 — 무인 위임에서만 신중히 사용.
+`plan`은 상위 agent가 계획을 제공할 때 사용한다. `images`는 로컬 이미지 절대경로 배열이다.
 
-## 5. 보안 주의
+## 재시작
 
-- 현재 **stdio(로컬) 전제**. 같은 사용자 계정에서 실행되며 별도 인증이 없다.
-- FORGE는 파일 쓰기·shell·git·host build 능력을 가진다. approval/sandbox/workspace 경계는
-  facade가 호출하는 AgentRuntime이 그대로 적용하지만, `auto_approve=true` + host 모드 조합은
-  강력하므로 신뢰하는 워크스페이스에만 위임한다.
-- **remote(HTTP) 노출은 아직 미구현**이다. 외부 네트워크에 열려면 토큰/정책 게이트가 선결
-  (`FORGE_AUTH_TOKEN` 유사 계층 + [`../proposal/forge-mcp-agent-runtime.md`](../proposal/forge-mcp-agent-runtime.md) §13).
+- `task_id`는 session id라 DB history/result와 연결된다.
+- FORGE `AUTO_RESUME=1`이면 서버 재시작으로 interrupted된 유효 workspace task를 동일 session에서 history 기반으로 재개한다.
+- MCP stdio client connection은 재연결해야 한다.
+- `final_status == resuming`에서 다시 죽은 run은 crash-loop 방지를 위해 자동 재재개하지 않는다.
 
-## 6. 트러블슈팅
+## 보안
 
-| 증상 | 원인·조치 |
+- stdio/local 전제, remote MCP는 미구현.
+- `auto_approve=true` + host mode는 높은 권한 조합이다.
+- 저수준 bash/write가 MCP tools에 안 보이는 것은 의도된 narrow capability surface다.
+
+## Troubleshooting
+
+| 증상 | 확인 |
 |---|---|
-| 도구 목록이 안 뜸 | 래퍼 경로·실행권한(`chmod +x run_mcp.sh`) 확인, `.venv` 존재 확인 |
-| `forge_execute` 후 결과 없음 | DB 연결·`DEEP_SEEK_API_KEY` 확인. `forge_status`로 role 진행 확인 |
-| task가 재시작 후 사라짐 | durability 미구현(알려진 한계) — `../proposal/durable-worker-resume.md` 참고 |
-| 저수준 도구(bash 등)가 안 보임 | 의도된 설계 — high-level 도구만 노출(§12) |
+| tools가 안 뜸 | command/cwd/.venv, `tools/list` 수동 호출 |
+| execute 후 진행 안 됨 | DB/API key, `forge_status`, backend error log |
+| 재시작 후 running=false | Auto Resume 조건(workspace 유효, crash-loop state 아님) 확인 |
+| result는 있는데 stdio가 끊김 | transport만 재연결 후 같은 task_id로 `forge_result` |
+| bash/write tool이 없음 | 정상 — high-level 4 tools만 노출 |

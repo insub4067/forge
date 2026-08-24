@@ -2,30 +2,23 @@
 
 FORGE 에이전트가 모든 채팅방에서 공통으로 참고하는 전역 메모리.
 
+> 보조 정보다. 현재 소스·설정과 충돌하면 반드시 현재 소스를 따른다.
+
 ## 프로젝트 규칙
 
-<!-- 공통 코딩 컨벤션, 기술 스택 제약 등을 여기에 기록 -->
-
-- 변수명·함수명은 영어, 커밋 메시지는 한국어
-- 구현 전에 계획을 세우고, 변경은 최소한으로
-- **응답은 핵심만 짧게.** 장황한 서술·중복 설명·불필요한 배경·자화자찬 금지.
-  결론과 다음 행동 위주로 몇 줄. 사용자는 긴 설명을 싫어한다("너무 길어").
+- 변수명·함수명은 영어, 커밋 메시지는 한국어.
+- 구현 전에 필요한 범위만 확인하고 변경은 최소화한다.
+- 응답은 핵심만 짧게. 결론, 검증 결과, 다음 행동을 우선한다.
+- 모델의 자기서술보다 process-owned test/gate/evidence를 우선한다.
 
 ## 반복 실패 기록
 
-<!-- 여러 방에서 반복되는 실패 패턴과 해결책 -->
-
-- **PWA 업데이트/캐시 stale 문제(해결됨)**: 수제 sw.js가 /assets를 cache-first로
-  캐싱해 새 배포가 화면에 반영되지 않았고, dist를 손으로 패치하는 잘못된 우회가
-  반복됐다. 해결: `vite-plugin-pwa`(workbox, registerType: autoUpdate)로 전환 —
-  배포마다 precache manifest가 갱신돼 새 버전을 확실히 감지·자동 교체한다
-  (trade-bot 프로젝트에서 검증된 구성). 앞으로 sw.js를 손으로 작성하거나
-  frontend/dist를 직접 수정하지 말 것 — 소스 수정 후 `npm run build`가 정답.
+- **PWA 업데이트/캐시 stale 문제(해결됨)**: 수제 sw.js가 `/assets`를 cache-first로 캐싱해 새 배포가 화면에 반영되지 않는 문제가 있었다. 현재는 `vite-plugin-pwa`/Workbox 기반으로 관리한다. `frontend/dist`를 손으로 패치하지 말고 소스를 수정한 뒤 `npm run build` 또는 FORGE의 `build_frontend`를 사용한다.
 
 ## 기술 결정
 
-<!-- 프로젝트 전반의 기술 결정 사항 -->
-
-- 백엔드: FastAPI + SQLAlchemy(async) + PostgreSQL
-- 프론트엔드: Vue3 + Vite (PWA)
-- LLM: DeepSeek (Adapter 추상화로 교체 가능)
+- 백엔드: FastAPI + SQLAlchemy(async) + PostgreSQL.
+- 프론트엔드: Vue 3 + Vite PWA.
+- LLM provider: 현재 main은 **DeepSeek only**. Adapter 경계는 있으나 OpenRouter/Ling은 현재 구현이 아니다.
+- 품질 authority: Generic Verification + Acceptance Gates + Integration Verification + process-owned CompletionSummary.
+- Project Memory는 evidence/provenance validation을 통과한 사실만 저장하며, 현재 소스가 memory보다 우선한다.

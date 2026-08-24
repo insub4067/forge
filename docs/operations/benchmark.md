@@ -2,61 +2,75 @@
 
 ## 목적
 
-Benchmark는 단순 비용 측정이 아니다.
+Benchmark는 비용 순위표가 아니다.
 
-> **저렴한 모델을 사용해도 Harness가 실제 결과 품질을 유지하는지 먼저 증명하고, 그 조건 안에서 성공 작업당 비용을 낮춘다.**
+> **Harness가 실제 결과 품질을 유지하는지 먼저 증명하고, 그 조건 안에서 성공 작업당 비용과 시간을 줄인다.**
 
 판단 순서:
 
-1. `success_rate` / deterministic correctness
-2. verification reliability
+1. deterministic correctness / verified success
+2. false-completion/verification reliability
 3. `cost_per_success`
 4. elapsed
 5. human intervention
 
-성공률이 후퇴한 후보는 비용이 낮아도 개선이 아니다.
-
 ## R0 Harness
 
-`backend/bench.py` + `backend/bench_tasks.py`는 격리 fixture에서 Agent를 실행하고 deterministic checker로 결과를 채점한다. 현재 25개 task가 있다.
+`backend/bench.py` + `backend/bench_tasks.py`는 임시 fixture workspace에서 Agent를 실행하고 **외부 deterministic checker**로 결과를 채점한다. 현재 **25개 task**다.
 
 ```bash
 cd backend
 python bench.py --self-test
-python bench.py --run --repeat 3
+python bench.py --run --repeat 3 --tier auto
 ```
 
-`test_bench_quality.py`가 checker와 task 품질을 검증한다. correctness authority로 LLM judge를 사용하지 않는다.
+`test_bench_quality.py`는 setup 직후 checker false, known fix 후 true 등을 검사해 checker false-positive/정답 노출을 방지한다. LLM judge는 correctness authority가 아니다.
+
+## Task 범위
+
+단일 파일 수정/bugfix뿐 아니라 다음을 포함한다.
+
+- multi-file feature/refactor
+- wrong import / recursive base case
+- failing-test debugging
+- ambiguous requirement
+- state persistence/restart 성격 task
+- frontend/backend 통합
+- 수정하지 않는 것이 정답인 task
+- 가정 검증/validation/config 등
+
+## Runtime variants
+
+현재 coding path는 **simple Developer 또는 auto complex Planner→Developer→fresh Reviewer**다. 과거 “항상 Planner” 또는 “Planner 없음” 실험 문구는 역사적이다.
+
+비교 시 세션 model tier(`auto/flash/pro`), Skills policy, provider/model 등 실제 배선된 변수를 사용한다. 상위 MCP가 `plan`을 제공하는 경로도 별도 variant로 측정할 수 있다.
 
 ## 측정값
 
-- success_rate
+- success_rate / verified completion
 - cost_per_success
-- elapsed_p50
+- elapsed p50
 - prompt/completion/cache tokens
 - model/tool calls
 - Pro escalation
 - retries/repair
-- verification outcome
-
-## 현재 Model 실험 방향
-
-현재 기본 Runtime은 별도 Planner/Reviewer/Debugger가 없는 올인원 Developer 구조다. 과거 Planner Pro/Flash/Off 실험은 역사적 최적화 기록이며 현재 기본 구조의 authority가 아니다.
-
-앞으로는 동일 task에서 Developer model/tier, thinking policy, Skills on/off 등을 비교하되 success-rate gate를 먼저 적용한다.
-
-Skill이 token을 더 써도 성공률을 높여 최종 `cost_per_success`를 낮춘다면 가치가 있다. token을 줄여도 실패가 늘면 regression이다.
+- gate/generic/integration outcome
+- human intervention(확장 시)
 
 ## Reliability cases
 
-지속적으로 다음을 결정적으로 검증한다.
+Runtime test suite는 benchmark와 별개로 다음 invariant를 고정한다.
 
-- build/test failure를 완료로 오판하지 않음
-- 검증하지 못한 상태를 검증 성공으로 기록하지 않음
-- failed verification에서 commit/push하지 않음
-- interrupted run이 restart 후 resume됨
-- resume 재충돌이 무한 loop를 만들지 않음
-- verified run만 최종 완료됨
+- test/build failure를 완료로 오판하지 않음
+- unavailable을 passed로 승격하지 않음
+- 코드 변경 + gate 0이 completed가 되지 않음
+- gate recovery가 1회 상한을 넘지 않음
+- failed verification에서 commit/push 금지
+- completed_unverified push 금지
+- interrupted run restart resume + crash-loop guard
+- session auto_approve/model tier isolation
+- compaction persistence
+- project memory unsupported claim rejection
 
 ## Bounded RSI
 
@@ -69,38 +83,20 @@ success_rate 후퇴 → REJECT
 전부 동률 → REJECT
 ```
 
-PROMOTE 후보가 되어도 현재는 자동 main merge하지 않고 사람 승인을 유지한다.
+`backend/rsi_run.py`는 candidate worktree에서 command 또는 `forge:<goal>` 자기수정 → benchmark → report를 수행한다. candidate가 아무 변경도 만들지 않으면 noise 비교 전에 REJECT한다. PROMOTE 후보도 자동 main merge하지 않고 사람이 결정한다.
 
-### R1 orchestration 실행
-
-`backend/rsi_run.py`가 candidate worktree에서 자기수정 → 재벤치마크 → 판정을 수행한다.
+예:
 
 ```bash
-# baseline 측정 (1회)
 python backend/bench.py --run --repeat 3 --tier auto --json baseline.json
-
-# FORGE 자기수정 후 재벤치마크 (venv에서 실행 — API 비용 발생)
 python backend/rsi_run.py --baseline baseline.json \
-  --candidate-cmd "forge: bench task 21~25의 failing-test debugging 성공률을 높여라" \
+  --candidate-cmd "forge: 특정 benchmark failure mode를 개선해라" \
   --repeat 3 --tier auto --json candidate.json --report report.md
 ```
 
-- `forge:<goal>` — worktree 안에서 FORGE 에이전트를 headless 구동해 자기수정.
-- 그 외 셸 명령 — 스크립트/프롬프트를 그대로 실행.
-- `report.md`에 PROMOTE/REJECT 판정과 baseline 대비 표가 생성된다. merge는 사람이 결정한다.
+## 해석 원칙
 
-## 확장 방향
-
-25개 task를 기반으로 현실 난이도와 failure-mode coverage를 늘린다.
-
-- multi-file feature/refactoring
-- failing-test debugging
-- frontend/backend 통합
-- ambiguous requirement
-- long-running/resume
-- 잘못된 사용자 가정을 코드에서 확인하는 task
-- 수정하지 않는 것이 정답인 task
-
-외부 harness와 비교할 때도 동일 fixture/checker를 사용한다.
-
-FORGE의 benchmark는 **싸게 실행됐음을 증명하는 장치가 아니라, 저렴한 모델로도 품질을 유지할 수 있음을 증명하는 장치**다.
+- token/task가 줄어도 success가 떨어지면 regression이다.
+- cheap-first chain이 repair/escalation을 늘리면 strong-first보다 비쌀 수 있다.
+- 단일 run latency 차이로 RSI promotion하지 않는다.
+- Acceptance Gate는 모델이 만든 내부 검증이고 R0 checker는 외부 authority이므로, 둘의 불일치가 gate semantic quality를 측정하는 중요한 신호다.

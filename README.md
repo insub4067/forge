@@ -2,87 +2,92 @@
 
 **English** | [한국어](README.ko.md)
 
-A self-hosted **agentic coding runtime** that executes, verifies, repairs, and resumes software work on a Mac while remaining controllable from a mobile PWA.
+A self-hosted **agentic coding runtime** that modifies real code, verifies user requirements and test/build outcomes at the process level, repairs bounded failures, survives long-running work on a Mac, and stays controllable from a mobile PWA.
 
-## Core Thesis
+## North Star
 
-FORGE is **not** primarily about running LLMs cheaply.
+FORGE is not about using the cheapest model.
 
-> **The key is to make inexpensive models reliable through a strong harness and deterministic quality-control process.**
+> **Use an appropriate model inside a strong execution, verification, repair, and recovery harness so the user can keep delegating real development work with confidence.**
 
-Quality is not delegated to the model's confidence. The process verifies real artifacts with tests/builds, repairs failures, and escalates to a stronger model only when needed.
+Optimization order: `verified correctness → verified completion → user trust/autonomy → cost_per_verified_task → elapsed → human intervention`. A model saying “done” is never the completion authority.
 
-```text
-Inexpensive model
-  ↓
-bounded execution loop
-  ↓
-real code/tool actions
-  ↓
-deterministic test/build verification
-  ├─ PASS → completed / commit
-  └─ FAIL → diagnose / repair / verify again
-                         ↓ only when stuck: stronger model
-```
-
-Optimization order is therefore: **success/quality first → verified completion → cost per successful task → elapsed time → human intervention**. Saving tokens while reducing success rate is not an improvement.
-
-## Current Runtime
+## Current Flow
 
 ```text
-User Goal
-  ↓
-Triage
-  ├─ CHAT → Chat (Flash)
-  └─ AGENT → Developer (Flash + thinking)
-               ↻ Plan → Execute → Self-verify/Repair
-               ↓ Pro escalation when needed
-               ↓
-          Strict Verification Gate
-          real test/build execution
-               ├─ PASS → completed → auto commit/push allowed
-               └─ FAIL → bounded repair → verification_failed
+Room mode
+├─ chat → read-only Chat
+├─ work → coding path directly
+└─ auto → Triage selects chat/work
+
+Coding path
+├─ simple  → Developer
+└─ complex → Planner → Developer → fresh Reviewer
+                          └ FAIL → one Developer repair
+
+Developer
+→ register Acceptance Gates before implementation
+→ Execute
+→ Generic Verification (test/build/runtime smoke)
+→ Acceptance Gate Verification
+→ Integration Verification
+→ process-owned CompletionSummary
 ```
 
-The default pipeline does not use separate Planner/Reviewer/Debugger agents. One Developer owns the working context end-to-end, while the final quality authority is the process-level verification gate—not the model saying "done".
+Complexity is selected automatically today. `multi/single` override rules exist internally but are not wired to user-facing API/UI controls.
 
-## Current Implementation
+## Reliability Contract
 
-- DeepSeek V4 provider (Flash/Pro/Vision routing), streaming, tool calling and thinking
-- Flash-first with bounded Pro escalation
-- all-in-one Developer loop
-- **Strict Verification Gate** running real build/pytest checks
-- bounded repair after verification failure
-- auto commit/push only on verified completion paths
-- step-level history persistence
-- **Durable Auto Resume** for unfinished runs after server restart, with crash-loop guard
-- PostgreSQL persistence / JSONL event log / metrics
-- context pruning / compaction / cache telemetry
-- Curated / Learned / Project three-tier Skills
-- deterministic R0 benchmark harness with 21 tasks
-- bounded RSI promotion gate: success rate → cost per success → elapsed
-- Docker Sandbox by default + opt-in Host mode
-- application-level HTTP/WebSocket auth via `FORGE_AUTH_TOKEN`
-- mobile PWA organized around Sessions / Automation / Mac
-- Git / Files / Skills / Metrics / Kanban / Vision
-- Mac host PTY Terminal / screen view / camera PoC
-- scheduled-job foundations
+- A code-changing run with zero acceptance gates cannot become `completed`.
+- If Developer misses gates, a Flash-only `gate_recovery` turn gets one attempt, at most 3 steps, with only `update_gates` available.
+- If gates are still absent, the run ends as `completed_unverified`.
+- Generic verification distinguishes `passed / failed / unavailable`.
+- Acceptance evidence records the actual command, exit code and output; gate commands run through `DockerSandbox.run_verify()` rather than a privileged host-shell bypass.
+- Only `completed` may auto-push. `completed_unverified` may commit locally but does not push; `verification_failed` does neither.
+- Final reports are deterministically built from process-owned gate/test/integration/commit/push facts and persisted in history.
 
-## Major Remaining Work
+## Models and Context
 
-- harden approval/capability boundaries during Durable Resume
-- distinguish verification `PASSED / FAILED / UNAVAILABLE`
-- expand benchmark coverage and compare against external harnesses
-- complete bounded RSI R1: candidate worktree → benchmark → human promotion
-- finish restart/idempotency/timezone semantics for Scheduled / Deferred / Condition Jobs
-- Tool Script/RPC Mode
-- ExecutionBackend cleanup (Local/Docker/SSH)
+- The current provider implementation is **DeepSeek only**. The OpenRouter/Ling experiment was removed from `main`.
+- Developer is Flash-first with bounded Pro escalation; per-session `auto / flash / pro` policy is persisted and restored.
+- Planner and Reviewer use short, fresh Flash contexts.
+- Large files use symbol maps and `find_symbol`; long tool results are pruned with recoverable `read_tool_result` storage.
+- Compaction starts around 75% and hard-blocks around 95%; the compacted summary is persisted in PostgreSQL across runs.
+- Project memory is evidence-bound and provenance-validated. Current source/config always outranks remembered facts.
+
+## Implemented Today
+
+- FastAPI + Vue 3/Vite PWA + PostgreSQL
+- DeepSeek streaming, tool calling, thinking and vision routing
+- adaptive Planner → Developer → Reviewer plus single-Developer path
+- Acceptance Gate Ledger, Gate Recovery, deterministic CompletionSummary
+- Generic/Acceptance/Integration verification and Playwright self-runtime smoke
+- bounded repair, Pro escalation, repeated-tool guard and cancellable subprocesses
+- Durable Auto Resume with crash-loop guard and persisted auto-approve/model-tier policy
+- per-run USD budget guardrail
+- Curated / Learned / Project Skills plus refinement approval/rollback
+- evidence-bound Project Memory validation
+- deterministic R0 benchmark with **25 tasks**
+- bounded RSI R1 candidate worktree → benchmark → no-op reject → human promotion
+- Scheduled Jobs: one-shot/daily/interval, timezone, durable `next_run_at`, atomic claim, retry
+- MCP stdio: `forge_execute`, `forge_status`, `forge_result`, `forge_cancel`
+- mobile sessions/automation/Kanban/files/Git/Skills/Metrics/approval/steering
+- Mac host PTY terminal over WebSocket, screen polling, pointer/keyboard remote input, camera PoC
+- `FORGE_AUTH_TOKEN` protection for `/api/*` and `/uploads/*` when enabled
+
+The latest memory-hardening source commit reported **116 backend tests passing**.
+
+## Next Priorities
+
+1. Dogfood gate semantic quality, false negatives, and intervention rate.
+2. Generalize the DeepSeek-only provider boundary with an OpenAI-compatible adapter while protecting verified success rate.
+3. Finish Deferred/Condition scheduling semantics and strengthen durable worker/process isolation.
+4. Add fresh-context workers/parallelism only when benchmarked independence and verified throughput justify the extra complexity.
+5. Treat Tool Script/RPC and broader ExecutionBackend abstractions as evidence-driven optimizations, not mandatory architecture.
 
 ## Security
 
-FORGE can modify files, execute shell commands, change Git repositories, expose a host PTY terminal, and access screen/camera capabilities. Do not expose it directly to the public Internet.
-
-A Cloudflare Tunnel alone is not authorization. Use Cloudflare Zero Trust / Access, Tailscale, a VPN, or equivalent network controls, while keeping application-level `FORGE_AUTH_TOKEN` protection enabled independently.
+FORGE can modify files, execute shell/Git actions, expose a host PTY, and access screen/keyboard/camera capabilities. Do not expose it directly to the public Internet. A Cloudflare Tunnel alone is not authorization: use Zero Trust/VPN/Tailscale or equivalent network controls and enable `FORGE_AUTH_TOKEN` independently. Host mode and auto-approve are high-trust options.
 
 ## Getting Started
 
@@ -105,7 +110,7 @@ npm run build
 
 ## Documentation
 
-Use [`docs/README.md`](docs/README.md) as the authoritative documentation index. Prefer current code plus `docs/core` and `docs/status` over Proposal/Archive documents.
+[`docs/README.md`](docs/README.md) is the documentation authority map. Prefer **current source → `docs/core`/`docs/status` → operations/planning → proposal → archive/handoff**.
 
 ## License
 

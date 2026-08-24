@@ -1,115 +1,166 @@
-# FORGE — 시스템 아키텍처
+# FORGE Architecture
 
-> 기준: 2026-08-23 `main`
+> 2026-08-24 현재 `main` source 기준.
 
-## 설계 중심
+## 1. Product Boundary
 
-FORGE의 핵심은 저가 모델 선택이 아니라 **모델 위에 품질 보증 프로세스를 올리는 Harness**다.
+FORGE는 범용 Agent OS가 아니라 **self-hosted verified coding runtime**이다.
 
 ```text
-Vue3 PWA
-  │ REST / SSE / event polling / WebSocket
-  ▼
+Mobile/Desktop Browser
+        ↓ HTTP/SSE/WebSocket
+Vue 3 PWA
+        ↓
 FastAPI Control Plane
-  ├─ auth (`FORGE_AUTH_TOKEN`)
-  ├─ Scheduler
-  ├─ Mac Terminal/Screen/Camera
-  └─ AgentRuntime
-       ├─ Triage
-       ├─ Chat
-       ├─ Developer
-       ├─ Context / Skills / Recovery
-       ├─ Tool Executor
-       └─ Strict Verification Gate
-             ↓
-     Docker(default) / Host(opt-in)
-             ↓
- PostgreSQL + JSONL event log + Git
+        ↓
+AgentRuntime
+├─ routing / role loop
+├─ context / memory / skills
+├─ approval / cancellation / budget
+├─ verification / completion
+└─ telemetry / refinement
+        ↓
+Tools / DockerSandbox / Git / Host capabilities
+        ↓
+Local workspace
 ```
 
-## Agent 흐름
+PostgreSQL이 history/session/task/gate/job/telemetry의 durable store이고 JSONL event log가 실행 관측을 보조한다.
 
-```text
-Request
- ↓
-Triage ── CHAT → Chat
- │
- AGENT
- ↓
-Developer (Flash + thinking)
- ↻ Plan → Execute → Self-verify/Repair
- ↓ 필요 시 Pro escalation
-Strict Verification Gate
- ├─ test/build PASS → completed → commit/push 가능
- └─ FAIL → bounded repair → 재검증 → verification_failed
-```
+## 2. Frontend
 
-별도 Planner/Reviewer/Debugger를 기본 실행 경로에서 제거해 컨텍스트 재전송을 줄였다. 그러나 비용 절감보다 중요한 것은 **Developer의 결과를 모델 스스로 최종 승인하지 못하게 하고 프로세스 검증을 별도 authority로 둔 것**이다.
+Vue 3 + Vite PWA. UI는 Agent lifecycle의 authority가 아니다.
 
-## Durable Execution
+주요 UX:
 
-Agent step마다 history를 영속화한다. 서버 시작 시 unfinished/running session을 찾아 저장된 history 기반으로 headless resume한다.
+- rooms/workspaces, chat/work mode
+- SSE/polling 기반 진행 상태
+- 상단 activity card 하나로 reasoning/tool/verification 상태 표시
+- 하단 task-bar 하나로 현재 task 진행 표시
+- approval/question/cancel/steering
+- Files/Git/Skills/Metrics/Kanban
+- Scheduled Jobs
+- Mac: Terminal/Screen/Camera
 
-- `AUTO_RESUME=0`으로 비활성화 가능
-- resume 중 재충돌 시 무한 재개를 막는 guard 존재
-- Python coroutine 자체를 복원하는 것이 아니라 저장된 Agent state/history에서 실행을 재구성한다.
+방별 `auto_approve`와 `model_tier`는 서버 값을 authority로 사용한다. localStorage는 신규 세션 기본값 정도로만 사용한다.
 
-resume 과정에서 approval 권한이 확대되지 않도록 capability 경계를 강화했다: 재시작 전 auto_approve 값을 그대로 복원(True 강제 없음), 세션별 승인 필터, BLOCKED_COMMANDS 차단. 회귀 테스트(`test_reliability_gates.py`·`test_reliability_invariants.py`)로 고정되어 있다.
+## 3. Control Plane
 
-## Verification Authority
+FastAPI는 REST/SSE/WebSocket, session state, file upload, scheduler, Mac remote endpoints를 제공한다.
 
-최종 `completed`는 모델 발화가 아니라 `_verify()` 결과가 결정한다.
+- `FORGE_AUTH_TOKEN`이 설정되면 `/api/*`(health 제외)와 `/uploads/*`를 보호한다.
+- CORS는 현재 `*`이므로 remote deployment에서는 네트워크 접근제어와 app token을 함께 사용한다.
+- startup에서 idempotent DB schema patch 후 interrupted run resume와 scheduler를 시작한다.
 
-현재 자동 탐색 대상은 root/frontend의 npm build와 root/backend의 pytest 중심이다. 실패하면 1회 bounded repair 후 다시 검증한다.
+## 4. AgentRuntime
 
-현재 `_verify()`는 `PASSED / FAILED / UNAVAILABLE` 3상태를 반환한다. pytest exit 0=passed, 1=failed, 그 외(수집/설정 오류·timeout·미설치)=unavailable이며, unavailable은 성공으로 기록되지 않는다. 회귀 테스트(`test_reliability_gates.py`·`test_reliability_invariants.py`)로 고정되어 있다.
+한 Runtime이 core execution contract를 가진다.
 
-## Context / Skills
+### Route
 
-- prompt token pressure 기반 compaction/hard block
-- tool result pruning
-- stable prefix/cache telemetry
-- reasoning 호환 오류 recovery
-- Skills 3계층: Curated / Learned / Project
-- 관련 Skill만 제한적으로 주입
+`chat/work/auto` room mode. auto는 Triage 사용.
 
-## Persistence / Events
+### Roles
 
-- PostgreSQL: sessions/messages/tasks/checkpoints/agent_runs 등
-- JSONL: durable action/event log
-- SSE: live stream
-- eventlog polling + sequence dedup: proxy buffering/재접속 보완
-- status polling: foreground 복귀 및 stale UI reconcile
+- Chat: read-only
+- Planner: complex 요청에서만, read-only/fresh
+- Developer: 유일한 mutation executor
+- Reviewer: complex 요청에서만, fresh independent review
+- Gate Recovery: gate 누락 안전망
 
-## Benchmark / RSI
+Multi/single을 사용자가 직접 고르는 UI/API는 현재 없다.
 
-`backend/bench.py` + `bench_tasks.py`가 격리 fixture와 deterministic checker로 R0 평가를 수행한다. 현재 21개 task가 있다.
+### Verification
 
-`backend/rsi.py`는 baseline/candidate 결과를 `success_rate → cost_per_success → elapsed` 순으로 비교하는 promotion gate를 구현한다. candidate worktree 실행과 merge는 아직 자동화하지 않으며 사람 승인을 유지한다.
+- Generic test/build/runtime smoke
+- Acceptance Gate Ledger/evidence
+- Integration rerun
+- deterministic CompletionSummary
 
-## Tool / Execution
+## 5. Model Layer
 
-읽기/수정/bash/build_frontend/Git 계열 도구를 사용한다. Docker가 기본이며 Host는 명시적 opt-in이다. Host mode와 Terminal은 높은 신뢰 경계로 취급한다.
+`app/llm/factory.py`의 current implementation은 DeepSeek adapter 하나다. ModelRouter는 role/model tier에 따라 Flash/Pro/Vision을 고른다.
 
-## Remote Operation
+OpenRouter, OpenAI-compatible internal endpoint, vLLM/SGLang 등은 **현재 구현이 아니라 future provider work**다.
 
-PWA 정보구조는 세션 / 예약 / 맥 중심이다.
+## 6. Tool / Execution Layer
 
-- Agent activity / approval / steering
-- Git / Files / Skills / Metrics / Kanban
-- Mac host PTY Terminal
-- view-only Screen
-- Camera JPEG polling PoC
-- Scheduled Job 기반
+주요 tool:
 
-## 보안
+`read_file`, `list_dir`, `grep`, `find_symbol`, `write_file`, `edit_file`, `bash`, `build_frontend`, `browser_check`, `ask_user`, `update_tasks`, `update_gates`, `save_skill`, `read_tool_result`.
 
-HTTP와 WebSocket `/api/*`는 `FORGE_AUTH_TOKEN` 기반 application auth를 사용한다. Zero Trust/VPN은 추가 방어층이지 application auth 대체물이 아니다.
+- path는 workspace 경계 안으로 resolve한다.
+- mutation은 approval policy를 거친다.
+- bash 기본은 Docker sandbox; host mode는 opt-in.
+- dangerous/self-kill command(`rm -rf`, sudo, kill/pkill, uvicorn 등)는 차단한다.
+- Acceptance verification도 `DockerSandbox.run_verify()`를 사용한다.
+- `build_frontend`는 배포 dist 갱신 때문에 host npm build를 명시적으로 사용한다.
 
-## 다음 구조적 과제
+ExecutionBackend 공통 interface(Local/Docker/SSH)는 아직 정리되지 않았다.
 
-1. benchmark 확대
-2. RSI candidate worktree + benchmark + human promotion
-3. Scheduler durable semantics
-4. Tool Script/RPC
-5. ExecutionBackend(Local/Docker/SSH)
+## 7. Persistence
+
+PostgreSQL tables:
+
+- sessions / messages / tasks / acceptance_gates / checkpoints
+- agent_runs
+- push_devices
+- scheduled_jobs
+- refinements
+
+Sessions에는 running/final_status, auto_approve, model_tier, logical budget, compaction summary/covered 등이 있다.
+
+## 8. Context / Memory / Skills
+
+- 131k logical budget, 75% compaction, 95% block
+- compaction summary DB persistence
+- symbol-aware file reading
+- recoverable tool-result pruning
+- selective Skills
+- evidence-bound ROOM_MEMORY with provenance guard
+
+Skills와 Memory는 다르다: Memory는 검증된 프로젝트 사실, Skill은 재사용 가능한 해결 절차다.
+
+## 9. Automation
+
+`scheduled_jobs.next_run_at`(UTC)이 authority다. Scheduler는 20초 polling으로 due jobs를 찾고 atomic claim/overlap skip/retry를 적용한다. 현재 recurrence는 one-shot, daily, interval이다. Deferred/Condition watcher는 아직 구현되지 않았다.
+
+## 10. MCP
+
+stdio JSON-RPC MCP server가 high-level capability만 노출한다.
+
+- `forge_execute`
+- `forge_status`
+- `forge_result`
+- `forge_cancel`
+
+`task_id == session_id`라 DB 결과와 global Auto Resume를 재사용한다. MCP transport 자체는 stdio/local이고 remote MCP auth/resources는 미구현이다.
+
+## 11. Mac Remote
+
+- Terminal: host PTY + WebSocket/xterm
+- Screen: `screencapture` 기반 단일 JPEG polling, 약 150ms 후 다음 frame 요청
+- Remote input: pointer/mouse/keyboard → HTTP `POST /api/mac/input`; mouse move는 ~25Hz throttle
+- coordinate mapping: contain letterbox + portrait rotation 보정
+- Camera: imagesnap polling PoC
+
+이것은 현재 WebRTC 기반 원격 데스크톱이 아니다.
+
+## 12. Evaluation / RSI
+
+- R0: 25 deterministic fixture tasks
+- checker self-test로 false-positive/정답 노출 방지
+- R1: candidate worktree에서 `forge:<goal>` self-modification 가능
+- no-op candidate는 benchmark 전에 REJECT
+- promotion gate: success rate → cost per success → elapsed
+- 자동 main merge는 하지 않고 사람 승인 유지
+
+## 13. Deliberately Not Yet
+
+- provider-independent OpenAI-compatible endpoint
+- independent durable worker/queue process
+- Deferred/Condition Jobs
+- generic Local/Docker/SSH ExecutionBackend
+- bounded parallel fresh workers
+- full browser/computer-use automation
+- WebRTC screen streaming

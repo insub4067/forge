@@ -1,118 +1,81 @@
-# FORGE 개선 계획
+# FORGE Improvement Plan
 
-> 기준: 2026-08-23 `main`
+> 단기 실행용. Current State는 `../status/work-status.md`, 큰 방향은 `roadmap-priority.md`가 authority다.
 
-## 핵심 가치
+## 목표
 
-과거의 "클로드급 성능을 저렴하게"라는 표현은 방향을 충분히 설명하지 못한다.
+기능을 더 많이 넣는 대신 **Claude처럼 계속 쓰고 싶은 daily-use agent**에 가까워지게 한다.
 
-FORGE의 핵심은:
+## 1. Reliability Probe Pack
 
-> **저렴한 모델로도 결과 품질을 보장할 수 있도록 실행·검증·수리·복구를 Harness 프로세스로 강제하는 것**
+실제 repository 작업을 반복해 다음을 기록한다.
 
-이다.
+- 요구사항 수 vs gate 수
+- gate가 external deterministic checker를 실제로 대표하는지
+- `gated / recovered_gated / generic_only`
+- verification failure → repair 성공률
+- `completed_unverified` 원인
+- ask_user/approval/steering 횟수
+- final report가 실제 evidence와 일치하는지
 
-비용은 품질 다음이다. 최적화 순서는 `success_rate → verified completion → cost_per_success → elapsed → human intervention`이다.
+약한 gate/거짓 gate/불필요한 질문이 반복되면 해당 failure mode만 좁게 수정한다.
 
-## 이미 해결된 과거 핵심 문제
+## 2. Startup Reliability
 
-- 올인원 Developer로 역할 간 context 재전송 축소
-- host/self-build 경로 확보
-- Strict Verification Gate 도입
-- 검증 실패 bounded repair
-- verification PASSED/FAILED/UNAVAILABLE 3상태(실행 불가/설정 오류/timeout=UNAVAILABLE)
-- FAILED/UNAVAILABLE에서 commit/push 차단 invariant(pytest exit code별 테스트 포함)
-- resume-safe approval: 재시작 전 auto_approve를 그대로 복원(True 강제 없음), 세션별 승인 필터, BLOCKED_COMMANDS 차단
-- step-level persistence
-- Durable Auto Resume
-- auto commit/push 경로
-- event polling/seq dedup
-- 3-tier Skills
-- application HTTP/WebSocket auth
-- deterministic R0 benchmark 25 tasks
-- bounded RSI promotion gate
+`main.py` lifespan이 DB create/migration/resume setup 예외를 broad하게 삼키는 부분을 점검한다.
 
-따라서 과거 문서의 "durable resume 미구현", "benchmark 실물 없음", "Planner 폭주가 현재 구조의 중심" 같은 항목은 더 이상 현재 backlog가 아니다.
+목표:
 
-## P0 — Benchmark 현실성 확대
+- schema migration 실패는 로그/health에서 명확히 보임
+- resume 한 세션 실패가 전체 startup을 죽이지 않음
+- 예상 가능한 per-session failure와 fatal schema failure를 구분
 
-현재 25 task를 단순 숫자 증가보다 failure-mode coverage 중심으로 확장한다. (2025-03-11: 21 → 25, 신규 4개)
+## 3. Provider Boundary
 
-- multi-file/integration
-- frontend/backend — X
-- failing-test debugging — U (예외 traceback을 따라 호출 경로 추적)
-- ambiguous requirement — V (모호한 요구를 테스트로 규칙 파악)
-- long-running/restart — W (상태를 파일에 영속화)
-- 잘못된 사용자 가정 검증
-- no-change가 정답인 task
+DeepSeek baseline을 고정하고 OpenAI-compatible adapter 하나만 추가하는 작은 실험을 한다.
 
-외부 harness 비교도 동일 fixture/checker를 사용한다.
+- AgentRuntime/verification은 provider를 모름
+- tool calling/usage/cache/thinking capability 차이를 adapter가 흡수
+- 동일 25-task benchmark + 실제 repo probe
+- 성공률 후퇴 시 route에 넣지 않음
 
-## P1 — Bounded RSI R1
+Ling/OpenRouter는 과거 실사용 실패가 있으므로 “싸다”만으로 다시 기본 후보로 넣지 않는다.
 
-`backend/rsi.py` promotion gate + `backend/rsi_run.py` orchestration 구현 완료.
+## 4. Automation / Worker Semantics
 
-```text
-candidate worktree
-→ FORGE 자기수정 (forge:<goal> headless 구동 또는 셸 명령)
-→ 동일 benchmark
-→ baseline 비교
-→ promotion report
-→ 사람 승인
-```
+Scheduled Jobs는 이미 있다. 다음은 Condition/Deferred와 crash ownership이다.
 
-- `rsi_run.py --candidate-cmd "forge:<goal>"` — worktree 안에서 FORGE 에이전트를
-  headless로 구동해 자기수정을 수행한다. worktree의 backend를 PYTHONPATH로 잡고
-  `task_facade.execute(goal, workspace=worktree)`를 호출, 완료를 폴링한다.
-- `--candidate-cmd "<셸 명령>"` — 스크립트/프롬프트를 그대로 실행한다.
-- 자동 merge는 아직 하지 않는다. 최종 승인은 사람이 report를 보고 결정한다.
-- 실증 완료(2026-08-24): baseline→candidate worktree→bench→gate→report 전체 파이프라인 실행 확인.
-  실증에서 `.env`(gitignore) 미복사로 candidate가 API key를 못 읽어 항상 0.0 REJECT되던 버그를 잡아 수정.
-- 검증: `test_rsi_run.py` 10케이스 (orchestration 로직 + FORGE subprocess 구성).
-  실제 FORGE 구동은 DeepSeek API 비용이 발생하므로 venv에서 실행한다.
+작은 순서:
 
-## P2 — Automation durability
+1. deterministic Condition interface
+2. persisted condition state/idempotency
+3. trigger true일 때만 기존 AgentRuntime 호출
+4. independent worker가 필요한 failure case를 실제로 재현한 뒤 process split 검토
 
-예약 기능은 존재한다. 다음은 기능 수보다 semantics다.
+## 5. Context / Memory Monitoring
 
-- restart
-- duplicate 방지/idempotency
-- timezone/DST
-- retry/history
-- Deferred/Condition
+Compaction persistence와 evidence-bound Project Memory가 막 들어간 상태이므로 새 구조를 더 얹기 전에 관찰한다.
 
-## P3 — Tool 효율
+- compact hit 이후 다음 run input 감소 확인
+- stale/invalid compact summary 복원 방지
+- memory candidate saved/rejected 이유 분포
+- ROOM_MEMORY가 source와 충돌하지 않는지 정기 probe
+- 4KB cap 도달 시에만 memory GC/selective retrieval 검토
 
-Tool Script/RPC는 성공률을 유지하면서 탐색 model round-trip을 줄일 수 있을 때만 도입한다.
+## 6. UX 원칙
 
-## P4 — Skills / Model Routing
+- 실행 상태는 activity card 한 곳
+- task 진행은 task-bar 한 곳
+- 최종 보고는 짧고 process-owned
+- debug token/tool/raw evidence는 필요할 때만 상세 화면
+- orchestration mode를 사용자에게 떠넘기지 않음
 
-Skill과 model tier는 신념이 아니라 benchmark로 평가한다.
+## 완료 기준
 
-- Skill ON/OFF 및 scope별 효과
-- Flash-first vs 강한 model 정책
-- escalation이 실제 성공률을 얼마나 회복하는지
+다음이 실제로 개선될 때만 이 계획이 성공이다.
 
-**싼 모델을 끝까지 고집하는 것이 목표가 아니다. Harness가 싼 모델을 최대한 활용하고 필요한 순간에만 강한 모델을 쓰게 만드는 것이 목표다.**
-
-## 하지 않는다
-
-- 실측 없는 Vector DB
-- 무분별한 Multi-Agent
-- 자동 main merge
-- 기능 수를 위한 framework 추가
-- 품질을 희생하는 token 절감
-
-## 반복 사이클
-
-```text
-문제/가설
-→ 최소 변경
-→ deterministic test
-→ benchmark
-→ success-rate gate
-→ cost/time 비교
-→ Keep / Revert
-```
-
-FORGE의 개선은 "더 싸졌는가"가 아니라 **"품질을 유지하면서 더 효율적으로 검증된 성공을 만들었는가"**로 판단한다.
+- verified task success 유지/향상
+- false completion 감소
+- human interventions/task 감소
+- 같은 문제를 재설명하는 횟수 감소
+- cost/elapsed는 위 조건을 지킨 뒤 감소

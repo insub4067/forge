@@ -1,51 +1,53 @@
-# FORGE MCP 서버 운영
+# FORGE MCP Server
 
-FORGE를 외부 AI 에이전트(Claude·ChatGPT·IDE)가 호출하는 MCP 서버로 노출한다. 저수준 도구
-(bash·write_file)는 노출하지 않고 high-level capability만 준다 — 자세한 설계는
-[`../proposal/forge-mcp-agent-runtime.md`](../proposal/forge-mcp-agent-runtime.md).
+FORGE를 Claude/ChatGPT/IDE 등 외부 orchestration agent가 호출할 수 있는 **local stdio MCP task facade**로 노출한다. 저수준 bash/write 도구는 직접 노출하지 않는다.
 
-## 노출 도구
+## 현재 도구
 
-| 도구 | 설명 |
+| Tool | 설명 |
 |---|---|
-| `forge_execute(goal, workspace, auto_approve)` | 목표 위임 → task_id 즉시 반환(비차단) |
-| `forge_status(task_id)` | 진행 상태(running/role/승인·질문 대기) |
-| `forge_result(task_id)` | 결과(최종 상태·요약·비용·토큰) |
-| `forge_cancel(task_id)` | 중단 |
+| `forge_execute(goal, workspace, plan?, images?, auto_approve?)` | 새 session/task 시작, `task_id` 즉시 반환 |
+| `forge_status(task_id)` | running/role/approval/question 등 live 상태 |
+| `forge_result(task_id)` | final_status, process-owned 마지막 assistant summary, 비용/토큰 |
+| `forge_cancel(task_id)` | 실행 중 task cancel |
 
-## 실행 (stdio)
+`task_id == session_id`다.
+
+## 실행
 
 ```bash
-cd backend && .venv/bin/python -m app.mcp.server
+cd backend
+.venv/bin/python -m app.mcp.server
 ```
 
-stdin/stdout으로 MCP 클라이언트와 JSON-RPC 2.0로 통신한다. 공식 SDK 없이 최소 구현이라
-의존성이 없다. DB(PostgreSQL)와 DeepSeek API 키(.env)는 기존 backend와 동일하게 필요하다.
+stdio JSON-RPC 2.0, MCP protocol version `2025-06-18`. 공식 SDK 의존 없이 최소 구현이다.
 
-## Claude Desktop / MCP 클라이언트 등록 예
+## Plan / Image delegation
 
-```json
-{
-  "mcpServers": {
-    "forge": {
-      "command": "/Users/insub/Desktop/forge/backend/.venv/bin/python",
-      "args": ["-m", "app.mcp.server"],
-      "cwd": "/Users/insub/Desktop/forge/backend"
-    }
-  }
-}
-```
+상위 agent가 `plan`을 주면 이를 user content에 포함해 FORGE가 그 계획을 실행하도록 할 수 있다. 이미지 파일 절대경로를 `images`로 주면 data URI로 변환해 기존 vision route를 재사용한다.
 
-## 비용·경계
+## Durability truth
 
-- MCP는 transport다. FORGE 내부 토큰 사용은 위임이든 REST든 동일하다. **줄어드는 것은
-  호출하는 상위 에이전트의 토큰** — 무거운 코딩 루프를 싼 DeepSeek 파이프라인에 떠넘긴다.
-- approval/sandbox/workspace 경계는 facade가 호출하는 AgentRuntime이 그대로 적용한다.
-  `auto_approve=true`는 무인 위임에서만 신중히 쓴다(쓰기·실행 자동 승인).
+MCP process 자체는 durable worker가 아니다. `asyncio.create_task`로 current process에서 run을 시작한다.
 
-## 알려진 한계 (미구현)
+하지만 task identity/history는 PostgreSQL session에 저장되고 global FORGE Auto Resume가 켜져 있으면 서버 재시작으로 interrupted된 동일 session을 history 기반으로 재개할 수 있다. 따라서 과거 문서의 “재시작 시 task_id가 완전히 유실된다”는 설명은 더 이상 정확하지 않다.
 
-- **durability 없음**: 서버 재시작 시 진행 중 task가 유실된다. 프로덕션 위임에는
-  [`../proposal/durable-worker-resume.md`](../proposal/durable-worker-resume.md)의 D0/D1이 선결이다.
-- **인증 없음**: 현재 stdio(로컬) 전제. remote(HTTP) 노출 시 토큰/정책 게이트가 필요하다.
-- Resources(`forge://task/{id}/diff` 등)·capability 도구(forge_review 등)는 2차.
+정확한 한계:
+
+- stdio 연결 자체는 프로세스 재시작 시 다시 연결해야 한다.
+- resume는 coroutine checkpoint continuation이 아니라 persisted history/state에서 새 run을 재구성한다.
+- independent worker queue/process ownership은 아직 없다.
+
+## Security
+
+- 현재 transport는 local stdio라 별도 remote auth를 제공하지 않는다.
+- `auto_approve=true`는 기존 AgentRuntime approval을 자동 승인하므로 신뢰 환경에서만 사용한다.
+- workspace/sandbox/dangerous-command/verification 경계는 AgentRuntime을 재사용한다.
+- remote HTTP MCP는 현재 구현이 아니며 구현 시 별도 auth/policy가 필요하다.
+
+## 미구현
+
+- remote MCP transport
+- MCP Resources (`forge://...`)
+- 추가 review/diff capability tools
+- independent durable worker queue

@@ -1,145 +1,130 @@
-# FORGE — 요구사항 정의서
+# FORGE Product / Runtime Specification
 
-> 기준: 2026-08-23 `main`
+> Current-state spec. 역사적 v1 스펙은 `docs/archive/`에 보존한다.
 
-## 1. 제품 목표
+## 1. Product Goal
 
-FORGE는 특정 LLM에 종속된 챗봇이 아니라 LLM을 판단 엔진으로 사용하는 실행 Runtime이다.
+FORGE는 사용자의 개발 환경에 상주하면서 **실제 일을 끝내고 그 완료를 증명하는 개인 개발 에이전트**다.
 
-핵심 가치는 **싼 모델 자체가 아니라, 저렴한 모델로도 결과 품질을 보장하는 Harness 프로세스**다.
+제품 경험 목표:
 
-> 모델의 자기확신을 신뢰하지 않고, 실행·검증·수리·재검증을 프로세스로 강제해 실제 작업 성공률을 확보한다.
+- 사용자는 자연어로 일을 맡긴다.
+- Harness가 필요한 탐색/계획/구현/수리/검증을 끝까지 진행한다.
+- 막히거나 위험 경계가 있을 때만 질문/승인을 요청한다.
+- 모바일에서 진행·승인·steering·cancel·결과를 확인할 수 있다.
+- 프로젝트 지식은 검증된 형태로 이어지되 conversation context는 무한 성장하지 않는다.
 
-최적화 우선순위:
+## 2. Quality Contract
 
-1. success rate / 결과 품질 유지·향상
-2. deterministic verification을 통과한 완료
-3. cost per successfully completed task 감소
-4. elapsed 감소
-5. human intervention 감소
+최우선 불변식:
 
-비용 감소로 성공률이 떨어지면 regression이다.
+1. **모델 self-report는 completion authority가 아니다.**
+2. 코드 변경 run은 사용자 요구사항을 Acceptance Gates로 표현한다.
+3. gate 0인 코드 변경은 `completed` 불가.
+4. Generic Verification은 passed/failed/unavailable을 구분한다.
+5. Acceptance PASS는 실제 command + expected stdout evidence가 있어야 한다.
+6. 최종 합쳐진 상태에서 Integration Verification을 수행한다.
+7. fully verified 결과만 auto push한다.
+8. 실패/미검증 이유를 숨기지 않는다.
+9. Project Memory는 evidence/provenance validation을 통과해야 한다.
+10. 현재 source/config가 memory/proposal보다 높은 authority를 가진다.
 
-## 2. 실행 모델
+## 3. Runtime Modes
 
-```text
-Goal → Triage → [Chat | Developer]
-                    ↓
-             Plan → Execute → Self-verify/Repair
-                    ↓
-             Strict Verification Gate
-               ├─ PASS → completed
-               └─ FAIL → bounded repair → verification_failed
-```
+Room `mode`:
 
-Developer는 Flash+thinking을 기본으로 하고 막힐 때만 Pro로 승격한다. 별도 Planner/Reviewer/Debugger를 기본 파이프라인에 두지 않는다.
+- auto(default): Triage가 chat/work 판정
+- chat: read-only response
+- work: coding path 강제
 
-## 3. 현재 구현 범위
+Coding topology는 Runtime이 자동 결정한다.
 
-- DeepSeek provider와 Flash/Pro/Vision routing
-- read/list/grep/write/edit/bash/ask_user/update_tasks/save_skill/build_frontend
-- approval, cancel, runtime injection
-- Docker Sandbox + Host opt-in
-- PostgreSQL session/message/task/agent-run persistence
-- step-level history persistence
-- JSONL event log / event polling / status recovery
-- **Durable Auto Resume** + crash-loop guard + `AUTO_RESUME=0`
-- Strict Verification Gate + bounded repair
-- verified completion 경로의 auto commit/push
-- context pruning / compaction / cache telemetry
-- Curated/Learned/Project 3-tier Skills
-- HTTP/WebSocket application auth(`FORGE_AUTH_TOKEN`)
-- deterministic R0 benchmark(21 tasks)와 benchmark quality test
-- bounded RSI promotion gate(R1 판정부)
-- 모바일 PWA / Git / Files / Skills / Metrics / Kanban / Vision
-- Mac Terminal / Screen / Camera PoC
-- Scheduled Job 기반
+- simple: Developer
+- complex: Planner → Developer → fresh Reviewer; Reviewer fail 시 Developer repair 1회
 
-## 4. 품질 보증 정책
+사용자가 multi/single topology를 직접 선택하는 UI/API는 현재 비목표다.
 
-`completed`는 모델의 문장이 아니라 프로세스가 결정한다.
+## 4. Model Policy
 
-- 감지된 build/test를 실제 실행한다.
-- 실패 시 제한된 횟수만 repair한다.
-- 검증 실패 상태에서 commit/push하지 않는다.
-- 검증 결과를 `PASSED / FAILED / UNAVAILABLE`로 분리한다(실행 불가·설정 오류·timeout은 UNAVAILABLE).
-- 테스트를 실행할 수 없었다는 사실을 테스트 성공으로 기록하지 않는다.
+현재 provider는 DeepSeek only.
 
-## 5. Model Policy
+- Flash-first
+- bounded Pro escalation
+- Vision 요청은 vision model route
+- 세션별 tier `auto/flash/pro`
+- Planner/Reviewer/Gate Recovery는 비용을 억제한 Flash 경로
 
-| 역할 | 정책 |
-|---|---|
-| Triage | Flash, 경량 분류 |
-| Chat | Flash, non-thinking |
-| Developer | Flash + thinking 기본, 막힘 시 Pro 승격 |
-| Vision | Vision model, 필요할 때만 |
+Provider independence는 향후 확장점이지 현재 기능이 아니다.
 
-강한 모델을 기본으로 쓰지 않는 이유는 비용 자체가 아니라 **Harness가 검증을 담당하기 때문에 가능한 모델 효율화**다. 모델 정책 변경은 benchmark 성공률을 먼저 통과해야 한다.
+## 5. Tools / Security
 
-## 6. Context / Skills
+Workspace path boundary, approval policy, dangerous command block, Docker sandbox를 유지한다. Host mode/host PTY/Mac input은 high-trust capability다.
 
-- provider prompt token 기준 pressure
-- 75% compaction / 95% hard block 정책
-- 긴 tool result model-free pruning
-- stable prefix/cache telemetry
-- Curated → Learned(`~/.forge/skills`) → Project(`<workspace>/.forge/skills`) 3계층
-- 충돌 시 Project가 높은 authority
-- 관련 Skill만 선택적으로 주입
+`FORGE_AUTH_TOKEN` 설정 시 API/WebSocket과 uploads를 보호한다. Remote deployment는 별도 Zero Trust/VPN 경계도 사용한다.
 
-## 7. Reliability
+## 6. Context
 
-- provider retry/recovery
-- repeated tool guard
-- concurrent run guard
-- bounded escalation/repair
-- step-level persistence
-- 서버 재시작 시 unfinished run 자동 재개
-- resume 중 재충돌에 대한 loop guard
-- SSE 단절 시 status/event polling 복구
+- logical budget 131072
+- 75% compaction / 95% block
+- compaction summary DB persistence
+- selective Skills
+- symbol-aware source reading
+- recoverable tool-result pruning
+- fresh Planner/Reviewer context
+- task boundary에서 새 세션 + 동일 workspace 가능
 
-resume 시 권한이 재시작 전보다 확대되지 않도록 approval/capability 경계를 강화했다: 재시작 전 auto_approve 값을 그대로 복원(True 강제 없음), 세션별 승인 필터, BLOCKED_COMMANDS 차단.
+Long-term project memory와 long conversation context를 분리한다.
 
-## 8. Evaluation / RSI
+## 7. Durability
 
-R0 benchmark는 fixture → Agent → deterministic checker로 동작하며 LLM-as-a-judge를 사용하지 않는다.
+- PostgreSQL history/session/task/gate/telemetry
+- step-level save
+- running/final status
+- restart 후 headless Auto Resume
+- resuming crash-loop guard
+- persisted approval/model-tier policy
+- JSONL event log
 
-승격 판단은 사전식이다.
+현재 Python coroutine/worker process 자체를 checkpoint에서 이어붙이는 event-sourced worker는 아니다. history/state에서 안전한 새 run으로 재구성하는 resume다.
 
-```text
-success_rate 후퇴 → reject
-success 유지 → cost_per_success 비교
-비용 동률 → elapsed 비교
-동률 → 변경할 이유가 없으므로 reject
-```
+## 8. Automation / Remote
 
-`backend/rsi.py`에는 promotion gate가 구현돼 있지만 candidate worktree 실행/merge는 아직 자동화하지 않는다. 최종 승인은 사람에게 둔다.
+- Scheduled one-shot/daily/interval jobs
+- mobile job management/run-now
+- Terminal: host PTY WebSocket
+- Screen: polling preview + mouse/keyboard remote input
+- Camera PoC
+- MCP stdio high-level task facade
 
-## 9. Remote / Automation
+Condition/Deferred watcher, WebRTC screen, remote MCP transport는 아직 구현되지 않았다.
 
-PWA는 IDE 복제가 아니라 Agent 지휘·복구 인터페이스다.
+## 9. Evaluation
 
-- 세션 / 예약 / 맥
-- Terminal / Screen / Camera
-- Git / Files / Skills / Metrics
-- Scheduled Job 기반
+Primary metrics:
 
-Condition/Deferred Job, timezone/idempotency/restart semantics는 계속 고도화한다.
+1. `verified_task_success_rate`
+2. `false_completion_rate`
+3. `human_interventions_per_task`
+4. `repair_success_rate`
+5. `cost_per_verified_task`
+6. `elapsed_per_verified_task`
 
-## 10. 보안
+R0 25-task deterministic benchmark와 RSI promotion gate를 사용한다. 가격/속도 개선이 success-rate regression을 정당화하지 않는다.
 
-- `FORGE_AUTH_TOKEN`으로 HTTP/WebSocket 보호
-- mutation approval
-- workspace boundary
-- Docker 기본, Host 명시적 opt-in
-- Zero Trust/VPN은 application auth를 대체하지 않음
-- Host Terminal은 원격 shell과 동일한 위험도로 취급
+## 10. Non-goals / Deferred
 
-## 11. 다음 우선순위
+- agent 수 자체를 늘리는 것
+- 기본 10-agent swarm
+- provider 수를 KPI로 삼는 것
+- LLM judge를 최종 correctness authority로 쓰는 것
+- 검증 없는 자동 main merge
+- 범용 automation SaaS/IDE/원격데스크톱 복제
+- 대규모 plugin framework rewrite
 
-1. benchmark 확대 및 실제 비교 데이터 축적
-2. bounded RSI candidate worktree/promotion pipeline
-3. Scheduler durable semantics
-4. Tool Script/RPC
-5. ExecutionBackend
+## 11. Next Expansion Criteria
 
-Vector DB, 무분별한 Multi-Agent, 거대한 plugin framework는 실측 병목이 생기기 전 기본 해법으로 사용하지 않는다.
+새 기능은 다음 질문을 통과해야 한다.
+
+> “이 변경 때문에 사용자가 FORGE에 실제 일을 더 자주 맡기고, 확인/개입 부담이 줄어드는가?”
+
+Provider abstraction, durable worker isolation, Condition Jobs, fresh workers, Tool RPC 모두 benchmark와 dogfooding evidence를 근거로 우선순위를 정한다.

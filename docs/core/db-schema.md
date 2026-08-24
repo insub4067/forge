@@ -1,150 +1,124 @@
-# FORGE — 데이터베이스 스키마
+# FORGE Database Schema
 
-> PostgreSQL · 기준: 2026-08-22 `main`
-
-## 주요 테이블
-
-| 테이블 | 용도 |
-|---|---|
-| `sessions` | 채팅방/워크스페이스 및 run 상태 |
-| `messages` | 대화 원본 기록 |
-| `tasks` | Agent task/칸반 상태 |
-| `checkpoints` | mutation 전 git SHA |
-| `agent_runs` | role별 모델·토큰·효율 telemetry |
-
-실행 이벤트 자체는 별도 JSONL event/action log에도 기록된다.
+> SQLAlchemy model(`backend/app/db/models.py`) 기준 요약. `create_all` + idempotent column patches를 사용한다.
 
 ## sessions
 
+Room/task의 durable state.
+
 주요 필드:
 
-- `id` — session UUID
-- `title`
-- `workspace_id` — 레거시 식별자
-- `workspace_path` — 실제 로컬 프로젝트 경로
+- `id`, `title`, `workspace_id`, `workspace_path`, `workspace_locked`
+- `mode`: `""` auto | `chat` | `work`
 - `status`
-- `model`
-- `logical_budget`
-- `used_tokens` — 최근 실측 context usage
-- `running` — 현재 run 실행 중 여부
-- `final_status` — 마지막 run 종료 상태
+- `logical_budget`, `used_tokens`
+- `running`, `final_status`
+- `auto_approve`
+- `model_tier`: `auto | flash | pro`
+- `compact_summary`, `compact_covered`
 - `created_at`, `archived_at`
 
-`workspace_path`는 파일 브라우저 및 Agent 실행 경계의 기준이다. 신규 세션은 workspace 선택이 필수다.
-
-### final_status
-
-대표 값:
-
-```text
-completed
-review_limit
-cancelled
-context_blocked
-max_steps
-repeated_tool_call
-failed
-```
-
-성공률 집계의 기본 성공 정의는 `final_status == completed`다.
+`running/final_status/history`는 restart detection/resume의 근거다. `auto_approve/model_tier`는 재시작 후에도 같은 capability/model policy를 복원한다.
 
 ## messages
 
-대화 원본을 저장한다. model context compaction/pruning은 이 원본을 파괴하지 않는다.
+세션 history.
 
-주요 필드:
+- `id`, `session_id`, `seq`
+- `role`, `content_json`
+- prompt/completion/cached token fields
 
-- `id`
-- `session_id`
-- `seq`
-- `role`
-- `content_json`
-- token 관련 legacy/집계 필드
-
-`content_json`에는 일반 text뿐 아니라 필요 시 tool call, reasoning 등 provider-neutral message 정보를 포함한다.
+Process-owned 최종 CompletionSummary도 assistant history에 영속된다.
 
 ## tasks
 
-Developer가 진행 상황을 기록하는 데 쓰는 선택적 태스크 목록(`update_tasks`). 옛 Reviewer/Debugger
-상태머신의 authority였으나, 올인원 구조에서는 완료 판정 authority가 세션 `final_status`로 바뀌었다.
-Developer가 자체검증(테스트/빌드)에 통과하면 완료다. tasks는 진행 표시·칸반 용도로 유지한다.
+Kanban.
 
-주요 필드:
+- `title`, `status`, `progress`
+- 정상 상태: `todo → working → testing → done`
 
-- `id`
-- `session_id`
-- `title`
-- `status` (todo/in_progress/done 등 — 진행 표시)
-- `progress`
-- `created_at`, `updated_at`
+모델은 todo/working까지만 직접 설정하고 testing/done은 process verification이 소유한다.
+
+## acceptance_gates
+
+사용자 요구사항 ledger.
+
+- `title`, `description`
+- `verification_method`, `expected_result`
+- `status`: pending | working | passed | failed | unavailable | blocked | abandoned
+- `evidence`, `failure_reason`
+
+`passed/failed`는 process가 실제 command 실행 뒤에만 쓴다. Evidence에는 command/exit/output/expected가 기록된다. Gate update는 기존 requirement를 조용히 삭제하지 않도록 merge/ledger invariants를 사용한다.
 
 ## checkpoints
 
-`write_file`, `edit_file`, `bash`, `save_skill` 등 승인/mutation 경계에서 현재 git SHA를 저장한다.
+mutation 전 Git SHA/step checkpoint.
 
-주요 필드:
-
-- `id`
-- `session_id`
-- `git_sha`
-- `step_no`
-- `created_at`
-
-현재 checkpoint는 audit/rollback 기준점을 제공하지만 자동 rollback 엔진은 아니다.
+- `session_id`, `git_sha`, `step_no`, `created_at`
 
 ## agent_runs
 
-역할별 실행 비용과 성능을 기록한다. 스키마 변화는 기존 DB에 idempotent ALTER 방식으로 보강한다.
+role/model 실행 telemetry.
 
-주요 데이터:
+- model/thinking/reasoning
+- prompt/completion/cache hit/miss tokens
+- model/tool calls, retries, compactions, elapsed
+- selected skills
+- tool raw/visible token estimates
 
-- `session_id`
-- `role`
-- `model`
-- `thinking`
-- `reasoning_effort`
-- `prompt_tokens`
-- `completion_tokens`
-- `cache_hit_tokens`
-- `cache_miss_tokens`
-- `model_calls`
-- `tool_calls`
-- `retries`
-- `compactions`
-- `elapsed_ms`
-- selected Skill 정보
+비용 계산과 benchmark/병목 분석에 사용한다.
 
-이를 기반으로 다음 집계를 계산한다.
+## push_devices
 
-- success rate
-- average tokens per success
-- cache hit ratio
-- Pro escalation rate
-- review first-pass rate
-- debugger activation rate
-- model/tool call count
-- estimated cost(모델 가격 설정이 있을 때)
+Web Push subscription metadata.
 
-API:
+- name, endpoint, subscription JSON, last_seen
 
-- `GET /api/metrics/summary`
-- `GET /api/rooms/{id}/metrics`
+## scheduled_jobs
 
-## Run persistence
+시간 기반 automation.
 
-run 시작 시 `sessions.running=true`, 정상/비정상 종료 시 false로 정리한다. 프로세스가 재시작되며 true가 남은 경우 startup reconcile이 해당 run을 중단된 것으로 표시하고 히스토리에 복구 안내를 남긴다.
+- name, prompt, workspace/session
+- timezone
+- `next_run_at`(naive UTC stored; scheduler authority)
+- recurrence: `"" | daily | interval`
+- recurrence_value
+- auto_approve, enabled, status
+- last_run_at/result
+- retries/max_retries
 
-이는 **실행 continuation 저장**이 아니다. model/tool stack과 pending executor 상태를 복원하는 durable resume은 향후 worker/event replay 단계다.
+현재 별도 `job_runs` table은 없다. run 결과는 session/history/agent_runs와 scheduled_jobs의 last fields를 재사용한다.
 
-## Event log
+## refinements
 
-AgentRuntime의 `send()` 이벤트는 JSONL durable log에 기록한다. 현재 이 로그는 감사/문제 추적 목적이며 PostgreSQL message history와 역할이 다르다.
+반복 failure evidence에서 만든 개선 후보.
 
-향후 Redis Streams 또는 동등한 durable queue를 authoritative execution event replay 계층으로 사용할 수 있으나 현재는 미구현이다.
+- type: skill | supplement
+- scope: project | global
+- target / proposed_change
+- before_text / after_text
+- evidence_runs / evidence_json / failure_pattern
+- expected_effect
+- status: pending | approved | ignored
+- decided_at
 
-## 데이터 원칙
+승인 시 Project/Learned skill 파일에 적용할 수 있고 rollback은 before_text를 사용한다. 자동 main/prompt mutation은 아니다.
 
-- 저장 원본과 모델 context projection 분리
-- cache hit과 miss를 별도 저장
-- 누적 API 비용과 현재 context pressure를 혼동하지 않음
-- telemetry는 최적화 판단용이며 핵심 기준은 `cost per successfully completed task`
+## 파일 기반 durable state
+
+DB 외에도 의도적으로 파일을 사용한다.
+
+- `ROOM_MEMORY.md`: provenance/evidence validation을 통과한 프로젝트 사실
+- `GLOBAL_MEMORY.md`: 모든 room 공통 보조 규칙
+- `.forge/skills/*.md`: curated/project skill
+- `~/.forge/skills/*.md`: global/learned skill
+- JSONL event/error/tool-result logs
+
+## 현재 없는 schema
+
+- durable worker queue/run_state event-sourcing table
+- condition watcher state table
+- generic provider/model profile table
+- parallel worker/worktree ownership table
+
+이들은 proposal이며 현재 schema로 가정하지 않는다.

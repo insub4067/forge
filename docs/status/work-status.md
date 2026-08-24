@@ -1,210 +1,160 @@
-# FORGE — 작업 진행 상태
+# FORGE — Current Work Status
 
-> 마지막 갱신: 2026-08-24 `main`
+> Source audit: 2026-08-24 `main`, memory-hardening commit `34626da1`까지 확인. 이 문서는 Current State authority이며 proposal/handoff보다 우선한다.
 
-## 현재 요약
+## 현재 한 줄 요약
 
-FORGE는 **저렴한 모델을 강한 Harness 안에서 실행해 품질을 프로세스로 보증하는 self-hosted coding runtime**으로 수렴하고 있다.
+FORGE는 **DeepSeek를 두뇌로 쓰되 완료 여부는 Harness가 실제 evidence로 판정하는 self-hosted coding runtime**으로 수렴하고 있다. 현재 단계는 기능 수 확장보다 dogfooding으로 신뢰·사용감·오개입을 줄이는 단계다.
 
-핵심 KPI는 단순 token 절감이 아니다.
-
-```text
-성공률/품질 유지·향상
-→ 검증된 완료
-→ cost per successful task 감소
-→ elapsed 감소
-→ human intervention 감소
-```
-
-## 완료된 핵심 기반
-
-- [x] Triage → Chat / 올인원 Developer
-- [x] Flash-first, 필요 시 Pro escalation
-- [x] Strict Verification Gate(test/build 실제 실행)
-- [x] verification 실패 시 bounded repair
-- [x] 검증 완료 경로의 auto commit/push
-- [x] step-level history persistence
-- [x] 서버 재시작 후 Durable Auto Resume
-- [x] resume crash-loop guard / `AUTO_RESUME=0`
-- [x] JSONL event log + event polling/seq dedup
-- [x] PostgreSQL persistence / model별 telemetry
-- [x] Curated / Learned / Project 3-tier Skills
-- [x] `FORGE_AUTH_TOKEN` HTTP/WebSocket 보호
-- [x] deterministic R0 benchmark 21 tasks + quality tests
-- [x] bounded RSI promotion gate
-- [x] Mac Terminal / Screen / Camera PoC
-- [x] 예약 작업 기반 (one-shot/daily/interval, timezone, restart 복원)
-- [x] 예약 작업 durability (DST 안전 daily, retry 정책, 원자적 claim 중복 방지)
-
-## 품질 보증 상태
-
-가장 중요한 변화는 모델의 "done"과 실제 완료를 분리한 것이다.
+## 현재 completion path
 
 ```text
-Developer done
-→ testing
-→ process가 test/build 실행
-→ PASS만 completed
+User goal
+→ chat/work routing
+→ simple Developer | complex Planner→Developer→fresh Reviewer
+→ Acceptance Gate coverage
+→ Generic Verification
+→ Acceptance Verification
+→ Integration Verification
+→ deterministic CompletionSummary
+→ completed / completed_unverified / verification_failed / ...
 ```
 
-(2026-08-24 해결) pytest exit code 처리는 `PASSED / FAILED / UNAVAILABLE` 3상태로 분리됐다.
-exit 2/3/4/5와 timeout은 `unavailable`로 남아 "검증 못 함"이 "검증 성공"으로 승격되지 않는다.
+핵심 불변식:
 
-### Project Memory — Evidence-Bound (2026-08-24)
+- 코드 변경 + gate 0 → `completed` 불가.
+- Gate Recovery는 1회 안전망일 뿐 정상 경로가 아니다. Developer가 구현 전에 gate를 만든다.
+- `completed_unverified`는 auto push 금지.
+- 모델 self-report는 completion evidence가 아니다.
+- current source가 memory보다 우선한다.
 
-> **source/evidence로 뒷받침되지 않는 fact는 ROOM_MEMORY에 저장되지 않는다.**
+## 최근 완료된 중요한 hardening
 
-LLM 출력 자체는 evidence가 아니다. utility 모델은 주어진 검증 사실을 압축만 하고,
-각 fact마다 근거 파일(source)과 gate/검증 명령(evidence)을 함께 낸다. 그 후
-`app/runtime/memory_guard.py`가 결정적으로 검증한다.
+### Acceptance / completion
 
-거절 사유: `empty_fact` / `no_source` / `invalid_source` / `unrelated_source` /
-`no_evidence` / `duplicate` / `unsupported_claim`. 이벤트로 남는다
-(`project_memory_candidate` / `_saved` / `_rejected`).
+- Gate Ledger와 process-owned status/evidence.
+- gate command host-shell bypass 제거 → `DockerSandbox.run_verify()`.
+- Developer prompt에서 gate를 구현 전 step 0으로 앞당김.
+- gate 0 code run의 1회 recovery + fallback `completed_unverified`.
+- gate quality anti-pattern(`grep` 존재 확인, generic pytest 재탕, 작업 수단을 gate로 등록) 지침 강화.
+- CompletionSummary deterministic formatter + 새로고침 후 history persistence.
+- generic unavailable인데 “최종 회귀 확인”이라고 말하던 report 모순 제거.
 
-핵심 검사는 `unsupported_claim`이다 — fact가 언급한 함수명·API 경로·기술 이름이
-인용한 source 파일에 실제로 없으면 거부한다.
+### Context
 
-**실측 오염 사례(회귀 픽스처로 고정)**: 원격 입력 구현은 `POST /api/mac/input`인데
-"실제 제어는 WebSocket/WebRTC 채널로 별도 연결"이라는 문장이 ROOM_MEMORY에 영속됐다.
-WebSocket은 터미널(PTY) 전용이고 원격 입력과 무관하다. 한 번 들어간 거짓 기억은 이후
-모든 세션 system context에 실린다. `test_memory_guard.py`가 이 사례를 고정한다.
+- large file symbol map + `find_symbol`.
+- tool result pruning/store/retrieval.
+- fresh Planner/Reviewer context + 파생 context `persist=False`.
+- 131k logical budget, 75% compaction, 95% hard block.
+- compaction summary를 DB에 영속해 run 경계를 넘어 재사용.
 
-우선순위: **Current Source > Current Config > Process Evidence > Verified Memory**.
-메모리 주입부(system prompt)에도 "충돌하면 현재 소스를 따른다"를 명시한다.
+### Project Memory
 
-원칙: 잘 기억하는 것 > 많이 기억하는 것. **모르는 것 > 틀리게 기억하는 것.**
+실제 오염 사례(HTTP remote input을 WebSocket/WebRTC라고 기억)가 발생해 memory를 harden했다.
 
-미구현(의도적): memory GC/압축, semantic judge, provenance DB 스키마. 현재는 Markdown +
-4000자 cap을 유지한다.
-
-### Gate Coverage Completion Policy (2026-08-24)
-
-> **Gate가 없는 코드 변경은 완전히 검증된 완료로 취급하지 않는다.**
-
-실측(격리 프로브 3/3)에서 모델은 `update_tasks`는 부르고 `update_gates`만 건너뛰었고,
-그 run들이 전부 `completed`로 끝났다. gate가 없으면 완료 근거는 generic verification
-(기존 test/build 통과) 하나뿐이고, 사용자 요구사항 충족은 확인되지 않는다.
-
-현재 정책:
+현재:
 
 ```text
-Developer 구현
-→ files_changed > 0 ?
-   → gate 0 ?  → Gate Recovery 1회(gate 등록 전용 턴, flash, step 3)
-                 → 여전히 gate 0 → generic verification → completed_unverified
-   → gate > 0  → 기존 검증 흐름(generic → acceptance → integration)
+passed gate/evidence + changed files
+→ utility model candidate {fact, source, evidence}
+→ memory_guard deterministic validation
+→ accepted fact만 ROOM_MEMORY
 ```
 
-- gate 없음 ≠ `verification_failed` (실패한 게 아니다)
-- gate 없음 ≠ `completed` (완전히 검증된 것도 아니다)
-- gate 없음 = `completed_unverified`
-- 부수 결과: gate 없는 run은 **origin push 대상이 아니다**(검증된 것만 배포 경로).
-- 복구는 **최대 1회**. 복구가 예외로 죽어도 run은 안전 상태로 마감한다.
-- 코드 변경이 없거나 작업 run이 아니면 복구하지 않는다(억지 gate 금지).
+source path/evidence/changed-file 관계/unsupported claim/duplicate를 검사하고 rejected 이유를 event로 남긴다. 기존 ROOM_MEMORY도 소스와 대조해 정화했다.
 
-**알려진 리스크(관찰 중, 미완화)**: 복구가 만든 gate가 잘못 작성돼 non-zero로 끝나면
-(예: 존재하지 않는 경로로 `cd`, import 오타) 프로세스는 그걸 코드 결함으로 보고 Developer
-수리 루프를 태운다 → 맞는 코드가 `verification_failed`로 갈 수 있다. 잘못된 코드를 push하지는
-않으므로 invariant는 유지되고, false-negative("못했습니다")는 허용 범위다. 프롬프트를 cwd
-가정 없이 쓰도록 강화했고(프로브에서 4건 중 3건 정상), 발화 여부는 telemetry로 관찰한다 —
-`coverage=recovered_gated` 중 `verification_failed` 비율이 뜨면 그때 겨냥한다(추측 완화 금지).
+### Session / UX
 
-핵심 함수: `resolve_completion_verification`, `needs_gate_recovery`,
-`build_gate_recovery_context`, `_coverage_kind` (전부 순수 함수 + 테스트로 고정).
-계측: `gate_coverage` 이벤트(`coverage` ∈ gated / recovered_gated / generic_only /
-no_change / not_applicable), 집계는 `backend/gate_coverage.py`.
+- auto_approve와 model_tier를 세션별 DB authority로 통일.
+- room 전환 시 해당 세션 설정을 UI로 복원.
+- 모델 티어 `pro` 경로를 regression test로 고정.
+- activity 상태를 상단 카드 하나로, task 진행을 하단 task-bar 하나로 정리해 중복 표시 제거.
+- 모바일 swipe/pull-to-refresh/remote pointer UX 개선.
 
-**정상 경로 = Developer가 gate를 앞당겨 만든다**(복구는 안전망). 초기 실측에서 모델이
-`update_gates`를 7/7 건너뛴 원인은 프롬프트 구조였다 — `update_tasks`(칸반)는 실행 루프
-step 0에 부각되고 `update_gates`는 뒷 섹션에 있어 뒷전이었다. gate 등록을 step 0에
-update_tasks와 나란히 넣자(둘 다 "코드 쓰기 전 등록") 이후 프로브에서 `read_file →
-update_gates → write_file` 순으로 앞당겨졌다(`coverage=gated`, 복구 미발생). gate 품질
-규칙(사용자 요구사항만·심볼 존재 검사 금지·generic 재탕 금지)을 developer/gate_recovery
-프롬프트에 정렬했다. 멀티 요구사항 작업(3요구사항→gate 3개, 디스크 영속화 포함)에서
-전부 앞당겨 생성·실행·통과 확인.
+### Evaluation / RSI
 
-## 핵심 KPI
+- R0 deterministic benchmark 25 tasks.
+- script-style tests가 pytest에서 조용히 누락되던 사각 제거.
+- R1 candidate worktree/self-mod/benchmark/report/human promotion 구현.
+- no-op candidate는 benchmark 전에 REJECT.
 
-기능 수나 token 절감이 아니다. 아래 순서로 본다.
+### Automation / Remote / MCP
 
-| 지표 | 의미 |
-|---|---|
-| `verified_task_success_rate` | 검증까지 통과한 완료 비율 |
-| **`false_completion_rate`** | **"완료했습니다" 했지만 요구사항 미충족 — 가장 위험한 실패** |
-| `human_interventions_per_task` | 사람이 끼어들어야 한 횟수 |
-| `repair_success_rate` | 검증 실패 후 수리가 성공한 비율 |
-| `cost_per_verified_task` | 검증된 완료 1건당 비용 |
-| `elapsed_per_verified_task` | 검증된 완료 1건당 소요 시간 |
+- Scheduled one-shot/daily/interval + timezone + durable next_run_at + atomic claim + retry.
+- MCP stdio execute/status/result/cancel.
+- Mac host PTY terminal, screen polling, pointer/keyboard input, camera PoC.
+- auth token 사용 시 uploads까지 보호.
 
-일반 실패("못했습니다")는 허용 가능하다. false completion은 아니다 — 사용자가 확인하지
-않아도 되는 에이전트라는 전제 자체를 깨기 때문이다. Gate coverage는 이 지표를 줄이는 수단이다.
+## 현재 provider truth
 
-## Durable Resume
+`backend/app/llm/factory.py`는 **DeepSeek adapter만** 지원한다. OpenRouter/Ling은 실험 후 repeated-tool behavior 문제로 main에서 되돌렸다. On-prem/OpenAI-compatible provider는 proposal이지 현재 기능이 아니다.
 
-이전 문서의 "진짜 resume 미구현" 상태는 더 이상 맞지 않는다. 현재는 unfinished run을 startup에서 찾아 저장된 history 기반으로 headless resume한다.
+## 알려진 위험 / 관찰 항목
 
-다만 resume 시 approval을 자동 처리하는 경로가 원래 run보다 권한을 넓힐 가능성이 있으므로 **resume-safe capability/approval**이 다음 보안 과제다.
+### 1. Gate semantic quality
 
-## Benchmark / RSI
+Gate 존재 문제는 크게 줄었지만 시험 문제 자체는 여전히 모델이 작성한다. weak gate가 실제 사용자 요구를 충분히 대표하는지는 deterministic benchmark/external checker와 비교하며 측정해야 한다. false PASS뿐 아니라 잘못된 gate로 맞는 코드를 막는 false-negative도 관찰한다.
 
-- R0 deterministic benchmark: 21 tasks
-- checker 자체 false-positive/정답 판정 self-test
-- model tier 비교 기반
-- `backend/rsi.py`: success rate → cost → elapsed promotion gate
+### 2. Memory guard의 보수성
 
-아직 자동화되지 않은 것:
+Evidence binding은 거짓 durable memory를 크게 줄였지만 semantic proof engine은 아니다. token/source 기반 guard는 valid fact를 거절할 수도 있고 미묘한 의미 오류를 모두 증명하지 못한다. 저장량보다 정확성을 우선한다.
 
-- candidate worktree 생성/실행
-- baseline/candidate 자동 benchmark orchestration
-- promotion 후 merge
+### 3. Startup error visibility
 
-최종 merge는 당분간 사람 승인으로 유지한다.
+`main.py` lifespan의 DB migration/resume setup이 현재 broad `except Exception: pass`로 감싸져 있다. schema/startup 실패를 조용히 숨길 수 있으므로 운영 신뢰성 관점에서 개선 후보다.
 
-## Remote Mac
+### 4. Auto Resume의 의미
 
-- Host PTY + WebSocket + xterm.js Terminal
-- view-only Screen
-- `imagesnap` Camera polling PoC
-- application auth 추가됨
+현재 resume는 Python coroutine/checkpoint를 그대로 이어붙이는 것이 아니라 **persisted history/session state에서 안전한 새 run을 재구성**한다. independent durable worker/event-sourced continuation과는 다르다.
 
-Host capability는 여전히 높은 위험 영역이므로 network Zero Trust와 application auth를 둘 다 유지한다.
+### 5. Host capabilities
 
-## Persistent Automation
+Host PTY, host mode, screen/input/camera는 높은 권한이다. `FORGE_AUTH_TOKEN` 기본값은 비어 있으므로 remote 배포에서는 반드시 명시 설정 + Zero Trust/VPN 계층을 사용한다.
 
-Scheduled Job 기반은 구현됐지만 Condition/Deferred, restart/idempotency/timezone/DST semantics는 추가 검증이 필요하다.
+## 현재 KPI
+
+우선순위:
+
+1. `verified_task_success_rate`
+2. `false_completion_rate`
+3. `human_interventions_per_task`
+4. `repair_success_rate`
+5. `cost_per_verified_task`
+6. `elapsed_per_verified_task`
+
+실패를 정직하게 보고하는 것은 허용된다. 실패했는데 성공이라고 말하는 것이 가장 나쁘다.
 
 ## 다음 우선순위
 
-### P0 — Reliability semantics
-- [x] verification `PASSED / FAILED / UNAVAILABLE` (`_verify` 3상태)
-- [x] failed/unavailable에서 commit/push invariant 테스트 (`test_acceptance_gates`,
-      `test_reliability_invariants` — verification_failed는 커밋 금지, completed_unverified는 push 금지)
-- [x] resume-safe approval/capability (재개가 저장된 auto_approve·model_tier를 복원, 권한 확대 없음)
-- [ ] **acceptance gate 커버리지 강제** — 계측(G0)·정직 표기(G1) 완료, 강제(G2)는 실사용 데이터 대기.
-      현 최우선 신뢰성 과제 → `docs/proposal/gate-coverage-enforcement.md`
+### P0 — Dogfood reliability
 
-### P1 — Evaluation
-- [ ] benchmark task/난이도 확대
-- [ ] 외부 harness와 동일 task 비교
-- [ ] model/skills 정책을 success-rate gate로 평가
+- gate semantic coverage/false-negative를 실제 작업과 benchmark에서 수집.
+- startup migration/resume exception visibility 개선.
+- CompletionSummary/approval/steering에서 사용자가 불필요하게 개입하는 지점 측정.
+- memory `saved/rejected` telemetry로 guard 품질 관찰.
 
-### P2 — Bounded RSI R1
-- [x] candidate worktree
-- [x] baseline/candidate 자동 benchmark
-- [x] promotion report
-- [x] human-approved merge
-- [x] FORGE headless 자기수정 (`forge:<goal>` 구동)
+### P1 — Provider independence
 
-### P3 — Automation durability
-- [ ] Scheduled/Deferred/Condition semantics
-- [ ] idempotency / timezone / restart
+- 기존 DeepSeek behavior를 기준선으로 OpenAI-compatible adapter를 최소 구현.
+- provider가 바뀌어도 AgentRuntime/verification/memory/skills는 바뀌지 않게 한다.
+- 새 모델 승격은 verified success → cost/success → elapsed 순으로 평가.
 
-### P4 — Tool 효율
-- [ ] Tool Script/RPC Mode
+### P2 — Persistent execution
 
-## 원칙
+- Scheduler의 Deferred/Condition semantics.
+- API process와 독립적인 durable worker/queue가 실제로 필요한지 설계/PoC.
+- restart/idempotency/run ownership을 더 명확하게 한다.
 
-FORGE는 "싼 모델을 쓰는 제품"이 아니다.
+### P3 — Bounded workers
 
-**저렴한 모델의 약점을 Harness의 검증·복구·승격·계측으로 통제하여, 강한 모델에만 의존하지 않고도 믿을 수 있는 결과를 만드는 시스템**이다.
+- fresh-context worker는 read-only/독립 task부터.
+- shared-file mutation은 isolation/ownership 없이는 병렬화하지 않는다.
+- verified throughput 개선이 없으면 도입하지 않는다.
+
+### P4 — Tool/Execution optimization
+
+Tool Script/RPC, Local/Docker/SSH ExecutionBackend는 현재 architecture 의무사항이 아니다. 측정된 round-trip/운영 문제가 생길 때 구현한다.
+
+## Test snapshot
+
+Memory hardening commit에서 `pytest` **116 passed**가 보고됐다. 이후 코드 변경 시 이 수치는 다시 검증해야 한다.
