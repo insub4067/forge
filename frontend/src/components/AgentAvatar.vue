@@ -65,6 +65,8 @@ defineProps({
         <circle class="eye" cx="39" cy="22" r="3.2" />
         <path class="mouth" d="M25 28q7 5 14 0" />
         <rect class="body" x="17" y="41" width="30" height="19" rx="8" />
+        <line class="arm" x1="18" y1="47" x2="11" y2="51" />
+        <line class="arm" x1="46" y1="47" x2="53" y2="51" />
         <g class="gear">
           <path d="M14 23a18 18 0 0 1 36 0" />
           <rect x="10.5" y="21.5" width="6" height="9" rx="2.5" />
