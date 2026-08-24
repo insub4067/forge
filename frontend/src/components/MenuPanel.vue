@@ -12,6 +12,7 @@ const props = defineProps({
 const emit = defineEmits([
   'close',
   'session-detail',
+  'fork-session',
   'top-up',
   'files',
   'git',
@@ -38,6 +39,11 @@ const emit = defineEmits([
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h5M9.5 14.5h5"/></svg>
         <span>충전 잔액</span>
         <span class="menu-ctx">${{ adminBalance.usd }}</span>
+      </div>
+      <div class="menu-item" @click="emit('fork-session')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="9"/></svg>
+        <span>새 세션 · 같은 워크스페이스</span>
+        <span class="menu-ctx">컨텍스트 리셋</span>
       </div>
       <div class="menu-item" @click="emit('files')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>

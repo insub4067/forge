@@ -523,6 +523,31 @@ async function selectRoom(id, isNew = false) {
   checkRunning()
 }
 
+// 같은 워크스페이스로 새 세션 시작(컨텍스트만 리셋) — 작업 경계에서 히스토리 누적·드리프트·
+// 비용을 끊는다. 워크스페이스·모드는 현재 세션에서 승계한다.
+async function forkSession() {
+  const r = currentRoom()
+  const ws = r?.workspace_path || ''
+  try {
+    const res = await fetch('/api/rooms', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'New Session', workspace_path: ws }),
+    })
+    const data = await res.json()
+    if (!data || !data.id) return
+    // 모드 승계 — work는 워크스페이스가 있어야 하므로 ws 있을 때만.
+    const mode = r?.mode === 'work' && ws ? 'work' : r?.mode === 'chat' ? 'chat' : ''
+    if (mode) {
+      await fetch(`/api/rooms/${data.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      }).catch(() => {})
+    }
+    await loadRooms()
+    await selectRoom(data.id, true)
+  } catch {}
+}
+
 // 검색 결과 클릭 → 방을 열고 매칭 메시지로 스크롤+하이라이트
 async function jumpToMessage(r, q = '') {
   const qq = (q || '').toLowerCase()
@@ -1421,6 +1446,7 @@ document.addEventListener('visibilitychange', () => {
       :themes="THEMES"
       @close="showMenu = false"
       @session-detail="showSessionDetail = true; showMenu = false"
+      @fork-session="forkSession(); showMenu = false"
       @top-up="openTopUpConfirm(); showMenu = false"
       @files="showFiles = true; showMenu = false"
       @git="showGit = true; showMenu = false"
