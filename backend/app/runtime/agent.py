@@ -304,6 +304,28 @@ def _planner_context(all_messages: list[dict], max_msgs: int = 8) -> list[dict]:
     return clean[-max_msgs:]
 
 
+def _reviewer_context(all_messages: list[dict], plan: str) -> list[dict]:
+    """Reviewer에게 주는 fresh·minimal 컨텍스트 — Developer의 작업 기록을 주지 않는다.
+
+    두 가지 이유가 있고, 두 번째가 본질이다.
+    1) 비용 — 전체 transcript 재전송은 planner에서 이미 비용 73%를 만든 패턴이다.
+    2) **독립성** — Developer의 추론을 읽은 리뷰어는 그 프레이밍과 맹점을 그대로 물려받는다.
+       "왜 이렇게 했는지"를 먼저 읽으면 결과가 아니라 변명을 검토하게 된다. 리뷰어의
+       가치는 결과물을 처음 보는 눈으로 본다는 것뿐이다(self-grading 방지).
+
+    그래서 원 요청 + 완료 조건(plan)만 주고, 변경은 git diff로 직접 확인하게 한다
+    (reviewer.md 검증 순서 1번이 이미 그렇게 규정한다).
+    """
+    msgs = [m for m in all_messages if m.get("role") == "user"][-3:]
+    if plan:
+        msgs.append({"role": "assistant", "content": "계획(완료 조건):\n" + plan})
+    msgs.append({"role": "user", "content":
+                 "위 요청과 완료 조건을 기준으로 방금 끝난 작업을 독립 검증하세요. "
+                 "Developer의 작업 기록은 주어지지 않습니다 — `git diff`로 실제 변경을 직접 "
+                 "확인하고, 테스트·빌드를 실제로 실행해 판정하세요."})
+    return msgs
+
+
 def _last_assistant_text(messages: list[dict]) -> str:
     """마지막 assistant 텍스트(계획·리뷰 판정 추출용)."""
     for m in reversed(messages):
@@ -929,6 +951,7 @@ class AgentRuntime:
         escalate: bool = False,
         has_image: bool = False,
         plan: str = "",
+        persist: bool = True,
     ) -> tuple:
         route = self.router.select_model(role, retry_count, complexity, escalate=escalate,
                                          has_image=has_image,
@@ -971,7 +994,9 @@ class AgentRuntime:
             # durable: 스텝마다 진행 history를 저장한다 — 중단(재시작·크래시·스트림 끊김)돼도
             # 완료된 스텝이 유실되지 않고, 재개 시 이 history에서 이어서 계속할 수 있다.
             # (이전엔 run 종료 시 한 번만 저장해 중단되면 그 run 전체가 사라졌다.)
-            if session_id:
+            # persist=False인 역할(planner·reviewer)은 세션 transcript가 아니라 파생된
+            # 축소 컨텍스트 위에서 돈다 — 그걸 저장하면 세션 기록을 그 몇 줄로 덮어쓴다.
+            if session_id and persist:
                 try:
                     await store.save_history(session_id, all_messages)
                 except Exception as err:
@@ -2069,6 +2094,7 @@ class AgentRuntime:
             p_status, p, c, route = await self._run_role(
                 "planner", planner_msgs, send, session_id, ws, state, recent_calls,
                 step_base, room_memory, tools=READ_ONLY_TOOL_SCHEMAS, skills=skills,
+                persist=False,
             )
             await record("planner", p, c, route)
             step_base += PLANNER_MAX_STEPS
@@ -2087,20 +2113,27 @@ class AgentRuntime:
                 if status == "done":
                     # 2c. Reviewer — 독립 검증(flash). 문제 시 Developer가 1회 수정
                     #     (리뷰↔수정 왕복 churn 방지 — 리뷰 루프는 최대 1회).
+                    reviewer_msgs = _reviewer_context(all_messages, plan)
                     r_status, p, c, route = await self._run_role(
-                        "reviewer", all_messages, send, session_id, ws, state, recent_calls,
-                        step_base, room_memory, skills=skills,
+                        "reviewer", reviewer_msgs, send, session_id, ws, state, recent_calls,
+                        step_base, room_memory, skills=skills, persist=False,
                     )
                     await record("reviewer", p, c, route)
                     step_base += REVIEWER_MAX_STEPS
                     # reviewer.md 규약: 마지막 줄이 정확히 PASS 또는 FAIL:로 시작한다.
                     # 전체 부분검색은 "does not pass"·"통과(pass) 못함" 같은 FAIL 본문에
                     # 걸려 판정을 뒤집으므로, 마지막 줄만 본다.
-                    _lines = _last_assistant_text(all_messages).strip().splitlines()
+                    _review = _last_assistant_text(reviewer_msgs).strip()
+                    _lines = _review.splitlines()
                     _verdict = _lines[-1].strip().upper() if _lines else ""
                     review_pass = r_status == "done" and _verdict.startswith("PASS")
                     if not review_pass:
-                        # 리뷰 피드백(FAIL 내용)이 컨텍스트에 남아 있어 Developer가 그대로 보고 수정.
+                        # 리뷰어가 별도 컨텍스트에서 돌므로 지적이 자동으로 남지 않는다 —
+                        # Developer가 보고 고칠 수 있게 명시적으로 넣어 준다.
+                        if _review:
+                            all_messages.append({
+                                "role": "user",
+                                "content": "[Reviewer 지적 — 수정하세요]\n" + _review})
                         status = await _run_developer(plan)
             else:
                 # Planner 실패 — 안전 폴백: 계획 없이 올인원 Developer로 처리.

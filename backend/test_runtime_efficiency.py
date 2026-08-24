@@ -286,6 +286,35 @@ def test_project_memory_needs_process_evidence():
     print("OK 프로젝트 메모리는 process-owned 근거가 있을 때만 적립")
 
 
+
+def test_reviewer_context_is_fresh_and_minimal():
+    """Reviewer는 Developer 작업 기록을 받지 않는다 — 그 프레이밍을 물려받으면 결과가
+    아니라 변명을 검토하게 된다(self-grading). 비용도 planner 73% 패턴의 재발이다."""
+    import json
+    from app.runtime.agent import _reviewer_context
+
+    all_messages = [
+        {"role": "user", "content": "로그인 붙여줘"},
+        {"role": "assistant", "content": "auth.py를 이렇게 고치는 게 최선입니다"},
+        {"role": "assistant", "tool_calls": [{"id": "1", "function": {"name": "read_file"}}]},
+        {"role": "tool", "tool_call_id": "1", "content": "파일 내용 전체..."},
+        {"role": "assistant", "content": "다 됐습니다"},
+    ]
+    msgs = _reviewer_context(all_messages, "완료 조건: 로그인 성공/실패 응답")
+
+    blob = json.dumps(msgs, ensure_ascii=False)
+    assert "로그인 붙여줘" in blob, "원 요청은 있어야 한다"
+    assert "완료 조건" in blob, "plan(완료 조건)은 있어야 한다"
+    assert "최선입니다" not in blob, "Developer 추론이 새어 들어갔다"
+    assert "다 됐습니다" not in blob, "Developer self-report가 새어 들어갔다"
+    assert "파일 내용 전체" not in blob, "도구 결과가 새어 들어갔다"
+    assert not any(m.get("role") == "tool" for m in msgs), "orphan tool 메시지는 400을 낸다"
+    assert "git diff" in blob, "변경을 직접 확인하라는 지시가 있어야 한다"
+    # plan이 없어도 동작한다(Planner 실패 폴백 경로)
+    assert "로그인 붙여줘" in json.dumps(_reviewer_context(all_messages, ""), ensure_ascii=False)
+    print("OK Reviewer 컨텍스트는 fresh·minimal")
+
+
 if __name__ == "__main__":
     test_compaction_thresholds()
     test_skill_selection()
@@ -299,5 +328,6 @@ if __name__ == "__main__":
     test_browser_check_local_only()
     test_developer_escalation()
     test_project_memory_needs_process_evidence()
+    test_reviewer_context_is_fresh_and_minimal()
     print("\n전체 통과")
 

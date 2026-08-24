@@ -300,7 +300,29 @@ async def main():
     assert resumable("/nonexistent-xyz-123") is False
     print("resume workspace 가드: 루트/없음/비디렉터리는 재개 안 함: OK")
 
+    test_derived_context_roles_do_not_overwrite_history()
     print("\n모든 invariant 통과 ✓")
+
+
+
+def test_derived_context_roles_do_not_overwrite_history():
+    """planner·reviewer는 축소된 파생 컨텍스트 위에서 돈다. _run_role이 그걸 그대로
+    save_history하면 세션 transcript가 그 몇 줄로 덮여 사라진다(비파괴 원칙 위반).
+    reviewer는 마지막에 돌기 때문에 덮어쓰기가 영구적이다."""
+    import inspect
+    from app.runtime import agent as A
+
+    src = inspect.getsource(A.AgentRuntime._run_role)
+    assert "if session_id and persist:" in src, "persist 가드가 사라졌다"
+
+    run_src = inspect.getsource(A.AgentRuntime.run)
+    # planner/reviewer 호출이 파생 컨텍스트를 쓰면서 persist=False가 아니면 유실된다.
+    for role, ctx in (("planner", "planner_msgs"), ("reviewer", "reviewer_msgs")):
+        i = run_src.index(f'"{role}", {ctx}')
+        call = run_src[i:i + 400]
+        assert "persist=False" in call.split(")")[0] + ")", \
+            f"{role}가 파생 컨텍스트로 history를 덮어쓴다"
+    print("derived context invariant: planner/reviewer는 세션 history를 덮지 않는다: OK")
 
 
 if __name__ == "__main__":
