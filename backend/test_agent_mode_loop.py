@@ -21,7 +21,7 @@ def make_runtime(dev_status="done", review_status="done", review_text="PASS",
     async def fake_run_role(role, all_messages, send, session_id, ws, state,
                             recent_calls, step_base, room_memory="", retry_count=0,
                             tools=None, skills="", complexity="normal", escalate=False, has_image=False,
-                            plan=""):
+                            plan="", persist=True):
         has_plan = bool(plan)
         calls.append((role, escalate, has_plan))
         if role == "developer":
