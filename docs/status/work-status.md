@@ -75,6 +75,13 @@ Developer 구현
 - 복구는 **최대 1회**. 복구가 예외로 죽어도 run은 안전 상태로 마감한다.
 - 코드 변경이 없거나 작업 run이 아니면 복구하지 않는다(억지 gate 금지).
 
+**알려진 리스크(관찰 중, 미완화)**: 복구가 만든 gate가 잘못 작성돼 non-zero로 끝나면
+(예: 존재하지 않는 경로로 `cd`, import 오타) 프로세스는 그걸 코드 결함으로 보고 Developer
+수리 루프를 태운다 → 맞는 코드가 `verification_failed`로 갈 수 있다. 잘못된 코드를 push하지는
+않으므로 invariant는 유지되고, false-negative("못했습니다")는 허용 범위다. 프롬프트를 cwd
+가정 없이 쓰도록 강화했고(프로브에서 4건 중 3건 정상), 발화 여부는 telemetry로 관찰한다 —
+`coverage=recovered_gated` 중 `verification_failed` 비율이 뜨면 그때 겨냥한다(추측 완화 금지).
+
 핵심 함수: `resolve_completion_verification`, `needs_gate_recovery`,
 `build_gate_recovery_context`, `_coverage_kind` (전부 순수 함수 + 테스트로 고정).
 계측: `gate_coverage` 이벤트(`coverage` ∈ gated / recovered_gated / generic_only /
