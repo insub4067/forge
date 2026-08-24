@@ -2399,6 +2399,35 @@ footer .image-preview-row {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
+/* ===== 풀투리프레시(세션·예약 목록) ===== */
+.ptr-scroll {
+  position: relative;
+  overscroll-behavior-y: contain; /* 브라우저 고무줄이 당김과 겹치지 않게 */
+}
+.ptr-hint {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  right: 0;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted, #8a8a8a);
+  pointer-events: none;
+}
+.ptr-hint.ready .ptr-text { color: var(--accent, #4a9eff); }
+.ptr-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border, #3a3a3a);
+  border-top-color: var(--accent, #4a9eff);
+  border-radius: 50%;
+  animation: ptr-spin 0.7s linear infinite;
+}
+@keyframes ptr-spin { to { transform: rotate(360deg); } }
 .rooms-add {
   border-top: 1px solid var(--border);
   padding: 16px calc(16px);

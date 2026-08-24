@@ -16,6 +16,9 @@ eggs/
 .eggs/
 lib/
 lib64/
+# 단, 프론트엔드 소스의 lib는 Python 빌드 산출물이 아니다 — 추적한다.
+!frontend/src/lib/
+!frontend/src/lib/**
 parts/
 sdist/
 var/

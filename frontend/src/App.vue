@@ -1472,6 +1472,7 @@ document.addEventListener('visibilitychange', () => {
       :is-wide="isWide"
       :pinned-sidebar="pinnedSidebar"
       :show-rooms="showRooms"
+      :refresh-rooms="loadRooms"
       @select-room="selectRoom"
       @jump-to-message="jumpToMessage"
       @delete-room="deleteRoom"

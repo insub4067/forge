@@ -1,9 +1,10 @@
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { makeMoveThrottle } from '../lib/moveThrottle.js'
+import { pullDistance, pullReady } from '../lib/pullToRefresh.js'
 
 const props = defineProps({
   rooms: { type: Array, default: () => [] },
@@ -11,6 +12,8 @@ const props = defineProps({
   isWide: { type: Boolean, default: false },
   pinnedSidebar: { type: Boolean, default: true },
   showRooms: { type: Boolean, default: false },
+  // 세션 목록 새로고침(rooms는 부모 소유) — await 가능한 함수 prop.
+  refreshRooms: { type: Function, default: null },
 })
 const emit = defineEmits([
   'select-room',
@@ -365,6 +368,43 @@ function stopCamera() {
 // ─── 스와이프 삭제 ───
 const swipedRoomId = ref(null)
 const swipedJobId = ref(null)
+// ─── 풀투리프레시(세션·예약 목록) ───
+// 스크롤 최상단에서 아래로 당기면 새로고침. 가로 스와이프(아이템 삭제)와 축이 달라 충돌 안 함.
+const pullY = ref(0)
+const pullRefreshing = ref(false)
+let pullStartY = 0
+let pullAtTop = false
+function activeRefresh() {
+  if (sidebarTab.value === 'jobs') return loadJobs()
+  if (sidebarTab.value === 'sessions' && props.refreshRooms) return props.refreshRooms()
+  return Promise.resolve()
+}
+function onPullStart(e) {
+  if (pullRefreshing.value) return
+  pullAtTop = e.currentTarget.scrollTop <= 0
+  pullStartY = e.touches[0].clientY
+}
+function onPullMove(e) {
+  if (!pullAtTop || pullRefreshing.value) return
+  const dy = e.touches[0].clientY - pullStartY
+  const d = pullDistance(dy)
+  pullY.value = d
+  if (d > 0) e.preventDefault()  // 당기는 동안만 브라우저 고무줄 스크롤을 막는다
+}
+const pullReadyNow = computed(() => pullReady(pullY.value))
+async function onPullEnd() {
+  if (pullRefreshing.value) return
+  if (pullReady(pullY.value)) {
+    pullRefreshing.value = true
+    try { await activeRefresh() } finally {
+      pullRefreshing.value = false
+      pullY.value = 0
+    }
+  } else {
+    pullY.value = 0
+  }
+}
+
 let touchStartX = 0
 let touchStartY = 0
 function onRoomTouchStart(e) {
@@ -476,7 +516,11 @@ watch(
         <div v-else-if="searchQuery" class="rooms-scroll">
           <div class="admin-sub" style="padding:16px">검색 결과가 없습니다.</div>
         </div>
-        <div v-else class="rooms-scroll">
+        <div v-else class="rooms-scroll ptr-scroll" @touchstart.passive="onPullStart" @touchmove="onPullMove" @touchend="onPullEnd" :style="{ transform: (pullY || pullRefreshing) ? `translateY(${pullRefreshing ? 40 : pullY}px)` : '', transition: (pullY && !pullRefreshing) ? 'none' : 'transform .22s' }">
+                <div class="ptr-hint" :class="{ ready: pullReadyNow, spin: pullRefreshing }">
+            <span v-if="pullRefreshing" class="ptr-spinner"></span>
+            <span v-else class="ptr-text">{{ pullReadyNow ? '놓으면 새로고침' : '당겨서 새로고침' }}</span>
+          </div>
           <div v-for="r in rooms" :key="r.id" class="room-swipe">
             <button class="room-swipe-del" @click.stop="emit('delete-room', r.id)">삭제</button>
             <div
@@ -504,7 +548,11 @@ watch(
 
       <!-- 예약 탭 -->
       <template v-else-if="sidebarTab === 'jobs'">
-        <div class="rooms-scroll">
+        <div class="rooms-scroll ptr-scroll" @touchstart.passive="onPullStart" @touchmove="onPullMove" @touchend="onPullEnd" :style="{ transform: (pullY || pullRefreshing) ? `translateY(${pullRefreshing ? 40 : pullY}px)` : '', transition: (pullY && !pullRefreshing) ? 'none' : 'transform .22s' }">
+                <div class="ptr-hint" :class="{ ready: pullReadyNow, spin: pullRefreshing }">
+            <span v-if="pullRefreshing" class="ptr-spinner"></span>
+            <span v-else class="ptr-text">{{ pullReadyNow ? '놓으면 새로고침' : '당겨서 새로고침' }}</span>
+          </div>
           <div v-if="!jobs.length" class="admin-sub" style="padding:16px">예약된 작업이 없습니다. 우측 상단 +로 추가하세요.</div>
           <div v-for="j in jobs" :key="j.id" class="room-swipe">
             <button class="room-swipe-del" @click.stop="deleteJob(j.id)">삭제</button>
