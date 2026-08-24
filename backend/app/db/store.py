@@ -104,6 +104,8 @@ async def delete_room(session_id: str) -> None:
         await s.execute(delete(Message).where(Message.session_id == session_id))
         await s.execute(delete(Task).where(Task.session_id == session_id))
         await s.execute(delete(Checkpoint).where(Checkpoint.session_id == session_id))
+        # acceptance_gates도 sessions FK — 안 지우면 세션 삭제가 FK 위반으로 실패한다.
+        await s.execute(delete(AcceptanceGate).where(AcceptanceGate.session_id == session_id))
         await s.execute(delete(Session).where(Session.id == session_id))
         await s.commit()
 

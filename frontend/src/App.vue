@@ -218,6 +218,17 @@ async function checkRunning() {
   if (!id) return
   if (!busy.value) await fetchStatus(id).catch(() => {})
   startRunningPoll()
+  // 실행 중인 세션을 열었는데 이 클라이언트가 스트림을 안 열고 있으면(=API/다른 기기에서
+  // 시작·재개된 run) 라이브 이벤트 폴링을 시작한다. 없으면 대화·"작성 중"이 정지된 것처럼 보였다.
+  if (sessionRunning.value && !busy.value && !eventPollTimer) {
+    const assistant = newAssistant()
+    try {
+      const r = await fetch(`/api/sessions/${id}/events?since=0`)
+      const evs = r.ok ? ((await r.json()).events || []) : []
+      assistant.lastSeq = evs.length ? evs[evs.length - 1].seq : 0
+    } catch { assistant.lastSeq = 0 }
+    startEventPolling(assistant)
+  }
 }
 
 // 포그라운드 복귀 시 stale 상태 수렴. 모바일 백그라운드에서 SSE reader.read()가 끊기지 않고
@@ -503,6 +514,12 @@ async function selectRoom(id, isNew = false) {
   await loadTasks()
   await loadGates()
   await loadRefinements()
+  // 승인 정책을 UI 토글에 맞춰 세션에 sync — 다른 경로로 시작된 세션도 "자동 승인"이 실제
+  // 반영되게(예전엔 UI는 on인데 세션은 여전히 물어봐서 어긋났다).
+  fetch(`/api/sessions/${id}/auto-approve`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: autoApprove.value }),
+  }).catch(() => {})
   checkRunning()
 }
 
@@ -1516,7 +1533,7 @@ document.addEventListener('visibilitychange', () => {
               </template>
             </div>
 
-            <div v-if="(busy || sessionRunning) && !taskBar && i === messages.length - 1" class="typing">
+            <div v-if="(busy || sessionRunning) && i === messages.length - 1" class="typing">
               <span class="typing-label">{{ typingLabel(m) }}</span>
               <span class="typing-dots"><i></i><i></i><i></i></span>
             </div>
