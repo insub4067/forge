@@ -303,6 +303,13 @@ function processNote(content) {
   return ''
 }
 
+// 카드 안에서 "추론 작성 중"을 이미 표시하는 상태인가.
+// 이때 카드 밖 표시기까지 켜면 같은 상태를 두 번 말하게 된다(실측: 중복 노출).
+function phaseShowsThinking(m) {
+  const p = m.phases && m.phases[m.phases.length - 1]
+  return !!(p && p.running && p.thinking && !p.text && !p.tools.length)
+}
+
 function typingLabel(m) {
   if (!busy.value) return liveActivityText()
   // 검증/복구는 프로세스가 보낸 이벤트로만 표시한다(추측 없음).
@@ -1572,7 +1579,7 @@ document.addEventListener('visibilitychange', () => {
               </template>
             </div>
 
-            <div v-if="(busy || sessionRunning) && i === messages.length - 1" class="typing">
+            <div v-if="(busy || sessionRunning) && i === messages.length - 1 && !phaseShowsThinking(m)" class="typing">
               <span class="typing-label">{{ typingLabel(m) }}</span>
               <span class="typing-dots"><i></i><i></i><i></i></span>
             </div>
