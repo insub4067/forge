@@ -161,11 +161,15 @@ TOOL_SCHEMAS: list[dict] = [
             "name": "update_gates",
             "description": (
                 "사용자 요구사항을 검증 가능한 acceptance gate로 분해해 등록한다. 구현 전에 호출한다. "
-                "각 gate는 observable behavior로 변환해야 한다. verification_method는 cwd=workspace에서 "
-                "sh -c로 실행 가능한 명령(예: pytest 대상, grep 확인, python -c 체크). expected_result는 "
-                "출력에서 찾을 문자열(통과 조건). 실행 가능한 검증을 만들 수 없으면 status를 unavailable로 "
-                "명시하고 failure_reason을 남긴다. passed/failed는 절대 직접 설정하지 않는다(프로세스가 "
-                "실제 실행 후 부여한다)."
+                "각 gate는 심볼 존재가 아니라 observable behavior로 변환하라(예: 소스에 함수명이 있는지가 "
+                "아니라, 엔드포인트를 실제로 호출/테스트해 기대 동작이 나오는지). verification_method는 "
+                "cwd=workspace에서 sh -c로 실행. "
+                "★통과 규칙: passed는 (exit 0 AND expected_result 문자열이 stdout에 실제로 출력)일 때만 "
+                "부여된다. 따라서 verification_method는 expected_result를 반드시 stdout에 찍어야 한다. "
+                "`grep -q`(출력 없음)나 조용한 명령은 통과 불가 — 대신 `grep -c`/`grep`(매칭이 출력됨) 또는 "
+                "`<검사> && echo PASS`처럼 만들고 expected_result를 그 출력('PASS' 등)에 맞춰라. exit 0만으로는 "
+                "통과되지 않는다(unavailable 처리). 실행 가능한 검증을 만들 수 없으면 status=unavailable + "
+                "failure_reason. passed/failed는 절대 직접 설정하지 않는다(프로세스가 실제 실행 후 부여)."
             ),
             "parameters": {
                 "type": "object",
@@ -177,8 +181,8 @@ TOOL_SCHEMAS: list[dict] = [
                             "properties": {
                                 "title": {"type": "string", "description": "요구사항 (예: 로그인)"},
                                 "description": {"type": "string", "description": "요구사항 상세"},
-                                "verification_method": {"type": "string", "description": "실행 가능한 검증 명령(sh -c, cwd=workspace)"},
-                                "expected_result": {"type": "string", "description": "출력에서 찾을 문자열(통과 조건)"},
+                                "verification_method": {"type": "string", "description": "실행 가능한 검증 명령(sh -c, cwd=workspace). expected_result를 stdout에 반드시 출력해야 한다(grep -q 같은 조용한 명령 금지)."},
+                                "expected_result": {"type": "string", "description": "verification_method의 stdout에 실제로 찍혀야 하는 문자열. 안 찍히면 통과 못 한다(exit 0이어도)."},
                                 "status": {
                                     "type": "string",
                                     "enum": ["pending", "working", "blocked", "abandoned", "unavailable"],
