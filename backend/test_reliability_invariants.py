@@ -305,6 +305,25 @@ async def main():
     assert resumable("/") is False
     assert resumable("") is False
     assert resumable("/nonexistent-xyz-123") is False
+    # ── 최종 보고는 durable해야 한다 ──
+    # 새로고침하면 하네스의 구조화 보고가 사라지고 모델의 자기서술만 남던 문제.
+    # 권위 있는 쪽이 영속적이어야 한다(정확히 반대였다).
+    saved = {}
+
+    async def capture_history(sid, msgs):
+        saved["msgs"] = [dict(m) for m in msgs]
+    rt, c = make_rt(["passed"])          # make_rt가 save_history를 noop으로 덮으므로
+    _orig_save = A.store.save_history     # 그 뒤에 캡처로 바꿔야 한다
+    A.store.save_history = capture_history
+    try:
+        await run_once(rt)
+    finally:
+        A.store.save_history = _orig_save
+    last = (saved.get("msgs") or [{}])[-1]
+    assert last.get("role") == "assistant", saved.get("msgs")
+    assert "요구사항 게이트 없음" in last.get("content", ""), last
+    print("최종 보고가 history에 영속된다(새로고침 후에도 남는다): OK")
+
     # ── 핵심 invariant: 코드 변경 + gate 0에서 completed는 나올 수 없다 ──
     # generic verification이 통과해도, gate 복구가 실패해도, 어떤 경로로도.
     for states in (["passed"], ["failed", "passed"], ["unavailable"],

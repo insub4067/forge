@@ -2066,6 +2066,14 @@ class AgentRuntime:
             # LLM을 다시 부르지 않고, 모델의 self-report를 근거로 쓰지 않는다.
             if summary is not None:
                 content = self.format_completion_summary(summary)
+                # history에 남긴다 — 안 남기면 새로고침 시 권위 있는 보고는 사라지고
+                # 모델의 자기서술만 durable하게 남는다(정확히 반대여야 한다).
+                all_messages.append({"role": "assistant", "content": content})
+                if session_id:
+                    try:
+                        await store.save_history(session_id, all_messages)
+                    except Exception as err:
+                        error_log.record("final_report_save", str(err), session_id)
             # gate 커버리지 계측 — 어떤 경로로 완료했는지 분류해 남긴다.
             # docs/proposal/gate-coverage-enforcement.md
             if session_id:
