@@ -1,5 +1,7 @@
 import asyncio
 import json
+import base64
+import mimetypes
 import os
 import re
 import subprocess
@@ -177,6 +179,29 @@ async def resume_run(session_id: str, workspace_path: str | None) -> None:
         runtime.cleanup_session(session_id)
 
 
+def _inline_upload(url: str) -> str:
+    """`/uploads/<name>` URL을 base64 data URI로 바꾼다.
+
+    프론트는 업로드 응답의 상대 경로(`/uploads/abc.png`)를 그대로 보내는데, 모델은 그
+    경로를 가져올 수 없다 — 첨부해도 "이미지를 확인할 수 없습니다"가 나온 원인이다.
+    MCP 경로(task_facade)는 이미 data URI로 변환하고 있어 같은 방식으로 맞춘다.
+    변환할 수 없으면(외부 http URL 등) 원본을 그대로 둔다.
+    """
+    u = str(url or "")
+    if not u.startswith("/uploads/"):
+        return u
+    name = os.path.basename(u.split("?", 1)[0])
+    path = UPLOADS_DIR / name
+    if not path.is_file():
+        return u
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return u
+    mime = mimetypes.guess_type(str(path))[0] or "image/png"
+    return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+
+
 @router.post("/chat")
 async def chat(req: Request):
     body = await req.json()
@@ -232,7 +257,7 @@ async def chat(req: Request):
     image_urls = body.get("image_urls") or ([body["image_url"]] if body.get("image_url") else [])
     if image_urls:
         content = [{"type": "text", "text": message}] + [
-            {"type": "image_url", "image_url": {"url": u}} for u in image_urls
+            {"type": "image_url", "image_url": {"url": u}} for u in map(_inline_upload, image_urls)
         ]
     else:
         content = message
