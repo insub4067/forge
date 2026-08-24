@@ -5,7 +5,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { makeMoveThrottle } from '../lib/moveThrottle.js'
 import { pullDistance, pullReady } from '../lib/pullToRefresh.js'
-import { toScreenXY } from '../lib/screenCoord.js'
+import { toScreenXY, containContentRect } from '../lib/screenCoord.js'
 
 const props = defineProps({
   rooms: { type: Array, default: () => [] },
@@ -153,6 +153,7 @@ const remoteCtrl = ref(false) // 원격제어(마우스/키보드) 활성화
 const remoteErr = ref('')
 function toggleRemote(ev) {
   remoteCtrl.value = !!ev.target.checked
+  if (remoteCtrl.value) macControls.value = false // 켜면 바를 숨겨 터치영역 확보
 }
 let screenImg = null // 현재 표시된 이미지 요소(좌표 스케일링용)
 let screenNatural = { w: 0, h: 0 } // 원본 캡처 해상도
@@ -195,6 +196,7 @@ async function toggleCaffeine() {
 function openMacScreen() {
   macView.value = 'screen'
   macControls.value = true
+  remoteCtrl.value = false
   startScreen()
   // 지원 브라우저(안드로이드 등)는 실제 가로 잠금. iOS는 미지원 → CSS 회전으로 대체.
   try {
@@ -211,13 +213,13 @@ function stopScreen() {
 }
 function screenTick() {
   if (!screenOn.value) return
-  screenSrc.value = `/api/mac/screen?d=1&t=${Date.now()}_${screenSeq++}`
+  screenSrc.value = `/api/mac/screen?d=1&max_px=1280&t=${Date.now()}_${screenSeq++}`
 }
 function onScreenImgLoad(e) {
   screenImg = e.target
   screenNatural = { w: e.target.naturalWidth || 0, h: e.target.naturalHeight || 0 }
   screenErr.value = ''
-  if (screenOn.value) setTimeout(screenTick, 500)
+  if (screenOn.value) setTimeout(screenTick, 150)
 }
 function onScreenError() {
   screenErr.value = '화면을 가져오지 못했습니다. 시스템 설정 › 개인정보 보호 › 화면 기록에서 백엔드(터미널/파이썬)에 권한을 허용하세요.'
@@ -228,7 +230,10 @@ const isRotatedScreen = () => window.matchMedia('(orientation: portrait)').match
 // 표시된 이미지 좌표 → 실제 화면 좌표 변환 (회전 보정 포함)
 function toDisplayScreenXY(ev) {
   if (!screenImg || !screenNatural.w) return null
-  return toScreenXY(ev, screenImg.getBoundingClientRect(), screenNatural, isRotatedScreen())
+  const rect = screenImg.getBoundingClientRect()
+  const rotated = isRotatedScreen()
+  const content = containContentRect(rect, screenNatural, rotated)
+  return toScreenXY(ev, content, screenNatural, rotated)
 }
 async function macSend(payload) {
   try {
@@ -248,7 +253,10 @@ async function macSend(payload) {
 // pointerdown 기반: 터치·마우스 모두 즉시 처리. click은 500ms 화면 갱신 시 취소될 수 있어
 // 사용하지 않는다(탭 중 src가 교체되면 click이 발생하지 않는 모바일 브라우저 동작 우회).
 function onScreenPointerDown(ev) {
-  if (!remoteCtrl.value) return
+  if (!remoteCtrl.value) {
+    macControls.value = !macControls.value // 원격제어 꺼져 있으면 탭으로 컨트롤 표시/숨김
+    return
+  }
   const p = toDisplayScreenXY(ev)
   if (!p) return
   macSend({ type: 'click', x: p.x, y: p.y, button: ev.button === 2 ? 'right' : 'left', clicks: ev.detail || 1 })
@@ -290,6 +298,7 @@ function closeMacView() {
   stopCamera()
   macView.value = ''
   macControls.value = true // 다음에 열 때 컨트롤 보이게
+  remoteCtrl.value = false
   try {
     screen.orientation?.unlock?.()
   } catch {}
@@ -558,33 +567,35 @@ watch(
         <div v-else-if="searchQuery" class="rooms-scroll">
           <div class="admin-sub" style="padding:16px">검색 결과가 없습니다.</div>
         </div>
-        <div v-else class="rooms-scroll ptr-scroll" @touchstart.passive="onPullStart" @touchmove="onPullMove" @touchend="onPullEnd" :style="{ transform: (pullY || pullRefreshing) ? `translateY(${pullRefreshing ? 40 : pullY}px)` : '', transition: (pullY && !pullRefreshing) ? 'none' : 'transform .22s' }">
-                <div class="ptr-hint" :class="{ ready: pullReadyNow, spin: pullRefreshing }">
+        <div v-else class="ptr-wrap" :style="{ transform: (pullY || pullRefreshing) ? `translateY(${pullRefreshing ? 40 : pullY}px)` : '', transition: (pullY && !pullRefreshing) ? 'none' : 'transform .22s' }">
+          <div class="ptr-hint" :class="{ ready: pullReadyNow, spin: pullRefreshing }">
             <span v-if="pullRefreshing" class="ptr-spinner"></span>
             <span v-else class="ptr-text">{{ pullReadyNow ? '놓으면 새로고침' : '당겨서 새로고침' }}</span>
           </div>
-          <div v-for="r in rooms" :key="r.id" class="room-swipe">
-            <button class="room-swipe-del" @click.stop="emit('delete-room', r.id)">삭제</button>
-            <div
-              class="room-item"
-              :class="{ active: r.id === currentRoomId, swiped: swipedRoomId === r.id }"
-              @click="selectRoom(r.id)"
-              @touchstart="onSwipeStart('r:' + r.id, $event)"
-              @touchmove="onSwipeMove"
-              @touchend="onSwipeEnd"
-              @touchcancel="onSwipeCancel"
-            >
-              <span v-if="r.running" class="room-spinner" title="작업 중"></span>
-              <span v-else-if="r.final_status" class="room-status" :class="statusClass(r.final_status)" :title="r.final_status"></span>
-              <span v-else class="room-status" :class="r.id === currentRoomId ? 'active' : 'idle'"></span>
-              <div class="room-info">
-                <div class="room-title">{{ r.title }}<span v-if="r.scheduled" class="room-badge">예약</span></div>
-                <div class="room-path">{{ r.workspace_path || '워크스페이스 설정' }}</div>
+          <div class="rooms-scroll ptr-scroll" @touchstart.passive="onPullStart" @touchmove="onPullMove" @touchend="onPullEnd">
+            <div v-for="r in rooms" :key="r.id" class="room-swipe">
+              <button class="room-swipe-del" @click.stop="emit('delete-room', r.id)">삭제</button>
+              <div
+                class="room-item"
+                :class="{ active: r.id === currentRoomId, swiped: swipedRoomId === r.id }"
+                @click="selectRoom(r.id)"
+                @touchstart="onSwipeStart('r:' + r.id, $event)"
+                @touchmove="onSwipeMove"
+                @touchend="onSwipeEnd"
+                @touchcancel="onSwipeCancel"
+              >
+                <span v-if="r.running" class="room-spinner" title="작업 중"></span>
+                <span v-else-if="r.final_status" class="room-status" :class="statusClass(r.final_status)" :title="r.final_status"></span>
+                <span v-else class="room-status" :class="r.id === currentRoomId ? 'active' : 'idle'"></span>
+                <div class="room-info">
+                  <div class="room-title">{{ r.title }}<span v-if="r.scheduled" class="room-badge">예약</span></div>
+                  <div class="room-path">{{ r.workspace_path || '워크스페이스 설정' }}</div>
+                </div>
+                <span class="room-pct">Context {{ ctxPct(r) }}%</span>
+                <button class="room-more" @click.stop="openRoomMenu(r.id, $event)" aria-label="메뉴">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+                </button>
               </div>
-              <span class="room-pct">Context {{ ctxPct(r) }}%</span>
-              <button class="room-more" @click.stop="openRoomMenu(r.id, $event)" aria-label="메뉴">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
-              </button>
             </div>
           </div>
         </div>
@@ -592,30 +603,32 @@ watch(
 
       <!-- 예약 탭 -->
       <template v-else-if="sidebarTab === 'jobs'">
-        <div class="rooms-scroll ptr-scroll" @touchstart.passive="onPullStart" @touchmove="onPullMove" @touchend="onPullEnd" :style="{ transform: (pullY || pullRefreshing) ? `translateY(${pullRefreshing ? 40 : pullY}px)` : '', transition: (pullY && !pullRefreshing) ? 'none' : 'transform .22s' }">
-                <div class="ptr-hint" :class="{ ready: pullReadyNow, spin: pullRefreshing }">
+        <div class="ptr-wrap" :style="{ transform: (pullY || pullRefreshing) ? `translateY(${pullRefreshing ? 40 : pullY}px)` : '', transition: (pullY && !pullRefreshing) ? 'none' : 'transform .22s' }">
+          <div class="ptr-hint" :class="{ ready: pullReadyNow, spin: pullRefreshing }">
             <span v-if="pullRefreshing" class="ptr-spinner"></span>
             <span v-else class="ptr-text">{{ pullReadyNow ? '놓으면 새로고침' : '당겨서 새로고침' }}</span>
           </div>
-          <div v-if="!jobs.length" class="admin-sub" style="padding:16px">예약된 작업이 없습니다. 우측 상단 +로 추가하세요.</div>
-          <div v-for="j in jobs" :key="j.id" class="room-swipe">
-            <button class="room-swipe-del" @click.stop="deleteJob(j.id)">삭제</button>
-            <div
-              class="job-item"
-              :class="{ off: !j.enabled, swiped: swipedJobId === j.id }"
-              @touchstart="onSwipeStart('j:' + j.id, $event)"
-              @touchmove="onSwipeMove"
-              @touchend="onSwipeEnd"
-              @touchcancel="onSwipeCancel"
-            >
-              <div class="job-main">
-                <div class="job-name">{{ j.name }}</div>
-                <div class="job-meta">{{ jobScheduleLabel(j) }} · 다음 {{ fmtTime(j.next_run_at) }}</div>
-                <div v-if="j.last_result" class="job-result">{{ j.status === 'running' ? '실행 중…' : j.last_result }}</div>
-              </div>
-              <div class="job-actions">
-                <button @click="runJobNow(j.id)" title="지금 실행">▶</button>
-                <button :class="{ on: j.enabled }" @click="toggleJob(j)">{{ j.enabled ? '켜짐' : '꺼짐' }}</button>
+          <div class="rooms-scroll ptr-scroll" @touchstart.passive="onPullStart" @touchmove="onPullMove" @touchend="onPullEnd">
+            <div v-if="!jobs.length" class="admin-sub" style="padding:16px">예약된 작업이 없습니다. 우측 상단 +로 추가하세요.</div>
+            <div v-for="j in jobs" :key="j.id" class="room-swipe">
+              <button class="room-swipe-del" @click.stop="deleteJob(j.id)">삭제</button>
+              <div
+                class="job-item"
+                :class="{ off: !j.enabled, swiped: swipedJobId === j.id }"
+                @touchstart="onSwipeStart('j:' + j.id, $event)"
+                @touchmove="onSwipeMove"
+                @touchend="onSwipeEnd"
+                @touchcancel="onSwipeCancel"
+              >
+                <div class="job-main">
+                  <div class="job-name">{{ j.name }}</div>
+                  <div class="job-meta">{{ jobScheduleLabel(j) }} · 다음 {{ fmtTime(j.next_run_at) }}</div>
+                  <div v-if="j.last_result" class="job-result">{{ j.status === 'running' ? '실행 중…' : j.last_result }}</div>
+                </div>
+                <div class="job-actions">
+                  <button @click="runJobNow(j.id)" title="지금 실행">▶</button>
+                  <button :class="{ on: j.enabled }" @click="toggleJob(j)">{{ j.enabled ? '켜짐' : '꺼짐' }}</button>
+                </div>
               </div>
             </div>
           </div>
@@ -689,7 +702,7 @@ watch(
   <div v-if="macView" class="mac-overlay" :class="{ 'is-screen': macView === 'screen' }">
     <template v-if="macView === 'screen'">
       <div v-if="screenErr" class="mac-screen-err">{{ screenErr }}</div>
-      <div class="mac-remote-bar">
+      <div v-show="macControls" class="mac-remote-bar">
         <label class="mac-remote-toggle">
           <input type="checkbox" :checked="remoteCtrl" @change="toggleRemote" />
           <span>원격제어</span>
