@@ -122,22 +122,68 @@ def test_merge_memory_facts():
     print("OK 프로젝트 메모리 dedup+상한+헤더1회")
 
 
-def test_completion_report():
-    # 표준 완료 리포트: 요구사항 요약 + 검증. (섹션5 daily-use)
-    # commit/push 줄은 실제 결과를 아는 finish()가 _deploy_line으로 붙인다.
-    cr = AgentRuntime._completion_report
-    r = cr("completed", "요구사항 2\n✓ 로그인\n✓ 실패메시지", "passed")
+def test_completion_summary_formatter():
+    """최종 보고는 process-owned 사실에서 deterministic하게 만든다(LLM 재호출 없음).
+    모델이 "모두 완료"라고 썼는지는 근거로 쓰지 않는다."""
+    fmt = AgentRuntime.format_completion_summary
+
+    r = fmt({"status": "completed", "gate_state": "passed", "generic_verification": "passed",
+             "integration_verification": "passed", "files_changed_count": 3,
+             "verified_requirements": [{"title": "로그인", "status": "passed"},
+                                       {"title": "실패메시지", "status": "passed"}],
+             "unverified_requirements": [], "failed_requirements": [],
+             "commit_status": True, "push_status": True})
     assert r.startswith("완료했습니다.")
-    assert "✓ 로그인" in r and "테스트·빌드 통과" in r
-    r2 = cr("completed_unverified", "요구사항 1\n! 다크모드 — 검증 방법 없음", "unavailable")
-    assert "일부 미검증" in r2 and "! 다크모드" in r2 and "미검증" in r2
-    # 리포트는 배포 상태를 추측하지 않는다 — 실제 push 결과를 모르기 때문.
-    assert "push" not in r and "push" not in r2
-    # gate 0개 완료는 "요구사항은 검증 안 됐다"를 숨기지 않는다(G1, 완전 검증으로 오독 방지).
-    r3 = cr("completed", "", "passed")
+    assert "✓ 로그인" in r and "✓ 실패메시지" in r
+    assert "✓ 기존 테스트·빌드 통과" in r and "✓ 최종 회귀 확인" in r
+    assert "commit·push 완료" in r
+    # 내부 정보는 최종 보고에 넣지 않는다(model/tool/token/compaction).
+    for noise in ("deepseek", "tool", "token", "compaction", "step"):
+        assert noise not in r.lower(), noise
+
+    # 미검증 항목은 침묵하지 않는다(honest failure)
+    r2 = fmt({"status": "completed_unverified", "gate_state": "partial",
+              "generic_verification": "passed", "integration_verification": "passed",
+              "files_changed_count": 2,
+              "verified_requirements": [{"title": "로그인", "status": "passed"}],
+              "unverified_requirements": [{"title": "세션 유지", "status": "unavailable",
+                                           "reason": "검증 방법 없음"}],
+              "failed_requirements": [], "commit_status": True, "push_status": False})
+    assert "일부 항목은 검증하지 못했습니다" in r2
+    assert "! 세션 유지 — 검증 방법 없음" in r2
+    assert "push 안 함" in r2 and "push 완료" not in r2
+
+    # gate 0 — "요구사항 미검증"을 반드시 말한다
+    r3 = fmt({"status": "completed_unverified", "gate_state": "none",
+              "generic_verification": "passed", "integration_verification": "none",
+              "files_changed_count": 1, "verified_requirements": [],
+              "unverified_requirements": [], "failed_requirements": [],
+              "commit_status": True, "push_status": False})
     assert "요구사항 게이트 없음" in r3
-    assert "요구사항 게이트 없음" not in r
-    print("OK 표준 완료 리포트(요구사항·검증)")
+
+    # push 실패를 성공으로 보고하지 않는다
+    r4 = fmt({"status": "completed", "gate_state": "passed", "generic_verification": "passed",
+              "integration_verification": "passed", "files_changed_count": 2,
+              "verified_requirements": [], "unverified_requirements": [],
+              "failed_requirements": [], "commit_status": True, "push_status": False})
+    assert "push 실패" in r4 and "push 완료" not in r4
+    r5 = dict(commit_status=False, push_status=False, status="completed",
+              gate_state="passed", generic_verification="passed",
+              integration_verification="passed", files_changed_count=2,
+              verified_requirements=[], unverified_requirements=[], failed_requirements=[])
+    assert "commit 안 됨" in fmt(r5)
+    print("OK 최종 보고 formatter(요구사항·검증·commit/push, 내부정보 없음)")
+
+
+def test_blocking_reason():
+    """완전 검증이 아니면 그 사유를 기계가 읽을 수 있게 남긴다(가장 근본적인 것 하나)."""
+    from app.runtime.agent import _blocking_reason as b
+    assert b("completed", "passed", "passed") == ""
+    assert b("completed_unverified", "none", "passed") == "요구사항 게이트 없음"
+    assert b("completed_unverified", "partial", "passed") == "일부 요구사항 미검증"
+    assert b("completed_unverified", "passed", "unavailable") == "실행 가능한 test/build 없음"
+    assert b("verification_failed", "failed", "passed") == "요구사항 검증 실패"
+
 
 
 def test_merge_gates_ledger():
@@ -239,8 +285,13 @@ def test_developer_escalation():
     esc = r.select_model("developer", escalate=True)
     assert esc["model"] == r.developer_pro_model and "pro" in esc["model"], esc
     assert esc["thinking"] is True and esc["reasoning_effort"] == "high", esc
-    # 역할 정책: developer/chat/vision + 멀티 모드용 planner/reviewer
-    assert set(r._policy.keys()) == {"developer", "chat", "vision", "planner", "reviewer"}, r._policy.keys()
+    # 역할 정책: developer/chat/vision + 멀티 모드용 planner/reviewer + gate_recovery
+    assert set(r._policy.keys()) == {"developer", "chat", "vision", "planner",
+                                     "reviewer", "gate_recovery"}, r._policy.keys()
+    # gate 복구는 저비용 고정 — gate 작성 실패로 pro를 소비하지 않는다(비용 상한).
+    gr = r.select_model("gate_recovery")
+    assert "flash" in gr["model"], gr
+    assert gr["model"] != r.developer_pro_model, gr
     print("OK developer flash+think / Sr(pro) escalation (8-9)")
 
 
@@ -333,6 +384,22 @@ def test_gate_coverage_summarize():
     assert s["generic_only_runs"] == 2
     assert s["generic_only_rate"] == round(2 / 3, 3)
     assert s["generic_only_by_status"] == {"completed": 1, "completed_unverified": 1}
+    # 경로 분류와 파생 비율
+    rows2 = [
+        {"status": "completed", "files_changed": 2, "generic_only": False, "coverage": "gated"},
+        {"status": "completed", "files_changed": 1, "generic_only": False,
+         "coverage": "recovered_gated"},
+        {"status": "completed_unverified", "files_changed": 1, "generic_only": True,
+         "coverage": "generic_only"},
+        {"status": "completed_unverified", "files_changed": 0, "generic_only": False,
+         "coverage": "no_change"},
+    ]
+    s2 = summarize(rows2)
+    assert s2["by_coverage"] == {"gated": 1, "recovered_gated": 1, "generic_only": 1}, s2
+    # 처음에 gate가 없던 run 2건(복구 성공 1 + 실패 1) / 코드 변경 3건
+    assert s2["gate_missing_rate"] == round(2 / 3, 3), s2
+    assert s2["recovery_success_rate"] == 0.5, s2
+    assert summarize([])["recovery_success_rate"] is None
     assert summarize([])["generic_only_rate"] is None  # 0으로 나누지 않는다
 
     # 테스트가 남긴 합성 run은 실제 사용으로 세지 않는다(오염된 telemetry → 잘못된 결정).
@@ -377,7 +444,8 @@ if __name__ == "__main__":
     test_stable_prefix()
     test_project_shrinks_after_compaction()
     test_merge_memory_facts()
-    test_completion_report()
+    test_completion_summary_formatter()
+    test_blocking_reason()
     test_merge_gates_ledger()
     test_over_budget()
     test_drop_orphan_tools()

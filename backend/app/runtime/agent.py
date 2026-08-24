@@ -33,9 +33,13 @@ DEVELOPER_MAX_STEPS = 60
 # Planner/Reviewer는 계획·검증 전담이라 step budget이 작아도 충분(비용·지연 억제).
 PLANNER_MAX_STEPS = 10
 REVIEWER_MAX_STEPS = 12
+# Gate 복구는 gate를 쓰는 것 하나만 한다 — 코드를 다시 읽거나 고치지 않으므로 아주 작다.
+# 여기가 커지면 "gate 없는 run이 두 번째 Developer 루프를 도는" 비용 사고가 된다.
+GATE_RECOVERY_MAX_STEPS = 3
 _ROLE_MAX_STEPS = {"developer": DEVELOPER_MAX_STEPS,
                    "planner": PLANNER_MAX_STEPS,
-                   "reviewer": REVIEWER_MAX_STEPS}
+                   "reviewer": REVIEWER_MAX_STEPS,
+                   "gate_recovery": GATE_RECOVERY_MAX_STEPS}
 # 막혀서 못 풀 때 pro로 승격해 재시도하는 최대 횟수(무한 루프·비용 폭주 방지).
 MAX_ESCALATIONS = 2
 MAX_REPEATED_CALLS = 3
@@ -48,6 +52,11 @@ READ_ONLY_TOOLS = {"read_file", "list_dir", "grep", "find_symbol"}
 # Planner용 도구 스키마(읽기 전용만) — 구현·실행 도구를 주지 않아 계획만 하게 강제한다.
 READ_ONLY_TOOL_SCHEMAS = [
     t for t in TOOL_SCHEMAS if t["function"]["name"] in READ_ONLY_TOOLS
+]
+# Gate 복구용 도구 — gate 등록만. 코드 수정·실행 도구를 주지 않아 "구현을 더 하는" 일탈이
+# 구조적으로 불가능하다. 읽기 도구도 주지 않는다(step 3 안에서 탐색 루프를 돌지 않게).
+GATE_RECOVERY_TOOL_SCHEMAS = [
+    t for t in TOOL_SCHEMAS if t["function"]["name"] == "update_gates"
 ]
 
 # Skill 선택 삽입 한도 — skill이 많아져도 system prompt가 폭증하지 않게 상위 N개만,
@@ -324,6 +333,85 @@ def _reviewer_context(all_messages: list[dict], plan: str) -> list[dict]:
                  "Developer의 작업 기록은 주어지지 않습니다 — `git diff`로 실제 변경을 직접 "
                  "확인하고, 테스트·빌드를 실제로 실행해 판정하세요."})
     return msgs
+
+
+def needs_gate_recovery(route_kind: str, files_changed: list, gate_count: int) -> bool:
+    """gate 복구가 필요한 상황인가 — 새 LLM 분류 호출 없이 기존 runtime state만 본다.
+
+    조건: 작업(code) run + 실제 파일 변경 발생 + gate 0개.
+    `files_changed`가 비어 있지 않다는 것 자체가 mutation 작업이었다는 가장 강한 증거다
+    (설명·조회·리뷰 요청은 파일을 바꾸지 않으므로 여기 걸리지 않는다). 별도 분류기를
+    두면 비용이 늘고 오분류가 새 실패 모드를 만든다.
+    """
+    return route_kind == "code" and bool(files_changed) and gate_count == 0
+
+
+def build_gate_recovery_context(goal: str, files_changed: list, tasks: list) -> list[dict]:
+    """복구 턴에 주는 최소 컨텍스트 — Developer의 거대한 transcript를 재전송하지 않는다.
+
+    gate를 쓰는 데 필요한 것은 "사용자가 뭘 요구했나"와 "무엇이 바뀌었나"뿐이다.
+    전체 히스토리를 다시 보내면 gate 없는 run마다 컨텍스트 비용이 두 배가 된다.
+    """
+    files = ", ".join(str(f) for f in list(files_changed)[:20]) or "(없음)"
+    titles = [t.get("title", "") for t in (tasks or []) if t.get("title")][:10]
+    lines = [f"사용자 요청:\n{(goal or '').strip()[:1200]}",
+             f"\n이번 작업에서 변경된 파일: {files}"]
+    if titles:
+        lines.append("수행한 작업 항목:\n" + "\n".join(f"- {t}" for t in titles))
+    lines.append("\n구현은 끝났다. 위 사용자 요청을 검증할 acceptance gate를 "
+                 "update_gates로 등록하라. 코드는 고치지 않는다.")
+    return [{"role": "user", "content": "\n".join(lines)}]
+
+
+def _coverage_kind(gate_count: int, files_changed: list, recovered: bool,
+                   is_code: bool) -> str:
+    """이 run이 어떤 경로로 마감됐는지 분류한다(telemetry). 상태를 바꾸지 않는다.
+
+    gated           — gate가 있었고 정상 흐름을 탔다
+    recovered_gated — gate가 없어 복구 턴이 만들어 냈다
+    generic_only    — 복구 후에도 gate 0. 요구사항 미검증(가장 주의해야 할 분류)
+    no_change       — 코드 변경 없음(gate가 필요 없다)
+    not_applicable  — 작업 run이 아니다(대화·조회)
+    """
+    if not is_code:
+        return "not_applicable"
+    if not files_changed:
+        return "no_change"
+    if gate_count == 0:
+        return "generic_only"
+    return "recovered_gated" if recovered else "gated"
+
+
+def _blocking_reason(status: str, gstate: str, vstate: str) -> str:
+    """왜 완전히 검증된 완료가 아닌가 — 한 가지 사유만(가장 근본적인 것)."""
+    if status == "completed":
+        return ""
+    if gstate == "none":
+        return "요구사항 게이트 없음"
+    if gstate == "failed":
+        return "요구사항 검증 실패"
+    if vstate != "passed":
+        return "실행 가능한 test/build 없음"
+    return "일부 요구사항 미검증"
+
+
+def resolve_completion_verification(gstate: str, vstate: str) -> str:
+    """최종 완료 상태를 결정한다(순수 함수 — 이 프로젝트의 핵심 invariant).
+
+    **gate가 없는 코드 변경은 완전히 검증된 완료가 아니다.** generic verification은
+    "기존 test/build가 안 깨졌다"만 말하고 사용자 요구사항 충족은 확인하지 않는다.
+    gate 0으로 `completed`를 내주면 모델이 요구사항을 놓쳐도 완료로 둔갑한다
+    (false_completion — 이 프로젝트가 가장 위험하게 보는 실패).
+
+    gate 없음 ≠ verification_failed (실패한 게 아니다)
+    gate 없음 ≠ completed        (완전히 검증된 것도 아니다)
+    gate 없음 = completed_unverified
+    """
+    if gstate == "none":
+        return "completed_unverified"
+    if gstate == "passed" and vstate == "passed":
+        return "completed"
+    return "completed_unverified"
 
 
 def _last_assistant_text(messages: list[dict]) -> str:
@@ -1494,7 +1582,8 @@ class AgentRuntime:
         except Exception as err:  # 학습 실패가 run 결과를 바꾸면 안 된다.
             error_log.record("reflect", str(err))
 
-    async def _verify(self, ws: str, send: EventSink) -> tuple[str, str]:
+    async def _verify(self, ws: str, send: EventSink,
+                      stage: str = "generic") -> tuple[str, str]:
         """3상태 검증 — 프로세스가 test/build를 직접 실행. 반환 (state, report),
         state ∈ {"passed","failed","unavailable"}.
         - passed: 실제 검증이 돌아 통과.
@@ -1546,7 +1635,7 @@ class AgentRuntime:
 
         if not checks:
             return "unavailable", "검증 대상 없음(test/build 미검출 또는 실행 불가)"
-        await send("verify_start", {"checks": [c[0] for c in checks]})
+        await send("verify_start", {"checks": [c[0] for c in checks], "stage": stage})
         any_passed = False
         unavailable_reasons: list[str] = []
         for label, args, cwd, kind in checks:
@@ -1674,7 +1763,7 @@ class AgentRuntime:
         gates = await store.list_gates(session_id)
         if not gates:
             return "none", ""
-        vstate, vreport = await self._verify(ws, send)
+        vstate, vreport = await self._verify(ws, send, stage="integration")
         if vstate == "failed":
             return "failed", "통합 검증 실패 — 최종 회귀(test/build) 실패:\n" + vreport[:600]
         failed = [g for g in gates if g.get("status") == "failed"]
@@ -1948,7 +2037,7 @@ class AgentRuntime:
                 route.get("tool_visible", 0),
             )
 
-        async def finish(status: str, content: str = "") -> None:
+        async def finish(status: str, content: str = "", summary: dict | None = None) -> None:
             # 성공 완료 시 하네스가 장부를 마감한다 — 모델이 잊어도 신뢰성 보장:
             # 남은 task done 처리(칸반), 변경 자동 commit+push(커밋 누락 방지).
             # completed(검증됨)와 completed_unverified(검증 대상 없음) 둘 다 마감 대상.
@@ -1966,17 +2055,18 @@ class AgentRuntime:
                         ws, goal, send, state["files_changed"], push=(status == "completed"))
                     # 배포 상태는 추측하지 않는다 — 실제 commit/push 결과만 사용자에게 말한다.
                     # (리포트를 미리 만들면 push가 실패해도 "push 완료"라고 보고한다.)
-                    if content:
-                        content += "\n" + self._deploy_line(
-                            len(state["files_changed"]), committed, pushed,
-                            push_attempted=(status == "completed"))
+                    if summary is not None:
+                        summary["commit_status"] = committed
+                        summary["push_status"] = pushed
                 # 검증 통과 완료만 durable 프로젝트 지식으로 적립(§6) — 미검증은 오염 방지로 제외.
                 if status == "completed":
                     await self._extract_project_memory(session_id, ws, goal,
                                                        state["files_changed"], send)
-            # G0 — gate 커버리지 계측(동작 변경 없음). gate 없이 코드를 바꾸고 끝난 run이
-            # 얼마나 되는지 알아야 강제(G2) 방식을 정할 수 있다. 그 run의 완료 근거는
-            # "기존 테스트가 안 깨졌다" 하나뿐이고, 요구사항 충족은 확인된 바 없다.
+            # 최종 문구는 summary(process-owned 사실)에서 deterministic하게 만든다 —
+            # LLM을 다시 부르지 않고, 모델의 self-report를 근거로 쓰지 않는다.
+            if summary is not None:
+                content = self.format_completion_summary(summary)
+            # gate 커버리지 계측 — 어떤 경로로 완료했는지 분류해 남긴다.
             # docs/proposal/gate-coverage-enforcement.md
             if session_id:
                 _gates = await store.list_gates(session_id)
@@ -1987,6 +2077,9 @@ class AgentRuntime:
                     "passed": sum(1 for g in _gates if g.get("status") == "passed"),
                     "files_changed": len(state["files_changed"]),
                     "generic_only": _n == 0 and bool(state["files_changed"]),
+                    "coverage": _coverage_kind(
+                        _n, state["files_changed"],
+                        bool(state.get("gate_recovery_ran")), route_kind == "code"),
                 })
             # done 이벤트를 보내면서 세션 final_status를 영속화(성공 정의·집계 기준).
             if session_id:
@@ -2174,6 +2267,29 @@ class AgentRuntime:
                          "코드 변경 없이 종료했습니다(검증 대상 없음). 수정이 필요한 요청이었다면 다시 지시해 주세요.")
             return all_messages
 
+        # ── Gate coverage 복구 — gate 0인 코드 변경 run은 완전 검증 완료가 될 수 없다 ──
+        # 실측(프로브 3/3)에서 모델은 update_tasks는 부르고 update_gates만 건너뛰었다.
+        # 전체 Developer 루프를 다시 돌리지 않는다 — gate만 쓰는 짧은 턴 1회(step 3, flash).
+        if needs_gate_recovery(route_kind, state["files_changed"],
+                               len(await store.list_gates(session_id)) if session_id else 0):
+            state["gate_recovery_ran"] = True
+            try:
+                await send("gate_recovery", {"phase": "start"})
+                await self._run_role(
+                    "gate_recovery", build_gate_recovery_context(
+                        goal, state["files_changed"], await store.list_tasks(session_id)),
+                    send, session_id, ws, state, recent_calls, step_base, room_memory,
+                    tools=GATE_RECOVERY_TOOL_SCHEMAS, persist=False,
+                )
+            except Exception as err:
+                # 복구 실패가 run을 깨뜨리면 안 된다 — gate 없이 정직하게 마감하면 된다.
+                error_log.record("gate_recovery", str(err), session_id)
+            step_base += GATE_RECOVERY_MAX_STEPS
+            _recovered = bool(session_id and await store.list_gates(session_id))
+            await send("gate_recovery", {"phase": "done",
+                                         "result": "recovered_gated" if _recovered
+                                         else "generic_only"})
+
         # ── Strict 검증 게이트 — 신뢰성은 모델이 아니라 프로세스가 보장한다 ──
         # 완료 = 검증(test/build) 통과 + 요구사항 게이트 통과. 모델이 "됐습니다" 해도
         # 프로세스가 실제로 돌려 통과해야 완료로 인정한다. 실패하면 1회 수리 재시도,
@@ -2223,48 +2339,96 @@ class AgentRuntime:
                          "통합 검증 실패로 완료하지 못했습니다. 커밋하지 않았습니다:\n" + ireport[:600])
             return all_messages
 
-        gates_report = await self._gates_report(session_id)
-        # 완료 정책:
-        #   gate 없음 → 기존 3상태 매핑(passed→completed, unavailable→completed_unverified)
-        #   gate 전부 passed + generic passed → completed
-        #   그 외(partial/unavailable/blocked/abandoned) → completed_unverified(정직 표기)
-        if gstate == "none":
-            final = "completed" if vstate == "passed" else "completed_unverified"
-            if vstate != "passed":
-                await send("verify_unavailable", {"report": report[:400]})
-        elif gstate == "passed" and vstate == "passed":
-            final = "completed"
-        else:
-            final = "completed_unverified"
-        await finish(final, self._completion_report(final, gates_report, vstate))
+        # 완료 정책 — gate 없는 코드 변경은 completed가 되지 않는다(핵심 invariant).
+        final = resolve_completion_verification(gstate, vstate)
+        if gstate == "none" and vstate != "passed":
+            await send("verify_unavailable", {"report": report[:400]})
+        summary = await self._completion_summary(
+            session_id, final, gstate, vstate, istate, len(state["files_changed"]))
+        await finish(final, summary=summary)
         return all_messages
 
-    @staticmethod
-    def _completion_report(status: str, gates_report: str, vstate: str) -> str:
-        """process-owned 사실로 만든 표준 완료 리포트(모델 self-report 아님). daily-use 신뢰의 핵심:
-        '무엇을 해결/검증했고, 배포했는가'를 한눈에. 파일 나열 대신 요구사항·검증·commit/push 요약."""
-        lines = ["완료했습니다." if status == "completed" else "작업을 마쳤습니다(일부 미검증)."]
-        if gates_report:
-            lines.append(gates_report)              # 요구사항별 ✓/✗/! (honest failure 포함)
-        if vstate == "passed":
-            # gate가 하나도 없으면 generic verify는 "기존 테스트가 안 깨졌다"만 말한다.
-            # 요구사항 충족 여부는 확인된 바 없다 — 침묵하면 완전 검증으로 읽힌다(honest failure).
-            lines.append("검증: 테스트·빌드 통과" if gates_report
-                         else "검증: 테스트·빌드 통과 (기존 회귀만 — 요구사항 게이트 없음)")
-        elif vstate == "unavailable":
-            lines.append("검증: 실행 가능한 test/build 없음 — 미검증")
-        return "\n".join(lines)
+    async def _completion_summary(self, session_id: str, status: str, gstate: str,
+                                  vstate: str, istate: str, n_files: int) -> dict:
+        """최종 보고의 재료를 process-owned 사실만으로 모은다(모델 self-report 아님).
+
+        모델이 "모두 완료했습니다"라고 썼는지는 근거로 쓰지 않는다. 여기 담기는 것은
+        프로세스가 직접 실행해 얻은 결과뿐이다 — gate 실행 결과, test/build 결과,
+        integration 결과, 그리고 (finish에서 채워지는) 실제 commit/push 결과.
+        commit/push는 아직 실행되지 않았으므로 None으로 두고 finish가 채운다.
+        """
+        gates = await store.list_gates(session_id) if session_id else []
+        by = {"passed": [], "failed": [], "other": []}
+        for g in gates:
+            st = g.get("status", "pending")
+            key = st if st in ("passed", "failed") else "other"
+            by[key].append({"title": g.get("title", ""), "status": st,
+                            "reason": g.get("failure_reason") or "",
+                            "evidence": str(g.get("evidence") or "")[:300]})
+        return {
+            "status": status,
+            "verified_requirements": by["passed"],
+            "unverified_requirements": by["other"],
+            "failed_requirements": by["failed"],
+            "generic_verification": vstate,
+            "integration_verification": istate,
+            "gate_state": gstate,
+            "files_changed_count": n_files,
+            "commit_status": None,   # finish가 실제 결과로 채운다
+            "push_status": None,
+            # 완전 검증이 아니라면 그 이유를 기계가 읽을 수 있게 남긴다(UI·telemetry).
+            "blocking_reason": _blocking_reason(status, gstate, vstate),
+        }
 
     @staticmethod
-    def _deploy_line(n_files: int, committed: bool, pushed: bool, push_attempted: bool) -> str:
-        """실제 commit/push 결과 한 줄. 실패를 성공으로 보고하지 않는 게 유일한 목적."""
-        if not committed:
-            return f"변경 {n_files}개 파일 · 자동 commit 안 됨 — 수동 확인 필요"
-        if pushed:
-            return f"변경 {n_files}개 파일 · commit·push 완료"
-        if push_attempted:
-            return f"변경 {n_files}개 파일 · 로컬 commit 완료 · push 실패 — 수동 push 필요"
-        return f"변경 {n_files}개 파일 · 로컬 commit(미검증이라 push 안 함)"
+    def format_completion_summary(s: dict) -> str:
+        """CompletionSummary → 사용자에게 보여줄 짧은 보고(deterministic — LLM 재호출 없음).
+
+        보여주는 것: 무엇을 검증했는지 / 미검증·실패 / commit·push 상태.
+        보여주지 않는 것: 모델 이름·tool call 수·token·compaction·retry·추론(Debug에서 본다).
+        """
+        verified = s.get("verified_requirements") or []
+        unverified = s.get("unverified_requirements") or []
+        failed = s.get("failed_requirements") or []
+        gstate = s.get("gate_state")
+        vstate = s.get("generic_verification")
+
+        lines = ["완료했습니다." if s.get("status") == "completed"
+                 else "작업은 완료했습니다. 다만 일부 항목은 검증하지 못했습니다."]
+        for r in verified:
+            lines.append(f"✓ {r['title']}")
+        for r in failed:
+            lines.append(f"✗ {r['title']}" + (f" — {r['reason']}" if r.get("reason") else ""))
+        for r in unverified:
+            label = {"unavailable": "검증 방법 없음", "blocked": "차단",
+                     "abandoned": "포기"}.get(r.get("status"), "미검증")
+            lines.append(f"! {r['title']} — {r.get('reason') or label}")
+
+        if vstate == "passed":
+            lines.append("✓ 기존 테스트·빌드 통과")
+        elif vstate == "unavailable":
+            lines.append("! 실행 가능한 test/build 없음 — 회귀 미확인")
+        if s.get("integration_verification") == "passed":
+            lines.append("✓ 최종 회귀 확인")
+        # gate가 없었다는 사실을 침묵하지 않는다 — 침묵하면 완전 검증으로 읽힌다.
+        if gstate == "none":
+            lines.append("! 요구사항 게이트 없음 — 요청 충족 여부는 검증되지 않았습니다")
+
+        commit, push = s.get("commit_status"), s.get("push_status")
+        n = s.get("files_changed_count") or 0
+        if not n:
+            lines.append("– 코드 변경 없음")
+        elif commit is None:
+            lines.append(f"– 변경 {n}개 파일")
+        elif not commit:
+            lines.append(f"✗ 변경 {n}개 파일 · 자동 commit 안 됨 — 수동 확인 필요")
+        elif push:
+            lines.append(f"✓ 변경 {n}개 파일 · commit·push 완료")
+        elif s.get("status") == "completed":
+            lines.append(f"! 변경 {n}개 파일 · 로컬 commit · push 실패 — 수동 push 필요")
+        else:
+            lines.append(f"– 변경 {n}개 파일 · 로컬 commit (미검증이라 push 안 함)")
+        return "\n".join(lines)
 
     @staticmethod
     def _finish_message(status: str) -> str:

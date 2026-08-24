@@ -25,20 +25,32 @@ SCRIPT_SUITES = [
     "test_sandbox_timeout.py",
     "test_bench_quality.py",
     "test_mcp_server.py",
+    # pytest가 수집하는 test_*도 있지만 main()의 invariant 본체는 스크립트로만 돈다 —
+    # 그래서 아래 orphan 검사(def test_ 유무)에 걸리지 않고 조용히 빠져 있었다.
+    "test_reliability_invariants.py",
+    "test_acceptance_gates.py",
 ]
 
 
 def test_no_uncollected_script_suites():
-    """`def test_*` 없는 test_*.py가 새로 생기면 목록에 넣으라고 알린다."""
+    """pytest가 실행하지 않는 테스트 본체가 있으면 목록에 넣으라고 알린다.
+
+    두 가지를 잡는다.
+    1) `def test_*`가 아예 없는 파일 — pytest가 통째로 건너뛴다.
+    2) `def test_*`는 있지만 `if __name__ == "__main__"`으로만 도는 main() 본체가 있는 파일 —
+       수집되는 테스트가 하나라도 있으면 (1)에 걸리지 않아 조용히 빠진다(실제로 빠져 있었다).
+    """
     known = set(SCRIPT_SUITES) | {Path(__file__).name}
     orphans = []
     for p in sorted(HERE.glob("test_*.py")):
         if p.name in known:
             continue
         body = p.read_text(encoding="utf-8")
-        if "\ndef test_" not in body and "\nasync def test_" not in body:
+        has_pytest_tests = "\ndef test_" in body or "\nasync def test_" in body
+        runs_own_main = "async def main(" in body or "\ndef main(" in body
+        if not has_pytest_tests or runs_own_main:
             orphans.append(p.name)
-    assert not orphans, f"pytest가 건너뛰는 스크립트 테스트: {orphans} — SCRIPT_SUITES에 추가하세요"
+    assert not orphans, f"pytest가 실행하지 않는 테스트 본체: {orphans} — SCRIPT_SUITES에 추가하세요"
 
 
 @pytest.mark.parametrize("script", SCRIPT_SUITES)

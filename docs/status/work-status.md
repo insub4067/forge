@@ -50,11 +50,51 @@ Developer done
 (2026-08-24 해결) pytest exit code 처리는 `PASSED / FAILED / UNAVAILABLE` 3상태로 분리됐다.
 exit 2/3/4/5와 timeout은 `unavailable`로 남아 "검증 못 함"이 "검증 성공"으로 승격되지 않는다.
 
-**남은 결함(2026-08-24 실측)**: 완료 판정의 재료인 acceptance gate 생성이 모델 재량이다.
-격리 프로브 3건 전부 gate 0개로 `completed`가 났고, 그 경우 완료 근거는 generic verify
-(기존 test/build 통과) 하나뿐이라 사용자 요구사항 충족은 확인되지 않는다.
-계측(`gate_coverage` 이벤트 + `backend/gate_coverage.py`)과 정직 표기는 들어갔고,
-강제 방식은 실사용 데이터를 보고 정한다 → `docs/proposal/gate-coverage-enforcement.md`.
+### Gate Coverage Completion Policy (2026-08-24)
+
+> **Gate가 없는 코드 변경은 완전히 검증된 완료로 취급하지 않는다.**
+
+실측(격리 프로브 3/3)에서 모델은 `update_tasks`는 부르고 `update_gates`만 건너뛰었고,
+그 run들이 전부 `completed`로 끝났다. gate가 없으면 완료 근거는 generic verification
+(기존 test/build 통과) 하나뿐이고, 사용자 요구사항 충족은 확인되지 않는다.
+
+현재 정책:
+
+```text
+Developer 구현
+→ files_changed > 0 ?
+   → gate 0 ?  → Gate Recovery 1회(gate 등록 전용 턴, flash, step 3)
+                 → 여전히 gate 0 → generic verification → completed_unverified
+   → gate > 0  → 기존 검증 흐름(generic → acceptance → integration)
+```
+
+- gate 없음 ≠ `verification_failed` (실패한 게 아니다)
+- gate 없음 ≠ `completed` (완전히 검증된 것도 아니다)
+- gate 없음 = `completed_unverified`
+- 부수 결과: gate 없는 run은 **origin push 대상이 아니다**(검증된 것만 배포 경로).
+- 복구는 **최대 1회**. 복구가 예외로 죽어도 run은 안전 상태로 마감한다.
+- 코드 변경이 없거나 작업 run이 아니면 복구하지 않는다(억지 gate 금지).
+
+핵심 함수: `resolve_completion_verification`, `needs_gate_recovery`,
+`build_gate_recovery_context`, `_coverage_kind` (전부 순수 함수 + 테스트로 고정).
+계측: `gate_coverage` 이벤트(`coverage` ∈ gated / recovered_gated / generic_only /
+no_change / not_applicable), 집계는 `backend/gate_coverage.py`.
+
+## 핵심 KPI
+
+기능 수나 token 절감이 아니다. 아래 순서로 본다.
+
+| 지표 | 의미 |
+|---|---|
+| `verified_task_success_rate` | 검증까지 통과한 완료 비율 |
+| **`false_completion_rate`** | **"완료했습니다" 했지만 요구사항 미충족 — 가장 위험한 실패** |
+| `human_interventions_per_task` | 사람이 끼어들어야 한 횟수 |
+| `repair_success_rate` | 검증 실패 후 수리가 성공한 비율 |
+| `cost_per_verified_task` | 검증된 완료 1건당 비용 |
+| `elapsed_per_verified_task` | 검증된 완료 1건당 소요 시간 |
+
+일반 실패("못했습니다")는 허용 가능하다. false completion은 아니다 — 사용자가 확인하지
+않아도 되는 에이전트라는 전제 자체를 깨기 때문이다. Gate coverage는 이 지표를 줄이는 수단이다.
 
 ## Durable Resume
 

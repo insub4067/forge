@@ -15,14 +15,28 @@ from collections import Counter
 
 
 def summarize(rows: list[dict]) -> dict:
-    """gate_coverage 이벤트 목록 → 집계(순수 함수)."""
+    """gate_coverage 이벤트 목록 → 집계(순수 함수).
+
+    분모는 **코드 변경이 있는 run**이다. 대화·조회 run을 섞으면 비율이 희석돼
+    "대체로 괜찮다"로 오독된다.
+    """
     changed = [r for r in rows if r.get("files_changed")]
     generic = [r for r in changed if r.get("generic_only")]
+    cov = Counter(r.get("coverage") or "?" for r in changed)
+    recovered = cov.get("recovered_gated", 0)
+    # 복구가 시도된 run = 처음에 gate가 없던 run(복구 성공 + 여전히 없음)
+    needed_recovery = recovered + len(generic)
     return {
         "runs": len(rows),
         "code_changing_runs": len(changed),
         "generic_only_runs": len(generic),
         "generic_only_rate": round(len(generic) / len(changed), 3) if changed else None,
+        "by_coverage": dict(cov),
+        # 모델이 처음부터 gate를 만든 비율 — 복구 장치 없이도 되는 비율
+        "gate_missing_rate": round(needed_recovery / len(changed), 3) if changed else None,
+        # 복구가 실제로 gate를 만들어 낸 비율(복구 장치의 효과)
+        "recovery_success_rate": (round(recovered / needed_recovery, 3)
+                                  if needed_recovery else None),
         "by_status": dict(Counter(r.get("status", "?") for r in rows)),
         "generic_only_by_status": dict(Counter(r.get("status", "?") for r in generic)),
     }
@@ -67,9 +81,13 @@ def main():
         return
     s = summarize(rows)
     print(f"run {s['runs']}개 (코드 변경 있는 run {s['code_changing_runs']}개)")
-    print(f"gate 없이 완료: {s['generic_only_runs']}개  비율 {s['generic_only_rate']}")
+    print(f"경로 분포: {s['by_coverage']}")
+    print(f"모델이 gate를 안 만든 비율: {s['gate_missing_rate']}"
+          f"  (복구가 만들어낸 비율: {s['recovery_success_rate']})")
+    print(f"복구 후에도 gate 0(요구사항 미검증): {s['generic_only_runs']}개"
+          f"  비율 {s['generic_only_rate']}")
     print(f"status 분포: {s['by_status']}")
-    print(f"gate 없이 완료의 status: {s['generic_only_by_status']}")
+    print(f"gate 0 run의 status: {s['generic_only_by_status']}")
 
 
 if __name__ == "__main__":

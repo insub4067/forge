@@ -1052,7 +1052,11 @@ function handleEvent(evt, assistant) {
       assistant.context = d
       break
     case 'verify_start':
-      assistant.verifyPhase = '검증 중'
+      // 내부 단계명(generic/integration)을 사람 말로 옮긴다 — 내부 이벤트는 그대로 유지.
+      assistant.verifyPhase = d.stage === 'integration' ? '최종 회귀 확인 중' : '테스트 중'
+      break
+    case 'gate_recovery':
+      assistant.verifyPhase = d.phase === 'start' ? '요구사항 정리 중' : ''
       break
     case 'verify_failed':
       assistant.verifyPhase = '복구 중'

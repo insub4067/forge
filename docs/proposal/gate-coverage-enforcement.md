@@ -1,7 +1,8 @@
 # Acceptance Gate Coverage Enforcement
 
 > 상태: Proposal (2026-08-24)
-> 상태 갱신: G0(계측)·G1(정직 표기) 구현됨. G2(강제)는 G0 데이터 대기.
+> 상태 갱신(2026-08-24): G0(계측)·G1(정직 표기)·**G2(a: 복구 1회 + completed 차단) 구현됨.**
+> 현재 구현 상태는 `docs/status/work-status.md`의 "Gate Coverage Completion Policy"가 authoritative.
 > 목표: 완료 판정의 근거인 acceptance gate가 **모델 재량**으로 남아 있는 구멍을 닫는다.
 > gate가 하나도 없는 작업이 `completed`로 끝나는 경로를 계측하고, 최종적으로 차단한다.
 
@@ -111,7 +112,7 @@ gate 0개로 완료한 run의 리포트가 "완료했습니다 / 검증: 테스�
 기존 `_gates_report`가 gate 0개면 빈 문자열을 돌려주는데, 그 침묵이 곧 오해다.
 honest failure 원칙의 연장이다.
 
-### G2 — 강제 (G0 계측 결과를 보고 결정)
+### G2 — 강제 (**구현됨** 2026-08-24, 선택지 (a))
 
 gate 0개인 채로 구현이 끝나면 완료를 내주지 않고 한 번 되돌린다. 선택지:
 
@@ -122,9 +123,14 @@ gate 0개인 채로 구현이 끝나면 완료를 내주지 않고 한 번 되�
 - **(c) 완료 거부**: gate 0개면 `completed` 불가, `completed_unverified` 고정. 가장 엄격하지만
   진짜로 gate가 부적절한 작업(문서 수정, 탐색)까지 걸린다.
 
-현재 선호: **(a)**. 비용이 1스텝이고, 실패해도 G1로 정직하게 떨어진다. (b)는 프로세스가
-검증을 지어내는 것이라 헌법에 어긋난다. (c)는 G0 데이터가 "거의 항상 gate가 없다"로 나올
-때만 고려한다.
+채택: **(a)**, 단 "루프 계속" 대신 **gate 등록 전용 턴 1회**로 구현했다. 전체 Developer
+루프를 다시 돌리면 step budget과 컨텍스트를 두 번 쓴다 — 복구 턴은 `update_gates` 도구
+하나만 받고(코드 수정 도구 없음) step 3, flash 고정이다. 복구 후에도 gate가 없으면
+`completed_unverified`로 정직하게 떨어진다.
+
+(b)는 프로세스가 검증을 지어내는 것이라 채택하지 않았다. (c)는 gate가 부적절한 작업까지
+막으므로 채택하지 않았다 — 대신 `needs_gate_recovery`가 "코드 변경이 있는 작업 run"만
+대상으로 삼는다(새 LLM 분류 호출 없이 기존 state 재사용).
 
 `complexity=simple` 분기에서 gate를 면제할지도 G0 데이터로 판단한다. 지금은 면제 로직이
 없고 — 프로브가 simple로 분류돼 gate 없이 끝난 것은 분류 때문이 아니라 모델이 안 불렀기

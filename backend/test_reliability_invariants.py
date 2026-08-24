@@ -51,7 +51,7 @@ def make_rt(verify_states, dev_status="done", changed=True, change_from=1):
         return "code", 0, 0
     rt._triage = fake_triage
 
-    async def fake_verify(ws, send):
+    async def fake_verify(ws, send, stage="generic"):
         i = vi["i"]; vi["i"] += 1
         return verify_states[min(i, len(verify_states) - 1)], "report"
     rt._verify = fake_verify
@@ -100,18 +100,25 @@ async def run_once(rt, ws="/tmp"):
 
 async def main():
     # ── commit invariant + 3상태 완료 매핑 ──
+    # gate 0 + generic passed → completed가 아니다(gate coverage 정책). 로컬 commit만.
+    # generic verification은 "기존 test/build가 안 깨졌다"만 말한다 — 요구사항 미검증.
+    # gate가 있는 completed+push 경로는 test_acceptance_gates.py Case A가 고정한다.
     rt, c = make_rt(["passed"])
-    assert await run_once(rt) == "completed" and c["count"] == 1
-    assert c["push"] is True, "completed는 push까지"   # P0-3
-    print("passed → completed + commit + push: OK")
+    st = await run_once(rt)
+    assert st == "completed_unverified", st
+    assert c["count"] == 1, c
+    assert c["push"] is False, "gate 0은 검증된 배포가 아니다 — push 금지"
+    print("gate 0 + passed → completed_unverified + commit + NO push: OK")
 
     rt, c = make_rt(["failed", "failed"])  # 지속 실패
     assert await run_once(rt) == "verification_failed" and c["count"] == 0
     print("failed(지속) → verification_failed + NO commit: OK")
 
-    rt, c = make_rt(["failed", "passed"])  # 수리 성공
-    assert await run_once(rt) == "completed" and c["count"] == 1
-    print("failed→repair→passed → completed + commit: OK")
+    rt, c = make_rt(["failed", "passed"])  # 수리 성공(gate 0이므로 미검증 완료)
+    st = await run_once(rt)
+    assert st == "completed_unverified", st
+    assert c["count"] == 1, c
+    print("failed→repair→passed → completed_unverified + commit: OK")
 
     rt, c = make_rt(["unavailable"])  # 검증 대상 없음
     st = await run_once(rt)
@@ -135,7 +142,7 @@ async def main():
 
     # 커밋 대상은 에이전트가 바꾼 경로뿐(git add -A로 남의 변경을 쓸어담지 않는다)
     rt, c = make_rt(["passed"])
-    assert await run_once(rt) == "completed"
+    assert await run_once(rt) == "completed_unverified"
     assert c["paths"] == ["app.py"], c["paths"]
     print("커밋 경로는 에이전트가 바꾼 파일뿐: OK")
 
@@ -298,6 +305,16 @@ async def main():
     assert resumable("/") is False
     assert resumable("") is False
     assert resumable("/nonexistent-xyz-123") is False
+    # ── 핵심 invariant: 코드 변경 + gate 0에서 completed는 나올 수 없다 ──
+    # generic verification이 통과해도, gate 복구가 실패해도, 어떤 경로로도.
+    for states in (["passed"], ["failed", "passed"], ["unavailable"],
+                   ["passed", "passed"]):
+        rt, c = make_rt(states)
+        st = await run_once(rt)
+        assert st != "completed", (states, st)
+        assert c["push"] is not True, (states, c)
+    print("gate 0 코드변경은 어떤 경로로도 completed가 되지 않는다: OK")
+
     print("resume workspace 가드: 루트/없음/비디렉터리는 재개 안 함: OK")
 
     test_derived_context_roles_do_not_overwrite_history()

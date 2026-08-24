@@ -35,6 +35,13 @@ class ModelRouter:
                 "thinking": True,
                 "reasoning_effort": "low",
             },
+            # Gate 복구 — 사용자 요청과 변경 파일에서 acceptance gate만 만든다.
+            # 저비용 고정: gate 작성 실패로 pro를 소비하지 않는다(비용 상한).
+            "gate_recovery": {
+                "model": settings.chat_model or "deepseek-v4-flash",
+                "thinking": True,
+                "reasoning_effort": "low",
+            },
             "vision": {
                 "model": settings.vision_model or "deepseek-v4-flash-vision-exp",
                 "thinking": False,

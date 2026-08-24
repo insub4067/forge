@@ -122,26 +122,46 @@ async def test_verify_gates():
 # ─────────────────────────────────────────────────────────────────────────────
 # run() 통합 흐름 — 게이트가 완료 판정을 바꾸는지
 # ─────────────────────────────────────────────────────────────────────────────
-def _make_run_rt(gates, verify_states):
+def _make_run_rt(gates, verify_states, recovery_gates=None, recovery_raises=False,
+                 dev_changes_files=True, roles=None):
+    """run()을 LLM 없이 돌린다. recovery_gates가 주어지면 gate 복구 턴이 그 gate를 등록한다.
+
+    recovery_raises=True면 복구 턴이 예외를 던진다(복구 실패가 run을 깨뜨리지 않는지 확인).
+    dev_changes_files=False면 Developer가 파일을 바꾸지 않는다(변경 0건 semantics).
+    """
     rt = A.AgentRuntime()
     commits = []
     verify_calls = []
     gates_state = [dict(g) for g in gates]
+    role_calls = roles if roles is not None else []
+    recovery_ctx = []
 
     async def fake_run_role(role, all_messages, send, session_id, ws, state,
                             recent_calls, step_base, room_memory="", retry_count=0,
                             tools=None, skills="", complexity="normal", escalate=False,
                             has_image=False, plan="", persist=True):
-        if role == "developer":
+        role_calls.append(role)
+        if role == "gate_recovery":
+            recovery_ctx.append(all_messages)
+            # 복구 턴은 gate 등록 도구만 받는다(코드 수정 도구 없음) — 계약을 테스트에서 고정.
+            names = {t["function"]["name"] for t in (tools or [])}
+            assert names == {"update_gates"}, names
+            if recovery_raises:
+                raise RuntimeError("복구 턴 실패")
+            if recovery_gates:
+                gates_state[:] = [dict(g) for g in recovery_gates]
+            return "done", 0, 0, {"model": "m", "thinking": False, "reasoning_effort": ""}
+        if role == "developer" and dev_changes_files:
             state["files_changed"].append("app.py")
         return "done", 0, 0, {"model": "m", "thinking": False, "reasoning_effort": ""}
     rt._run_role = fake_run_role
+    rt._recovery_ctx = recovery_ctx
 
     async def fake_triage(all_messages):
         return "code", 0, 0
     rt._triage = fake_triage
 
-    async def fake_verify(ws, send):
+    async def fake_verify(ws, send, stage="generic"):
         verify_calls.append(1)
         idx = min(len(verify_calls) - 1, len(verify_states) - 1)
         return verify_states[idx]  # (state, report) 튜플 그대로
@@ -247,35 +267,163 @@ async def test_run_gate_all_passed_completed():
 
 
 
-async def _run_events(rt):
+async def _run_events(rt, msg="작업"):
     events = []
 
     async def emit(evt):
         events.append(evt)
-    await rt.run([{"role": "user", "content": "작업"}], emit, "s1", None)
+    await rt.run([{"role": "user", "content": msg}], emit, "s1", None)
     return events
 
 
-async def test_gate_coverage_event():
-    """G0 계측 — gate 없이 코드를 바꾸고 완료한 run을 generic_only로 표시한다.
-    그 run의 완료 근거는 "기존 테스트가 안 깨졌다" 하나뿐이다(요구사항 미검증).
-    빈도를 알아야 강제(G2) 방식을 정할 수 있다."""
-    rt, _commits, _ = _make_run_rt([], verify_states=[("passed", "v1"), ("passed", "v2")])
-    cov = [e["data"] for e in await _run_events(rt) if e["type"] == "gate_coverage"]
-    assert cov, "gate_coverage 이벤트가 없다"
-    assert cov[-1]["gates"] == 0 and cov[-1]["generic_only"] is True, cov[-1]
-    assert cov[-1]["files_changed"] > 0 and cov[-1]["status"] == "completed"
+def _done(events):
+    d = [e for e in events if e["type"] == "done"]
+    return d[-1]["data"] if d else {}
 
-    gates = [_gate(1, "로그인", "echo ok", "ok")]
-    rt, _commits, _ = _make_run_rt(gates, verify_states=[("passed", "v1"), ("passed", "v2")])
-    cov = [e["data"] for e in await _run_events(rt) if e["type"] == "gate_coverage"]
-    assert cov[-1]["gates"] == 1 and cov[-1]["generic_only"] is False, cov[-1]
-    print("gate_coverage(G0): OK — gate 0 + 변경 있음 → generic_only 표시")
+
+def _cov(events):
+    c = [e["data"] for e in events if e["type"] == "gate_coverage"]
+    return c[-1] if c else {}
+
+
+_G = {"title": "0으로 나누면 ValueError", "verification_method": "echo ok",
+      "expected_result": "ok"}
+
+
+async def test_case_a_gated_all_pass_completed():
+    """A — 코드 변경 + gate 존재 + 전부 PASS → completed."""
+    roles = []
+    rt, commits, _ = _make_run_rt([_gate(1, "로그인", "echo ok", "ok")],
+                                  verify_states=[("passed", "v1"), ("passed", "v2")],
+                                  roles=roles)
+    ev = await _run_events(rt)
+    assert _done(ev).get("status") == "completed", _done(ev)
+    assert "gate_recovery" not in roles, roles     # gate가 있으면 복구하지 않는다
+    assert _cov(ev)["coverage"] == "gated", _cov(ev)
+    assert commits and commits[0]["push"] is True
+    print("Case A (gate 있음 + 전부 PASS → completed): OK")
+
+
+async def test_case_b_recovered_gate_pass_completed():
+    """B — gate 0으로 시작 → 복구가 gate 생성 → gate PASS → completed."""
+    roles = []
+    rt, commits, _ = _make_run_rt([], verify_states=[("passed", "v1"), ("passed", "v2")],
+                                  recovery_gates=[_gate(1, "0 나눗셈", "echo ok", "ok")],
+                                  roles=roles)
+    ev = await _run_events(rt)
+    assert _done(ev).get("status") == "completed", _done(ev)
+    assert roles.count("gate_recovery") == 1, roles
+    assert _cov(ev)["coverage"] == "recovered_gated", _cov(ev)
+    # 복구 컨텍스트는 최소여야 한다 — Developer transcript 재전송 금지
+    ctx = rt._recovery_ctx[0]
+    assert len(ctx) == 1 and ctx[0]["role"] == "user", ctx
+    assert "app.py" in ctx[0]["content"]
+    print("Case B (gate 0 → 복구 생성 → PASS → completed): OK")
+
+
+async def test_case_c_recovery_fails_to_create_completed_unverified():
+    """C — 복구 후에도 gate 0 → generic PASS여도 completed_unverified.
+
+    이번 작업의 핵심 invariant: 코드 변경 + gate 0에서 completed는 나오지 않는다.
+    generic verification은 "기존 test/build가 안 깨졌다"만 말한다."""
+    roles = []
+    rt, commits, _ = _make_run_rt([], verify_states=[("passed", "v1"), ("passed", "v2")],
+                                  recovery_gates=None, roles=roles)
+    ev = await _run_events(rt)
+    d = _done(ev)
+    assert d.get("status") == "completed_unverified", d
+    assert roles.count("gate_recovery") == 1, roles
+    assert _cov(ev)["coverage"] == "generic_only", _cov(ev)
+    # 미검증 사실을 침묵하지 않는다
+    assert "요구사항 게이트 없음" in d.get("content", ""), d
+    # 미검증은 로컬 commit만 — origin push 금지
+    assert commits and commits[0]["push"] is False, commits
+    print("Case C (복구 후에도 gate 0 → completed_unverified, push 금지): OK")
+
+
+async def test_case_d_no_change_keeps_semantics():
+    """D — 변경 없음 + gate 0 → 기존 no-change semantics 유지(복구 안 함)."""
+    roles = []
+    rt, commits, _ = _make_run_rt([], verify_states=[("passed", "v1")],
+                                  dev_changes_files=False, roles=roles)
+    ev = await _run_events(rt)
+    d = _done(ev)
+    assert d.get("status") == "completed_unverified", d
+    assert "코드 변경 없이" in d.get("content", ""), d
+    assert "gate_recovery" not in roles, roles   # 바꾼 게 없으면 gate도 필요 없다
+    assert commits == [], commits
+    assert _cov(ev)["coverage"] == "no_change", _cov(ev)
+    print("Case D (변경 없음 → 복구 안 함, 기존 semantics): OK")
+
+
+async def test_case_e_recovery_exception_does_not_crash_run():
+    """E — 복구 턴이 예외를 던져도 run이 죽지 않고 안전 상태로 마감한다."""
+    roles = []
+    rt, commits, _ = _make_run_rt([], verify_states=[("passed", "v1"), ("passed", "v2")],
+                                  recovery_raises=True, roles=roles)
+    ev = await _run_events(rt)
+    d = _done(ev)
+    assert d.get("status") == "completed_unverified", d
+    assert roles.count("gate_recovery") == 1, roles
+    assert _cov(ev)["coverage"] == "generic_only", _cov(ev)
+    print("Case E (복구 예외 → crash 없이 completed_unverified): OK")
+
+
+async def test_case_f_recovery_runs_at_most_once():
+    """F — gate 복구는 두 번 이상 돌지 않는다(비용 상한).
+
+    gate 실패 → Developer 수리 루프를 타는 경로에서도 복구가 재진입하지 않아야 한다."""
+    roles = []
+    rt, _commits, _ = _make_run_rt(
+        [], verify_states=[("passed", "v1"), ("passed", "v2"), ("passed", "v3")],
+        recovery_gates=[_gate(1, "실패하는 요구사항", "exit 1", "never")], roles=roles)
+    await _run_events(rt)
+    assert roles.count("gate_recovery") == 1, roles
+    print("Case F (복구 최대 1회): OK")
+
+
+def test_resolve_completion_verification_invariant():
+    """gate 없는 코드 변경은 completed가 될 수 없다 — 순수 함수로 고정."""
+    r = A.resolve_completion_verification
+    assert r("none", "passed") == "completed_unverified"
+    assert r("none", "unavailable") == "completed_unverified"
+    assert r("passed", "passed") == "completed"
+    assert r("passed", "unavailable") == "completed_unverified"
+    assert r("partial", "passed") == "completed_unverified"
+    assert r("unavailable", "passed") == "completed_unverified"
+    # gate 없음은 실패가 아니다
+    assert "failed" not in r("none", "passed")
+
+
+def test_needs_gate_recovery_scope():
+    """gate가 필요 없는 요청에는 복구를 걸지 않는다(억지 gate 금지)."""
+    n = A.needs_gate_recovery
+    assert n("code", ["a.py"], 0) is True
+    assert n("code", ["a.py"], 2) is False   # 이미 gate 있음
+    assert n("code", [], 0) is False         # 변경 없음(설명·조회·리뷰)
+    assert n("chat", ["a.py"], 0) is False   # 작업 run 아님
+
+
+def test_coverage_kind_categories():
+    k = A._coverage_kind
+    assert k(0, [], False, False) == "not_applicable"
+    assert k(0, [], False, True) == "no_change"
+    assert k(0, ["a.py"], True, True) == "generic_only"
+    assert k(2, ["a.py"], False, True) == "gated"
+    assert k(2, ["a.py"], True, True) == "recovered_gated"
 
 
 async def main():
     test_clamp_gate_status()
-    await test_gate_coverage_event()
+    await test_case_a_gated_all_pass_completed()
+    await test_case_b_recovered_gate_pass_completed()
+    await test_case_c_recovery_fails_to_create_completed_unverified()
+    await test_case_d_no_change_keeps_semantics()
+    await test_case_e_recovery_exception_does_not_crash_run()
+    await test_case_f_recovery_runs_at_most_once()
+    test_resolve_completion_verification_invariant()
+    test_needs_gate_recovery_scope()
+    test_coverage_kind_categories()
     test_schedule_no_same_file_in_batch()
     await test_verify_gates()
     await test_run_gate_fail_no_commit()

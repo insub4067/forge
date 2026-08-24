@@ -107,12 +107,20 @@ def test_autocommit_returns_real_outcome():
     assert asyncio.run(_outcome(ws, [])) == (False, False)         # 대상 없음
 
 
-def test_deploy_line_never_claims_unearned_push():
-    """push가 실패했으면 성공으로 보고하지 않는다 (false completion 방지)."""
-    d = A.AgentRuntime._deploy_line
-    assert "push 완료" in d(2, committed=True, pushed=True, push_attempted=True)
-    assert "push 실패" in d(2, committed=True, pushed=False, push_attempted=True)
-    assert "push 안 함" in d(2, committed=True, pushed=False, push_attempted=False)
-    assert "commit 안 됨" in d(2, committed=False, pushed=False, push_attempted=True)
-    for line in (d(2, True, False, True), d(2, False, False, True)):
-        assert "push 완료" not in line
+def test_report_never_claims_unearned_push():
+    """push가 실패했으면 성공으로 보고하지 않는다 (false completion 방지).
+    최종 보고는 _autocommit이 돌려준 실제 (committed, pushed)로 만들어진다."""
+    def line(status, committed, pushed):
+        return A.AgentRuntime.format_completion_summary({
+            "status": status, "gate_state": "passed", "generic_verification": "passed",
+            "integration_verification": "passed", "files_changed_count": 2,
+            "verified_requirements": [], "unverified_requirements": [],
+            "failed_requirements": [], "commit_status": committed, "push_status": pushed})
+
+    assert "commit·push 완료" in line("completed", True, True)
+    assert "push 실패" in line("completed", True, False)
+    assert "push 안 함" in line("completed_unverified", True, False)
+    assert "commit 안 됨" in line("completed", False, False)
+    for bad in (line("completed", True, False), line("completed", False, False),
+                line("completed_unverified", True, False)):
+        assert "push 완료" not in bad
