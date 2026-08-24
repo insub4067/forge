@@ -5,6 +5,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { makeMoveThrottle } from '../lib/moveThrottle.js'
 import { pullDistance, pullReady } from '../lib/pullToRefresh.js'
+import { toScreenXY } from '../lib/screenCoord.js'
 
 const props = defineProps({
   rooms: { type: Array, default: () => [] },
@@ -219,16 +220,12 @@ function onScreenError() {
   screenErr.value = '화면을 가져오지 못했습니다. 시스템 설정 › 개인정보 보호 › 화면 기록에서 백엔드(터미널/파이썬)에 권한을 허용하세요.'
   screenOn.value = false
 }
-// 표시된 이미지 좌표 → 실제 화면 좌표 변환
-function toScreenXY(ev) {
+// CSS와 동일 조건(portrait에서 rotate(90deg) 표시) — 회전 보정이 필요한지 판단
+const isRotatedScreen = () => window.matchMedia('(orientation: portrait)').matches
+// 표시된 이미지 좌표 → 실제 화면 좌표 변환 (회전 보정 포함)
+function toDisplayScreenXY(ev) {
   if (!screenImg || !screenNatural.w) return null
-  const r = screenImg.getBoundingClientRect()
-  const sx = (ev.clientX - r.left) / r.width
-  const sy = (ev.clientY - r.top) / r.height
-  return {
-    x: Math.round(sx * screenNatural.w),
-    y: Math.round(sy * screenNatural.h),
-  }
+  return toScreenXY(ev, screenImg.getBoundingClientRect(), screenNatural, isRotatedScreen())
 }
 async function macSend(payload) {
   try {
@@ -245,15 +242,17 @@ async function macSend(payload) {
     remoteErr.value = '입력 전송 실패: ' + err.message
   }
 }
-function onScreenClick(ev) {
+// pointerdown 기반: 터치·마우스 모두 즉시 처리. click은 500ms 화면 갱신 시 취소될 수 있어
+// 사용하지 않는다(탭 중 src가 교체되면 click이 발생하지 않는 모바일 브라우저 동작 우회).
+function onScreenPointerDown(ev) {
   if (!remoteCtrl.value) return
-  const p = toScreenXY(ev)
+  const p = toDisplayScreenXY(ev)
   if (!p) return
   macSend({ type: 'click', x: p.x, y: p.y, button: ev.button === 2 ? 'right' : 'left', clicks: ev.detail || 1 })
 }
 function onScreenMove(ev) {
   if (!remoteCtrl.value) return
-  const p = toScreenXY(ev)
+  const p = toDisplayScreenXY(ev)
   if (p) sendMove(p)
 }
 function onScreenWheel(ev) {
@@ -659,8 +658,8 @@ watch(
         alt="맥 화면"
         @load="onScreenImgLoad"
         @error="onScreenError"
-        @click="onScreenClick"
-        @mousemove="onScreenMove"
+        @pointerdown="onScreenPointerDown"
+        @pointermove="onScreenMove"
         @wheel="onScreenWheel"
         @keydown="onScreenKey"
         tabindex="0"

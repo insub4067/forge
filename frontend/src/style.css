@@ -2652,6 +2652,8 @@ footer .image-preview-row {
   cursor: crosshair;
   outline: 2px solid var(--accent, #4f8cff);
   outline-offset: -2px;
+  /* 터치 스크롤/확대 제스처가 입력 이벤트를 가로채지 못하게 차단 (원격제어 중에만) */
+  touch-action: none;
 }
 .mac-remote-bar {
   position: absolute;
