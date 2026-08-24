@@ -760,17 +760,21 @@ header .todo-btn {
   margin-bottom: 8px;
 }
 
-/* QA에서 멈춘(실패/차단) 카드 — 진행바 대신 상태 뱃지로 '진행 중 아님'을 분명히 한다. */
-.kanban-card.failed { border-color: #d9775766; }
+/* QA에서 멈춘(실패/차단) 카드 — 진행바 대신 상태 뱃지로 '진행 중 아님'을 분명히 한다.
+   카드 테두리는 중립 유지(7장 전부 오렌지면 강조가 무강조가 된다) — 오렌지는 뱃지에만. */
+.kanban-card.failed { border-color: var(--border); }
 .kanban-card-badge {
   display: inline-block;
   font-size: 11px;
-  font-weight: 600;
-  color: #d97757;
-  background: #d9775722;
+  font-weight: 700;
+  color: #f6a884;
+  background: rgba(217, 119, 87, 0.30);
   border-radius: 6px;
-  padding: 1px 7px;
+  padding: 2px 8px;
 }
+/* 빈 레인(0건)은 헤더를 얇게·카운트를 흐리게 — 카드 있는 레인이 부각되게. */
+.kanban-section.empty .kanban-col-head { padding: 9px 14px; opacity: 0.72; }
+.kanban-count.zero { opacity: 0.4; }
 
 .kanban-empty {
   text-align: center;
@@ -4077,7 +4081,8 @@ button {
   font-weight: 500;
   letter-spacing: 0.02em;
   color: var(--muted);
-  margin-top: 5px;
+  margin-top: auto;   /* 카드 하단에 고정 — capability chip 개수(2~3개)와 무관하게 4장 정렬 */
+  padding-top: 6px;
 }
 .agent-card-status {
   display: inline-flex;
@@ -4137,15 +4142,16 @@ button {
 }
 .detail-label { font-size: 11.5px; font-weight: 600; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 10px; text-transform: uppercase; }
 .detail-desc { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--text); }
-.detail-desc.lead { color: var(--muted); margin: 2px 0 4px; }
+.detail-desc.lead { color: var(--muted); margin: 12px 0 4px; }
 .detail-hint { margin: 10px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
 .agent-detail { animation: detail-in 0.2s ease-out; }
 @keyframes detail-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .agent-detail { animation: none; } }
-.detail-kv { display: flex; flex-direction: column; gap: 7px; }
-.detail-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
-.detail-key { color: var(--muted); flex-shrink: 0; }
-.detail-val { color: var(--text); text-align: right; word-break: break-all; }
+.detail-kv { display: flex; flex-direction: column; gap: 8px; }
+/* 라벨 고정폭 + 값 좌측정렬 — 값 길이차로 우측이 지그재그로 흩어지던 것 제거. */
+.detail-row { display: grid; grid-template-columns: 108px 1fr; gap: 12px; font-size: 13px; align-items: baseline; }
+.detail-key { color: var(--muted); }
+.detail-val { color: var(--text); text-align: left; word-break: break-all; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .detail-caps { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .detail-policy {
@@ -4173,9 +4179,9 @@ button {
 
 .prompt-open-btn {
   width: 100%;
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid var(--border);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent);
   border-radius: 10px;
   padding: 11px;
   font-size: 14px;
@@ -4234,13 +4240,20 @@ button {
 .prompt-mode-btn.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 
 /* Read 모드 typography — 터미널이 아니라 문서 Inspector */
-.prompt-read { font-size: 14px; line-height: 1.68; }
-.prompt-read h1 { font-size: 19px; margin: 20px 0 10px; }
-.prompt-read h2 { font-size: 16px; margin: 18px 0 8px; }
-.prompt-read h3 { font-size: 14.5px; margin: 16px 0 6px; }
+/* .prompt-body의 white-space:pre-wrap(Raw용)이 read 모드에도 걸리면 marked HTML의
+   태그 사이 개행이 전부 시각적 빈 줄로 렌더돼 요소마다 큰 공백이 생긴다 — normal로 되돌린다.
+   .prompt-body가 소스상 뒤에 있어 같은 명시도로는 지므로 복합 선택자로 이긴다. */
+.prompt-body.prompt-read { white-space: normal; }
+.prompt-read { font-size: 14px; line-height: 1.6; }
+.prompt-read h1 { font-size: 19px; margin: 20px 0 8px; }
+.prompt-read h2 { font-size: 16px; margin: 18px 0 6px; }
+.prompt-read h3 { font-size: 14.5px; margin: 14px 0 6px; }
 .prompt-read h1:first-child, .prompt-read h2:first-child { margin-top: 0; }
-.prompt-read p, .prompt-read li { margin: 6px 0; }
-.prompt-read ul, .prompt-read ol { padding-left: 20px; }
+.prompt-read p { margin: 8px 0; }
+/* marked의 loose list는 li 안에 <p>를 넣어 간격이 두 배로 벌어진다 — li 내부 p 마진 제거. */
+.prompt-read li { margin: 3px 0; }
+.prompt-read li > p { margin: 0; }
+.prompt-read ul, .prompt-read ol { padding-left: 20px; margin: 8px 0; }
 .prompt-read code { background: var(--panel-2); border-radius: 4px; padding: 1px 5px; font-size: 0.9em; }
 .prompt-read pre { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-x: auto; }
 .prompt-read pre code { background: none; padding: 0; }

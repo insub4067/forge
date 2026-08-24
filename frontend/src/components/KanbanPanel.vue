@@ -28,6 +28,10 @@ function failBadge(s) {
   return failMarks[s] || ''
 }
 
+function laneCount(key) {
+  return props.tasks.filter((x) => normStatus(x.status) === key).length
+}
+
 // gate 상태 → 표시 기호·레이블. passed/failed는 프로세스가 실제 검증 후 부여한다.
 const gateMarks = {
   passed: { mark: '✓', label: '통과' },
@@ -81,10 +85,10 @@ function toggleKanban(key) {
       <button @click="emit('close')">닫기</button>
     </div>
     <div class="kanban-board">
-      <div v-for="col in kanbanCols" :key="col.key" class="kanban-section">
+      <div v-for="col in kanbanCols" :key="col.key" class="kanban-section" :class="{ empty: laneCount(col.key) === 0 }">
         <div class="kanban-col-head" @click="toggleKanban(col.key)">
           <span>{{ col.label }}</span>
-          <span class="kanban-count">{{ tasks.filter((x) => normStatus(x.status) === col.key).length }}</span>
+          <span class="kanban-count" :class="{ zero: laneCount(col.key) === 0 }">{{ laneCount(col.key) }}</span>
         </div>
         <div v-show="kanbanOpen[col.key]" class="kanban-cards">
           <div

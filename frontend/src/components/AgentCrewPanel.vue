@@ -221,7 +221,7 @@ onUnmounted(() => {
           <p class="detail-desc lead">{{ selected.description }}</p>
 
           <div class="detail-block">
-            <div class="detail-label">모델</div>
+            <div class="detail-label">MODEL</div>
             <div class="detail-kv">
               <div class="detail-row"><span class="detail-key">Current</span><span class="detail-val mono">{{ selected.model || '—' }}</span></div>
               <div class="detail-row"><span class="detail-key">Thinking</span><span class="detail-val">{{ selected.thinking ? '켜짐 · ' + (selected.reasoning_effort || '') : '꺼짐' }}</span></div>
@@ -230,7 +230,7 @@ onUnmounted(() => {
           </div>
 
           <div class="detail-block">
-            <div class="detail-label">컨텍스트</div>
+            <div class="detail-label">CONTEXT</div>
             <div class="detail-kv">
               <div class="detail-row">
                 <span class="detail-key">Context</span>
