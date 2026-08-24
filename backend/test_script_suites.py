@@ -29,6 +29,9 @@ SCRIPT_SUITES = [
     # 그래서 아래 orphan 검사(def test_ 유무)에 걸리지 않고 조용히 빠져 있었다.
     "test_reliability_invariants.py",
     "test_acceptance_gates.py",
+    "test_memory_guard.py",
+    "test_chat_images.py",
+    "test_grep_bounds.py",
 ]
 
 

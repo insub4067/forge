@@ -1,3 +1,4 @@
+import asyncio
 import re
 from pathlib import Path
 
@@ -319,22 +320,40 @@ def _list_tree(path: Path, depth: int) -> list[str]:
     return lines
 
 
-def _grep(path: Path, pattern: str, include: str | None, out: list[str]) -> None:
-    import re
+# grep은 이벤트 루프를 블록하는 동기 재귀다 — 홈 디렉터리처럼 큰 트리에서 폭주해 서버를
+# 먹통으로 만든 사고가 있었다(워크스페이스가 /Users/insub였고 수만 파일을 훑었다).
+# 방문 파일 수·경과 시간·결과 수에 상한을 두고, execute_tool은 이걸 executor로 돌린다.
+_GREP_MAX_FILES = 20000
+_GREP_MAX_HITS = 100
+_GREP_MAX_SECONDS = 8.0
 
+
+def _grep(path: Path, pattern: str, include: str | None, out: list[str],
+          budget: dict | None = None) -> None:
+    import re
+    import time
+
+    if budget is None:
+        budget = {"files": 0, "deadline": time.monotonic() + _GREP_MAX_SECONDS}
     regex = re.compile(pattern)
     try:
         entries = sorted(path.iterdir(), key=lambda e: (e.is_file(), e.name))
     except PermissionError:
         return
     for e in entries:
-        if e.name in {"node_modules", ".git", "__pycache__", ".venv"}:
+        if len(out) >= _GREP_MAX_HITS or budget["files"] >= _GREP_MAX_FILES \
+                or time.monotonic() > budget["deadline"]:
+            return
+        if e.name in {"node_modules", ".git", "__pycache__", ".venv", ".venv", "dist", ".next", "build"}:
+            continue
+        if e.is_symlink():  # 심링크 루프로 무한 재귀 방지
             continue
         if e.is_dir():
-            _grep(e, pattern, include, out)
+            _grep(e, pattern, include, out, budget)
             continue
         if include and not e.match(include):
             continue
+        budget["files"] += 1
         try:
             text = e.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -342,6 +361,8 @@ def _grep(path: Path, pattern: str, include: str | None, out: list[str]) -> None
         for i, line in enumerate(text.splitlines(), 1):
             if regex.search(line):
                 out.append(f"{e}:{i}: {line.strip()}")
+                if len(out) >= _GREP_MAX_HITS:
+                    return
 
 
 def _make_diff(old_text: str, new_text: str, path: str) -> str:
@@ -519,10 +540,14 @@ async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]
         lines = _list_tree(p, 0)
         return "\n".join(lines) or "(빈 디렉토리)", ""
     if name == "grep":
-        p = _resolve(workspace, ".")
+        # 모델이 준 path를 존중한다(무시하고 워크스페이스 전체를 훑으면 홈 디렉터리에서 폭주).
+        p = _resolve(workspace, str(args.get("path") or "."))
         out: list[str] = []
-        _grep(p, str(args["pattern"]), args.get("include"), out)
-        return "\n".join(out[:100]) or "검색 결과 없음", ""
+        # 동기 재귀라 이벤트 루프를 막는다 — 스레드로 오프로드한다.
+        await asyncio.to_thread(_grep, p, str(args["pattern"]), args.get("include"), out)
+        tail = "\n(결과 상한 도달 — 더 좁은 path/pattern으로 다시 검색하세요)" \
+            if len(out) >= _GREP_MAX_HITS else ""
+        return ("\n".join(out[:_GREP_MAX_HITS]) + tail) or "검색 결과 없음", ""
     if name == "save_skill":
         import re as _re
         from .. import skills as skills_lib
@@ -554,7 +579,6 @@ async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]
         p.write_text(new_content, encoding="utf-8")
         return f"파일을 수정했습니다: {p}", diff
     if name == "build_frontend":
-        import asyncio
         import shutil
         fe = Path(workspace) / "frontend"
         if not (fe / "package.json").is_file():
