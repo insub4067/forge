@@ -28,6 +28,11 @@ function renderMarkdown(text) {
   }
 }
 
+// 카드 헤더가 이미 skill 이름을 보여주므로, 본문 첫 줄의 '# 이름' H1은 중복이라 제거.
+function skillBody(content) {
+  return (content || '').replace(/^\s*#[^\n]*\n+/, '')
+}
+
 const messages = ref([])
 const input = ref('')
 const busy = ref(false)
@@ -1915,14 +1920,14 @@ document.addEventListener('visibilitychange', () => {
         <div v-if="!skills.length" class="admin-sub">
           아직 저장된 skill이 없습니다. 에이전트가 반복될 만한 해결 절차를 발견하면 save_skill로 저장합니다.
         </div>
-        <div v-for="s in skills" :key="s.name" class="admin-section">
+        <div v-for="s in skills" :key="s.name" class="admin-section skill-card">
           <div class="skill-head" @click="skillOpen[s.name] = !skillOpen[s.name]">
             <svg class="skill-chevron" :class="{ open: skillOpen[s.name] }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
             <span class="skill-name">{{ s.name }}</span>
             <span class="skill-scope" :class="s.origin || s.scope">{{ { curated: '큐레이트', learned: '학습', project: '프로젝트' }[s.origin] || (s.scope === 'global' ? '전역' : '프로젝트') }}</span>
             <button v-if="s.origin !== 'curated'" class="skill-del" @click.stop="deleteSkill(s.name, s.scope)">삭제</button>
           </div>
-          <pre v-show="skillOpen[s.name]" class="skill-content">{{ s.content }}</pre>
+          <pre v-show="skillOpen[s.name]" class="skill-content">{{ skillBody(s.content) }}</pre>
         </div>
       </div>
     </div>

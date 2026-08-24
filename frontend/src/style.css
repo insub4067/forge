@@ -561,12 +561,14 @@ header .todo-btn {
   border-bottom: none;
 }
 .role-name {
-  width: 72px;
+  width: 104px;   /* 'Gate_recovery'가 값과 겹치지 않게 — 가장 긴 라벨 기준 고정폭 */
   flex-shrink: 0;
   font-weight: 600;
   font-size: 13px;
   text-transform: capitalize;
+  white-space: nowrap;
 }
+.policy-model { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .policy-model {
   flex: 1;
   min-width: 0;
@@ -2183,7 +2185,7 @@ footer .image-preview-row {
   -webkit-overflow-scrolling: touch;
 }
 .gh-empty {
-  padding: 28px 16px;
+  padding: 64px 16px;
   text-align: center;
   color: var(--muted);
   font-size: 13px;
@@ -2234,15 +2236,16 @@ footer .image-preview-row {
 }
 .gh-avatar {
   flex-shrink: 0;
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  background: var(--accent);
-  color: #fff;
+  /* 커밋마다 반복되는 오렌지 disc가 메시지보다 튀던 것 — 중립 처리로 위계를 메시지에 양보. */
+  background: var(--panel-2);
+  color: var(--muted);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 700;
 }
 .gh-commit-body {
@@ -3147,6 +3150,7 @@ button {
   border-radius: 3px;
   background: var(--accent);
   transition: width 0.3s ease;
+  min-width: 2px;   /* 값은 있는데 0%로 반올림되는 항목도 존재를 표시(빈 트랙 방지) */
 }
 
 .file-chip {
@@ -3259,13 +3263,19 @@ button {
   animation: pulse 1.2s ease-in-out infinite;
 }
 
+/* skill 카드는 접힌 상태가 제목 한 줄이라 admin-section 기본 여백은 과하다 — 조밀하게. */
+.skill-card { padding: 11px 14px; }
+/* grid로 배지 우변을 고정 슬롯에 앵커 — 삭제 버튼 유무와 무관하게 6개 카드 배지가 정렬된다. */
 .skill-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: 16px 1fr auto 52px;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
   cursor: pointer;
 }
+.skill-scope { justify-self: end; }
+.skill-del { justify-self: end; }
+.skill-content { margin-top: 10px; }
 .skill-chevron {
   color: var(--muted);
   transition: transform 0.15s ease;

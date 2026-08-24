@@ -101,11 +101,11 @@ onMounted(() => {
       <div v-if="adminBalance && adminBalance.ok" class="admin-section">
         <div class="admin-stat-title">DeepSeek 잔액</div>
         <div class="admin-row">
-          <span>USD 근사</span>
+          <span>잔액</span>
           <span class="admin-big">${{ adminBalance.usd }}</span>
         </div>
-        <div class="admin-row">
-          <span>{{ adminBalance.currency }}</span>
+        <div v-if="adminBalance.currency !== 'USD'" class="admin-row">
+          <span>{{ adminBalance.currency }} 환산</span>
           <span class="mono">{{ adminBalance.total }}</span>
         </div>
         <a class="admin-charge" :href="adminBalance.top_up_url" target="_blank" rel="noopener">충전하러 가기</a>
