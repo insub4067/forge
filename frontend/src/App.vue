@@ -1522,7 +1522,7 @@ document.addEventListener('visibilitychange', () => {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
         </button>
       </div>
-    <div v-if="sessionRunning && !busy && (!isAtBottom || (agentStatus && agentStatus.waiting_for))" class="running-banner" :class="{ waiting: agentStatus && agentStatus.waiting_for }">
+    <div v-if="busy || sessionRunning" class="running-banner" :class="{ waiting: agentStatus && agentStatus.waiting_for }">
       <span class="running-dot"></span>{{ runningBannerText() }}
     </div>
     </header>
