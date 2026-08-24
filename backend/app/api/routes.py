@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, File, Request, UploadFile, WebSocket
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, Response
 from sse_starlette.sse import EventSourceResponse
 
@@ -442,6 +442,42 @@ async def session_status(session_id: str):
     """에이전트 라이브 상태 — 스트림이 끊겨도 언제나 조회 가능.
     running / role / last_event / idle_seconds / waiting_for(승인·질문) / pending."""
     return runtime.get_status(session_id)
+
+
+@router.get("/agents")
+async def list_agents(session_id: str = ""):
+    """Agent Roster — 실제 runtime에서 파생한 Agent Definition + 라이브 상태.
+    read-only observability API다. role별 도구·모델·thinking·fresh/read_only는
+    runtime 상수(TOOL_SCHEMAS·CHAT_TOOLS·READ_ONLY_TOOL_SCHEMAS·ModelRouter policy)가
+    source of truth이며 frontend에 복제하지 않는다."""
+    from .. import agents as agents_catalog
+    st = runtime.get_status(session_id) if session_id else None
+    return {
+        "agents": agents_catalog.with_live_status(agents_catalog.agent_definitions(), st),
+        "internal": agents_catalog.internal_definitions(),
+        "active_role": (st or {}).get("role", "") if st else "",
+    }
+
+
+@router.get("/agents/{role}")
+async def get_agent(role: str):
+    """Agent 상세 — 도구별 설명·승인 필요 여부 포함."""
+    from .. import agents as agents_catalog
+    detail = agents_catalog.agent_detail(role)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"unknown agent: {role}")
+    return detail
+
+
+@router.get("/agents/{role}/prompt")
+async def get_agent_prompt(role: str):
+    """Base Role System Prompt(읽기 전용) — docs/agents/{role}.md 원문 그대로.
+    동적 memory/skills/plan/user data·secret은 절대 포함하지 않는다(보안 경계)."""
+    from .. import agents as agents_catalog
+    data = agents_catalog.agent_prompt(role)
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"no prompt for agent: {role}")
+    return data
 
 
 @router.get("/sessions/{session_id}/tool-usage")

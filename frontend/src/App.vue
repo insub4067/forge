@@ -12,6 +12,7 @@ import KanbanPanel from './components/KanbanPanel.vue'
 import MenuPanel from './components/MenuPanel.vue'
 import SessionDetailPanel from './components/SessionDetailPanel.vue'
 import FileBrowserPanel from './components/FileBrowserPanel.vue'
+import AgentCrewPanel from './components/AgentCrewPanel.vue'
 import FsIcon from './components/FsIcon.vue'
 import { balance as adminBalance, loadBalance } from './store'
 import { isOpenSwipe } from './lib/drawerDrag.js'
@@ -163,6 +164,7 @@ const showFiles = ref(false)
 const showMenu = ref(false)
 const showAdmin = ref(false)
 const showPush = ref(false)
+const showCrew = ref(false)
 const showSessionDetail = ref(false)
 // 잔액 영역 탭 → "충전 화면으로 이동하시겠습니까?" 팝업
 const showTopUpConfirm = ref(false)
@@ -1529,6 +1531,7 @@ document.addEventListener('visibilitychange', () => {
       @kanban="showKanban = true; loadTasks(); showMenu = false"
       @skills="openSkills(); showMenu = false"
       @push="showPush = true; showMenu = false"
+      @agents="showCrew = true; showMenu = false"
       @admin="openAdmin(); showMenu = false"
       @set-theme="setTheme($event)"
     />
@@ -1907,6 +1910,12 @@ document.addEventListener('visibilitychange', () => {
     </div>
 
     <PushPanel v-if="showPush" @close="showPush = false" />
+
+    <AgentCrewPanel
+      v-if="showCrew"
+      :session-id="currentRoomId || ''"
+      @close="showCrew = false"
+    />
 
     <AdminPanel
       v-if="showAdmin"
