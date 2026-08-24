@@ -6,11 +6,13 @@ result_id만 컨텍스트에 남기고, 원본은 여기에 저장한다. 모델
 파일 기반이라 재시작에도 살아남는다.
 """
 import uuid
+import os
 from pathlib import Path
 
 # eventlog(backend/logs)와 같은 위치 아래 — 이 디렉터리는 .gitignore 대상이라 커밋되지 않는다.
 # (tool_store.py는 backend/app/runtime/ 이라 backend까지 세 단계 상위.)
-STORE_DIR = Path(__file__).resolve().parent.parent.parent / "logs" / "tool_results"
+STORE_DIR = Path(os.environ.get("FORGE_LOG_DIR")
+                 or Path(__file__).resolve().parent.parent.parent / "logs") / "tool_results"
 
 
 def save(text: str) -> str:

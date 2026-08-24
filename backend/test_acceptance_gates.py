@@ -131,7 +131,7 @@ def _make_run_rt(gates, verify_states):
     async def fake_run_role(role, all_messages, send, session_id, ws, state,
                             recent_calls, step_base, room_memory="", retry_count=0,
                             tools=None, skills="", complexity="normal", escalate=False,
-                            has_image=False, plan=""):
+                            has_image=False, plan="", persist=True):
         if role == "developer":
             state["files_changed"].append("app.py")
         return "done", 0, 0, {"model": "m", "thinking": False, "reasoning_effort": ""}
@@ -246,8 +246,36 @@ async def test_run_gate_all_passed_completed():
     print("run(all passed): OK — 전부 통과 시 completed + push")
 
 
+
+async def _run_events(rt):
+    events = []
+
+    async def emit(evt):
+        events.append(evt)
+    await rt.run([{"role": "user", "content": "작업"}], emit, "s1", None)
+    return events
+
+
+async def test_gate_coverage_event():
+    """G0 계측 — gate 없이 코드를 바꾸고 완료한 run을 generic_only로 표시한다.
+    그 run의 완료 근거는 "기존 테스트가 안 깨졌다" 하나뿐이다(요구사항 미검증).
+    빈도를 알아야 강제(G2) 방식을 정할 수 있다."""
+    rt, _commits, _ = _make_run_rt([], verify_states=[("passed", "v1"), ("passed", "v2")])
+    cov = [e["data"] for e in await _run_events(rt) if e["type"] == "gate_coverage"]
+    assert cov, "gate_coverage 이벤트가 없다"
+    assert cov[-1]["gates"] == 0 and cov[-1]["generic_only"] is True, cov[-1]
+    assert cov[-1]["files_changed"] > 0 and cov[-1]["status"] == "completed"
+
+    gates = [_gate(1, "로그인", "echo ok", "ok")]
+    rt, _commits, _ = _make_run_rt(gates, verify_states=[("passed", "v1"), ("passed", "v2")])
+    cov = [e["data"] for e in await _run_events(rt) if e["type"] == "gate_coverage"]
+    assert cov[-1]["gates"] == 1 and cov[-1]["generic_only"] is False, cov[-1]
+    print("gate_coverage(G0): OK — gate 0 + 변경 있음 → generic_only 표시")
+
+
 async def main():
     test_clamp_gate_status()
+    await test_gate_coverage_event()
     test_schedule_no_same_file_in_batch()
     await test_verify_gates()
     await test_run_gate_fail_no_commit()
@@ -259,3 +287,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

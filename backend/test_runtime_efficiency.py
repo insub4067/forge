@@ -315,6 +315,35 @@ def test_reviewer_context_is_fresh_and_minimal():
     print("OK Reviewer 컨텍스트는 fresh·minimal")
 
 
+
+def test_gate_coverage_summarize():
+    """G0 집계 — 코드 변경이 있는 run만 분모로 삼는다. 대화·조회 run을 섞으면
+    비율이 희석돼 "대체로 괜찮다"로 오독된다."""
+    from gate_coverage import summarize
+
+    rows = [
+        {"status": "completed", "gates": 0, "files_changed": 2, "generic_only": True},
+        {"status": "completed", "gates": 3, "files_changed": 5, "generic_only": False},
+        {"status": "completed_unverified", "gates": 0, "files_changed": 1, "generic_only": True},
+        {"status": "completed_unverified", "gates": 0, "files_changed": 0, "generic_only": False},
+    ]
+    s = summarize(rows)
+    assert s["runs"] == 4
+    assert s["code_changing_runs"] == 3, "변경 0건 run은 분모에서 빠져야 한다"
+    assert s["generic_only_runs"] == 2
+    assert s["generic_only_rate"] == round(2 / 3, 3)
+    assert s["generic_only_by_status"] == {"completed": 1, "completed_unverified": 1}
+    assert summarize([])["generic_only_rate"] is None  # 0으로 나누지 않는다
+
+    # 테스트가 남긴 합성 run은 실제 사용으로 세지 않는다(오염된 telemetry → 잘못된 결정).
+    from gate_coverage import is_real_session
+    assert is_real_session("a" * 32) is True
+    assert is_real_session("s1") is False
+    assert is_real_session("") is False
+    assert is_real_session("Z" * 32) is False
+    print("OK gate 커버리지 집계")
+
+
 if __name__ == "__main__":
     test_compaction_thresholds()
     test_skill_selection()
@@ -329,5 +358,6 @@ if __name__ == "__main__":
     test_developer_escalation()
     test_project_memory_needs_process_evidence()
     test_reviewer_context_is_fresh_and_minimal()
+    test_gate_coverage_summarize()
     print("\n전체 통과")
 

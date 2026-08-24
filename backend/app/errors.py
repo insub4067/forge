@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from collections import deque
 from pathlib import Path
@@ -7,7 +8,8 @@ from pathlib import Path
 _ERRORS: deque = deque(maxlen=100)
 
 # durable 로그: record() 호출 때마다 JSONL 한 줄씩 append (eventlog.py 방식)
-LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+LOG_DIR = Path(os.environ.get("FORGE_LOG_DIR")
+               or Path(__file__).resolve().parent.parent / "logs")
 
 
 def record(source: str, message: str, session_id: str = "") -> None:

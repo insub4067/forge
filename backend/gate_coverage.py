@@ -1,0 +1,76 @@
+"""gate 커버리지 집계 — gate 없이 코드를 바꾸고 완료한 run의 빈도를 읽는다 (G0).
+
+`docs/proposal/gate-coverage-enforcement.md`의 미지수를 채우는 도구다. 그 run의 완료
+근거는 "기존 테스트가 안 깨졌다" 하나뿐이고 요구사항 충족은 확인된 바 없다. 강제(G2)를
+어떤 방식으로 넣을지는 이 숫자를 보고 정한다.
+
+실행: ./.venv/bin/python gate_coverage.py [--since 2026-08-24] [--logs logs]
+주의: 이벤트 ts는 UTC다(로컬 KST와 9시간 차).
+"""
+import argparse
+import glob
+import json
+import os
+from collections import Counter
+
+
+def summarize(rows: list[dict]) -> dict:
+    """gate_coverage 이벤트 목록 → 집계(순수 함수)."""
+    changed = [r for r in rows if r.get("files_changed")]
+    generic = [r for r in changed if r.get("generic_only")]
+    return {
+        "runs": len(rows),
+        "code_changing_runs": len(changed),
+        "generic_only_runs": len(generic),
+        "generic_only_rate": round(len(generic) / len(changed), 3) if changed else None,
+        "by_status": dict(Counter(r.get("status", "?") for r in rows)),
+        "generic_only_by_status": dict(Counter(r.get("status", "?") for r in generic)),
+    }
+
+
+def is_real_session(session_id: str) -> bool:
+    """실제 세션 id는 uuid4().hex(32자 hex)다. 그 형식이 아니면 테스트·합성 run이다
+    (예전 테스트가 session_id="s1"로 운영 로그에 가짜 run을 쌓아 뒀다 — 지금은 막혔지만
+    남은 줄이 집계에 섞이면 안 된다). 로그를 지우지 않고 읽을 때 걸러낸다."""
+    sid = session_id or ""
+    return len(sid) == 32 and all(c in "0123456789abcdef" for c in sid)
+
+
+def load(logs_dir: str, since: str) -> list[dict]:
+    rows = []
+    for path in sorted(glob.glob(os.path.join(logs_dir, "events-*.jsonl"))):
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if e.get("type") != "gate_coverage":
+                    continue
+                if not is_real_session(e.get("session_id", "")):
+                    continue
+                if since and (e.get("ts") or "") < since:
+                    continue
+                rows.append(e.get("data") or {})
+    return rows
+
+
+def main():
+    ap = argparse.ArgumentParser(description="gate 커버리지 집계 (G0)")
+    ap.add_argument("--logs", default="logs", help="이벤트 로그 디렉터리")
+    ap.add_argument("--since", default="", help="UTC ISO 접두사로 필터 (예: 2026-08-24)")
+    args = ap.parse_args()
+
+    rows = load(args.logs, args.since)
+    if not rows:
+        print("gate_coverage 이벤트가 없습니다. 계측 도입 이후의 run이 필요합니다.")
+        return
+    s = summarize(rows)
+    print(f"run {s['runs']}개 (코드 변경 있는 run {s['code_changing_runs']}개)")
+    print(f"gate 없이 완료: {s['generic_only_runs']}개  비율 {s['generic_only_rate']}")
+    print(f"status 분포: {s['by_status']}")
+    print(f"gate 없이 완료의 status: {s['generic_only_by_status']}")
+
+
+if __name__ == "__main__":
+    main()

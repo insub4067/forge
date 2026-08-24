@@ -7,10 +7,14 @@ send()가 이미 모든 동작(role 전환·도구 호출/결과·승인·압축
 한 줄 형식: {"ts", "session_id", "seq", "type", "data"}
 """
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
-LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+# 테스트가 운영 로그를 오염시키지 않게 디렉터리를 env로 바꿀 수 있다. 실제로 테스트 run이
+# events-*.jsonl에 session_id="s1" 가짜 run을 쌓아 gate 커버리지 집계를 망쳤다.
+LOG_DIR = Path(os.environ.get("FORGE_LOG_DIR")
+               or Path(__file__).resolve().parent.parent / "logs")
 _MAX_DATA_CHARS = 1500  # 도구 결과 등 큰 페이로드는 잘라 로그 비대화 방지
 
 

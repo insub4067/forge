@@ -1975,6 +1975,20 @@ class AgentRuntime:
                 if status == "completed":
                     await self._extract_project_memory(session_id, ws, goal,
                                                        state["files_changed"], send)
+            # G0 — gate 커버리지 계측(동작 변경 없음). gate 없이 코드를 바꾸고 끝난 run이
+            # 얼마나 되는지 알아야 강제(G2) 방식을 정할 수 있다. 그 run의 완료 근거는
+            # "기존 테스트가 안 깨졌다" 하나뿐이고, 요구사항 충족은 확인된 바 없다.
+            # docs/proposal/gate-coverage-enforcement.md
+            if session_id:
+                _gates = await store.list_gates(session_id)
+                _n = len(_gates)
+                await send("gate_coverage", {
+                    "status": status,
+                    "gates": _n,
+                    "passed": sum(1 for g in _gates if g.get("status") == "passed"),
+                    "files_changed": len(state["files_changed"]),
+                    "generic_only": _n == 0 and bool(state["files_changed"]),
+                })
             # done 이벤트를 보내면서 세션 final_status를 영속화(성공 정의·집계 기준).
             if session_id:
                 await store.set_session_final_status(session_id, status)

@@ -7,6 +7,7 @@ test_*.py라 수집되는 것처럼 보이는 게 함정이다 — 실제로 이
 
 전부 LLM 없이 도는 결정적 테스트다(합계 ~9초). 실패하면 그 스크립트의 출력을 그대로 보여준다.
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -42,6 +43,8 @@ def test_no_uncollected_script_suites():
 
 @pytest.mark.parametrize("script", SCRIPT_SUITES)
 def test_script_suite(script):
-    r = subprocess.run([sys.executable, script], cwd=HERE,
+    # 스크립트는 conftest.py를 타지 않는다 — 운영 로그 격리를 env로 직접 넘긴다.
+    env = {**os.environ, "FORGE_LOG_DIR": os.environ.get("FORGE_LOG_DIR", "")}
+    r = subprocess.run([sys.executable, script], cwd=HERE, env=env,
                        capture_output=True, text=True, timeout=300)
     assert r.returncode == 0, f"{script} 실패:\n{r.stdout[-3000:]}\n{r.stderr[-2000:]}"
