@@ -44,7 +44,7 @@ CONTEXT_BLOCK_RATIO = 0.95
 CONTEXT_COMPACT_RATIO = 0.75
 COMPACT_KEEP_RECENT = 8
 # 부수효과·승인이 없는 읽기 전용 도구 — 한 응답에 여러 개면 병렬 실행 가능
-READ_ONLY_TOOLS = {"read_file", "list_dir", "grep"}
+READ_ONLY_TOOLS = {"read_file", "list_dir", "grep", "find_symbol"}
 # Planner용 도구 스키마(읽기 전용만) — 구현·실행 도구를 주지 않아 계획만 하게 강제한다.
 READ_ONLY_TOOL_SCHEMAS = [
     t for t in TOOL_SCHEMAS if t["function"]["name"] in READ_ONLY_TOOLS

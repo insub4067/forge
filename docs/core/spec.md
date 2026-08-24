@@ -36,7 +36,7 @@ Developer는 Flash+thinking을 기본으로 하고 막힐 때만 Pro로 승격�
 
 ## 3. 현재 구현 범위
 
-- DeepSeek/OpenRouter provider와 Flash/Pro/Vision routing
+- DeepSeek provider와 Flash/Pro/Vision routing
 - read/list/grep/write/edit/bash/ask_user/update_tasks/save_skill/build_frontend
 - approval, cancel, runtime injection
 - Docker Sandbox + Host opt-in

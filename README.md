@@ -48,7 +48,7 @@ The default pipeline does not use separate Planner/Reviewer/Debugger agents. One
 
 ## Current Implementation
 
-- DeepSeek V4 / OpenRouter model routing, streaming, tool calling and thinking
+- DeepSeek V4 provider (Flash/Pro/Vision routing), streaming, tool calling and thinking
 - Flash-first with bounded Pro escalation
 - all-in-one Developer loop
 - **Strict Verification Gate** running real build/pytest checks
