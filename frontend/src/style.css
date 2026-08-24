@@ -4105,7 +4105,7 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
 }
 .agent-card-status.working { color: var(--accent); }
