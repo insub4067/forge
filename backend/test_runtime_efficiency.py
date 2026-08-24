@@ -344,6 +344,33 @@ def test_gate_coverage_summarize():
     print("OK gate 커버리지 집계")
 
 
+
+def test_model_tier_reaches_pro():
+    """화면의 모델 티어가 실제로 pro 모델에 닿는지 고정한다.
+
+    티어는 select_model에 직접 전달되지 않는다 — run()이 `always_pro = tier == "pro"`로
+    번역해 escalate로 넘긴다. 그 간접 경로 때문에 "티어가 무시된다"고 오진하기 쉽다
+    (실제로 오진했다). 실측: model_tier=pro → role_start.model = deepseek-v4-pro.
+    """
+    from app.orchestrator.model_router import ModelRouter
+
+    r = ModelRouter()
+    assert r.select_model("developer")["model"] != r.developer_pro_model, "기본은 flash"
+    assert r.select_model("developer", escalate=True)["model"] == r.developer_pro_model
+    # pro 승격은 thinking high를 함께 켠다
+    esc = r.select_model("developer", escalate=True)
+    assert esc["thinking"] is True and esc["reasoning_effort"] == "high"
+
+    # run()의 번역 규칙: pro→always_pro, flash/auto→아님
+    import inspect
+    from app.runtime.agent import AgentRuntime
+    src = inspect.getsource(AgentRuntime.run)
+    assert 'always_pro = tier == "pro" or settings.developer_pro' in src, \
+        "티어→escalate 번역이 사라지면 화면의 pro 선택이 조용히 무력해진다"
+    assert "escalate=always_pro" in src
+    print("OK 모델 티어 pro → pro 모델 + thinking high")
+
+
 if __name__ == "__main__":
     test_compaction_thresholds()
     test_skill_selection()
@@ -359,5 +386,6 @@ if __name__ == "__main__":
     test_project_memory_needs_process_evidence()
     test_reviewer_context_is_fresh_and_minimal()
     test_gate_coverage_summarize()
+    test_model_tier_reaches_pro()
     print("\n전체 통과")
 

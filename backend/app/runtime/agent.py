@@ -954,8 +954,7 @@ class AgentRuntime:
         persist: bool = True,
     ) -> tuple:
         route = self.router.select_model(role, retry_count, complexity, escalate=escalate,
-                                         has_image=has_image,
-                                         tier=self._model_tier.get(session_id, "auto"))
+                                         has_image=has_image)
         tool_schemas = tools if tools is not None else TOOL_SCHEMAS
         # 이 role에 실제로 허용된 도구. LLM에 안 준 도구를 이름만 지어내 호출하면(환각) 거부한다.
         # chat 경로는 읽기 전용 도구만 받는데, 모델이 edit_file 등을 호출해 무검증 편집·커밋이

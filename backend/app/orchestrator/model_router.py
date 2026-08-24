@@ -49,7 +49,9 @@ class ModelRouter:
 
     def select_model(self, agent_type: str, retry_count: int = 0,
                      complexity: str = "normal", escalate: bool = False,
-                     has_image: bool = False, tier: str = "") -> dict:
+                     has_image: bool = False) -> dict:
+        """사용자 티어(pro/flash)는 호출자가 escalate로 번역해 넘긴다 — run()의 always_pro.
+        planner/reviewer/triage는 의도적으로 flash 고정이라 티어를 보지 않는다(비용)."""
         base = dict(self._policy.get(agent_type, self._policy["developer"]))
 
         # Developer + 이미지: 텍스트 모델(flash/pro)은 이미지를 못 받으므로(400) vision 모델로 실행.
