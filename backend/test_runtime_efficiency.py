@@ -240,6 +240,48 @@ def test_developer_escalation():
     print("OK developer flash+think / Sr(pro) escalation (8-9)")
 
 
+
+def test_project_memory_needs_process_evidence():
+    """gate 근거 없이는 프로젝트 메모리를 적립하지 않는다 — 모델이 빈자리를 일반론으로
+    채워 ROOM_MEMORY를 오염시킨다(실측: 이 워크스페이스에 없는 `python -m pytest`가
+    durable 사실로 적립됐다). 오염된 메모리는 이후 모든 세션 컨텍스트에 실린다."""
+    import asyncio
+    from app.runtime import agent as A
+
+    rt = AgentRuntime()
+    gates_now = []
+    distilled = []
+
+    async def fake_list_gates(sid):
+        return gates_now
+
+    def fake_adapter(model):
+        distilled.append(model)
+        raise AssertionError("근거 없이 utility 모델을 부르면 안 된다")
+
+    async def send(t, d):
+        distilled.append(t)
+
+    orig = A.store.list_gates
+    A.store.list_gates = fake_list_gates
+    rt._adapter_for = fake_adapter
+    try:
+        # gate 없음 → 적립 금지
+        asyncio.run(rt._extract_project_memory("s1", "/tmp", "목표", ["a.py"], send))
+        assert distilled == [], f"gate 없이 적립 시도: {distilled}"
+        # gate는 있으나 통과한 검증 명령 없음 → 적립 금지
+        gates_now.append({"title": "X", "status": "unavailable", "verification_method": ""})
+        asyncio.run(rt._extract_project_memory("s1", "/tmp", "목표", ["a.py"], send))
+        assert distilled == [], f"미검증 gate로 적립 시도: {distilled}"
+        # 통과한 gate + 검증 명령 있음 → 여기서는 적립 경로로 들어간다(모델 호출 시도)
+        gates_now[0] = {"title": "X", "status": "passed", "verification_method": "pytest -q"}
+        asyncio.run(rt._extract_project_memory("s1", "/tmp", "목표", ["a.py"], send))
+        assert distilled, "근거가 있는데도 적립 경로를 타지 않았다"
+    finally:
+        A.store.list_gates = orig
+    print("OK 프로젝트 메모리는 process-owned 근거가 있을 때만 적립")
+
+
 if __name__ == "__main__":
     test_compaction_thresholds()
     test_skill_selection()
@@ -252,4 +294,6 @@ if __name__ == "__main__":
     test_drop_orphan_tools()
     test_browser_check_local_only()
     test_developer_escalation()
+    test_project_memory_needs_process_evidence()
     print("\n전체 통과")
+

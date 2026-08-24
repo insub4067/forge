@@ -1726,9 +1726,15 @@ class AgentRuntime:
             passed = [g["title"] for g in gates if g.get("status") == "passed"]
             methods = [g.get("verification_method", "") for g in gates
                        if g.get("status") == "passed" and g.get("verification_method")]
+            # process-owned 근거가 없으면 적립하지 않는다. gate가 없을 때 distill 입력은
+            # 목표 문자열 하나뿐이고, 모델은 그 빈자리를 일반론으로 채운다 — 실측에서
+            # 이 워크스페이스에 없는 명령(`python -m pytest`)이 사실로 적립됐다.
+            # 오염된 메모리는 이후 모든 세션 컨텍스트에 실린다(§6 오염 방지).
+            if not passed or not methods:
+                return
             src = (f"목표: {goal[:200]}\n"
-                   f"통과한 요구사항: {', '.join(passed) or '(gate 없음)'}\n"
-                   f"검증 명령: {'; '.join(m[:80] for m in methods[:5]) or '(없음)'}")
+                   f"통과한 요구사항: {', '.join(passed)}\n"
+                   f"검증 명령: {'; '.join(m[:80] for m in methods[:5])}")
             prompt = [
                 {"role": "system", "content":
                     "다음 '검증 통과한' 작업 기록에서, 이 프로젝트에서 앞으로 재사용할 durable 지식만 "
