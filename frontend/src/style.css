@@ -3833,3 +3833,29 @@ button {
 .ctx-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
 .ctx-fill { height: 100%; background: var(--accent); }
 .ctx-tok { flex-shrink: 0; width: 52px; text-align: right; color: var(--text); }
+
+/* 서버 도달 불가 배너 — 먹통이면 화면이 빈 채 멈추던 것을 드러낸다 */
+.server-down {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  padding-top: max(10px, env(safe-area-inset-top));
+  background: #7a2e2e;
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.server-down-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff8a8a;
+  flex-shrink: 0;
+  animation: sd-pulse 1.2s ease-in-out infinite;
+}
+@keyframes sd-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }

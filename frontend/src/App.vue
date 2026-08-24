@@ -61,6 +61,10 @@ function tierLabel() {
 // 에이전트 모드 — auto: FORGE가 복잡도로 판단 / multi: 계획→구현→리뷰 3역할 / single: 올인원 Developer
 const sessionRunning = ref(false)
 const agentStatus = ref(null)
+// 서버 도달 가능 여부 — 헬스 하트비트가 판정한다. 서버가 먹통이면 모든 fetch가 조용히
+// 실패해 화면이 빈 채로 멈추던 문제(실측)를 배너로 드러낸다.
+const serverDown = ref(false)
+let healthTimer = null
 const showSkills = ref(false)
 const skillOpen = ref({}) // 스킬 카드 펼침 상태(기본 닫힘)
 const skills = ref([])
@@ -254,6 +258,30 @@ async function reconcileOnResume() {
     }
   }
   checkRunning()
+}
+
+// 서버 헬스 하트비트 — 방/세션과 무관하게 항상 돈다. /api/health를 짧은 타임아웃으로
+// 찔러 도달 불가(먹통·재시작·네트워크)면 배너를 띄운다. 연속 실패해야 down으로 판정해
+// 일시적 지연에 깜빡이지 않는다.
+let healthFails = 0
+async function pingHealth() {
+  try {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), 4000)
+    const res = await fetch('/api/health', { signal: ctrl.signal, cache: 'no-store' })
+    clearTimeout(t)
+    if (!res.ok) throw new Error('bad')
+    healthFails = 0
+    serverDown.value = false
+  } catch {
+    healthFails += 1
+    if (healthFails >= 2) serverDown.value = true   // 2회 연속(=최대 ~8s) 실패 시 down
+  }
+}
+function startHealthPoll() {
+  if (healthTimer) return
+  pingHealth()
+  healthTimer = setInterval(pingHealth, 5000)
 }
 
 function startRunningPoll() {
@@ -1379,6 +1407,7 @@ onMounted(async () => {
   applyWide()
   mq.addEventListener('change', applyWide)
   loadBalance() // 앱 실행 시 잔액 최초 1회 fetch(전역 상태로 공유)
+  startHealthPoll() // 서버 도달성 상시 감시 — 먹통이면 배너로 알린다
   await loadRooms()
   // 유효한 현재 세션이 없으면 가장 최근 세션으로 랜딩
   const valid = rooms.value.some((r) => r.id === currentRoomId.value)
@@ -1402,6 +1431,10 @@ document.addEventListener('visibilitychange', () => {
 
 <template>
   <div class="app" :class="{ 'sidebar-pinned': isWide && pinnedSidebar }">
+    <div v-if="serverDown" class="server-down" @click="pingHealth()">
+      <span class="server-down-dot"></span>
+      서버에 연결할 수 없습니다 — 백엔드가 재시작 중이거나 응답하지 않습니다. 자동으로 다시 시도합니다.
+    </div>
     <header>
       <button v-if="!(isWide && pinnedSidebar)" class="icon-btn" @click="isWide ? togglePin() : (showRooms = true)" aria-label="세션 목록">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
