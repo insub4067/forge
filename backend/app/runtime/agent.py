@@ -2105,18 +2105,35 @@ class AgentRuntime:
         #   gate 없음 → 기존 3상태 매핑(passed→completed, unavailable→completed_unverified)
         #   gate 전부 passed + generic passed → completed
         #   그 외(partial/unavailable/blocked/abandoned) → completed_unverified(정직 표기)
+        n_files = len(state["files_changed"])
         if gstate == "none":
-            if vstate == "passed":
-                await finish("completed", "작업 완료 — 검증 통과.")
-            else:  # unavailable — 검증 못 함을 '검증 성공'으로 기록하지 않는다(별도 상태).
+            final = "completed" if vstate == "passed" else "completed_unverified"
+            if vstate != "passed":
                 await send("verify_unavailable", {"report": report[:400]})
-                await finish("completed_unverified", "작업 완료(검증 대상 없음 — 미검증). " + report[:200])
         elif gstate == "passed" and vstate == "passed":
-            await finish("completed", "작업 완료 — 검증 통과.\n\n" + gates_report)
+            final = "completed"
         else:
-            await finish("completed_unverified",
-                         "작업 완료 — 단, 일부 요구사항 게이트가 미검증/차단 상태입니다.\n\n" + gates_report)
+            final = "completed_unverified"
+        await finish(final, self._completion_report(final, gates_report, vstate, n_files))
         return all_messages
+
+    @staticmethod
+    def _completion_report(status: str, gates_report: str, vstate: str, n_files: int) -> str:
+        """process-owned 사실로 만든 표준 완료 리포트(모델 self-report 아님). daily-use 신뢰의 핵심:
+        '무엇을 해결/검증했고, 배포했는가'를 한눈에. 파일 나열 대신 요구사항·검증·commit/push 요약."""
+        lines = ["완료했습니다." if status == "completed" else "작업을 마쳤습니다(일부 미검증)."]
+        if gates_report:
+            lines.append(gates_report)              # 요구사항별 ✓/✗/! (honest failure 포함)
+        if vstate == "passed":
+            lines.append("검증: 테스트·빌드 통과")
+        elif vstate == "unavailable":
+            lines.append("검증: 실행 가능한 test/build 없음 — 미검증")
+        if n_files:
+            lines.append(f"변경 {n_files}개 파일 · commit·push 완료" if status == "completed"
+                         else f"변경 {n_files}개 파일 · 로컬 commit(미검증이라 push 안 함)")
+        else:
+            lines.append("코드 변경 없음")
+        return "\n".join(lines)
 
     @staticmethod
     def _finish_message(status: str) -> str:

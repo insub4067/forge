@@ -106,6 +106,22 @@ def test_project_shrinks_after_compaction():
     print("OK projection shrinks after compaction (10-11)")
 
 
+def test_completion_report():
+    # 표준 완료 리포트: 요구사항 요약 + 검증 + commit/push를 정직하게. (섹션5 daily-use)
+    cr = AgentRuntime._completion_report
+    r = cr("completed", "요구사항 2\n✓ 로그인\n✓ 실패메시지", "passed", 3)
+    assert r.startswith("완료했습니다.")
+    assert "✓ 로그인" in r and "테스트·빌드 통과" in r and "commit·push 완료" in r
+    # 미검증은 push 안 했다고 정직하게
+    r2 = cr("completed_unverified", "요구사항 1\n! 다크모드 — 검증 방법 없음", "unavailable", 2)
+    assert "일부 미검증" in r2 and "push 안 함" in r2 and "! 다크모드" in r2
+    assert "미검증" in r2
+    # 변경 0건
+    r3 = cr("completed", "", "passed", 0)
+    assert "코드 변경 없음" in r3
+    print("OK 표준 완료 리포트(요구사항·검증·commit/push 정직)")
+
+
 def test_merge_gates_ledger():
     # P0-2: 한번 생성된 acceptance gate는 모델이 payload에서 누락하는 것만으로 삭제되지 않는다.
     # process-owned evidence(passed/failed)는 모델 재선언으로 되돌아가지 않는다.
@@ -215,6 +231,7 @@ if __name__ == "__main__":
     test_skill_selection()
     test_stable_prefix()
     test_project_shrinks_after_compaction()
+    test_completion_report()
     test_merge_gates_ledger()
     test_over_budget()
     test_drop_orphan_tools()
