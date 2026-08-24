@@ -133,6 +133,10 @@ def test_completion_report():
     assert "일부 미검증" in r2 and "! 다크모드" in r2 and "미검증" in r2
     # 리포트는 배포 상태를 추측하지 않는다 — 실제 push 결과를 모르기 때문.
     assert "push" not in r and "push" not in r2
+    # gate 0개 완료는 "요구사항은 검증 안 됐다"를 숨기지 않는다(G1, 완전 검증으로 오독 방지).
+    r3 = cr("completed", "", "passed")
+    assert "요구사항 게이트 없음" in r3
+    assert "요구사항 게이트 없음" not in r
     print("OK 표준 완료 리포트(요구사항·검증)")
 
 

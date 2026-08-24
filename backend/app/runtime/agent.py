@@ -2201,7 +2201,10 @@ class AgentRuntime:
         if gates_report:
             lines.append(gates_report)              # 요구사항별 ✓/✗/! (honest failure 포함)
         if vstate == "passed":
-            lines.append("검증: 테스트·빌드 통과")
+            # gate가 하나도 없으면 generic verify는 "기존 테스트가 안 깨졌다"만 말한다.
+            # 요구사항 충족 여부는 확인된 바 없다 — 침묵하면 완전 검증으로 읽힌다(honest failure).
+            lines.append("검증: 테스트·빌드 통과" if gates_report
+                         else "검증: 테스트·빌드 통과 (기존 회귀만 — 요구사항 게이트 없음)")
         elif vstate == "unavailable":
             lines.append("검증: 실행 가능한 test/build 없음 — 미검증")
         return "\n".join(lines)

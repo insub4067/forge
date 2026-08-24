@@ -55,6 +55,7 @@ Proposal 채택 여부도 기능 수나 token 절감보다 success/verification 
 - `tauri-desktop-host.md` — proposal.
 - `web-search-tools.md` — proposal/보류. 품질 개선 효과가 benchmark로 확인될 때 채택.
 - `vision-agent.md` — Vision 기능 일부 구현.
+- `gate-coverage-enforcement.md` — **proposal**. acceptance gate 생성이 모델 재량이라, gate 0개인 채로 `completed`가 나는 우회 경로가 있다(실측 프로브에서 재현). G1(정직 표기) 구현됨, G0(커버리지 계측)·G2(강제) 미착수 — G0 데이터를 보고 G2 방식을 정한다.
 
 ## 현재 구현과 과거 Proposal이 다른 대표 사례
 
