@@ -23,6 +23,21 @@ async def main() -> int:
         print("CREW_SMOKE_UNAVAILABLE: playwright 미설치")
         return 2
 
+    # 백엔드가 새 코드를 로드했는지 먼저 확인한다 — /api/agents가 JSON이 아니라 index.html을
+    # 반환하면 백엔드가 stale(재시작 전)이다. 이건 UI 결함이 아니라 환경 문제이므로 failed가
+    # 아니라 unavailable(검증 불가)로 정직하게 처리한다(evidence 규율: 애매하면 통과 아님·실패도 아님).
+    try:
+        import urllib.request
+        with urllib.request.urlopen(BASE + "/api/agents", timeout=5) as r:
+            ct = r.headers.get("content-type", "")
+            if "application/json" not in ct:
+                print("CREW_SMOKE_UNAVAILABLE: 백엔드가 stale입니다(/api/agents가 JSON을 "
+                      "반환하지 않음). 백엔드를 재시작한 뒤 다시 실행하세요.")
+                return 2
+    except Exception as err:
+        print(f"CREW_SMOKE_UNAVAILABLE: 백엔드 확인 실패 — {err}")
+        return 2
+
     errors: list[str] = []
     try:
         async with async_playwright() as p:
