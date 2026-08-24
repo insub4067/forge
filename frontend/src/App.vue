@@ -14,7 +14,7 @@ import SessionDetailPanel from './components/SessionDetailPanel.vue'
 import FileBrowserPanel from './components/FileBrowserPanel.vue'
 import FsIcon from './components/FsIcon.vue'
 import { balance as adminBalance, loadBalance } from './store'
-import { openRatio, decideOpen, horizontalIntent } from './lib/drawerDrag.js'
+import { isOpenSwipe } from './lib/drawerDrag.js'
 
 // 단일 줄바꿈도 <br>로 — 답변 줄바꿈을 적극 반영
 marked.setOptions({ breaks: true, gfm: true })
@@ -111,7 +111,6 @@ const rooms = ref([])
 const currentRoomId = ref(localStorage.getItem('forge_room') || '')
 const loadingMessages = ref(false)
 const showRooms = ref(false)
-const roomsDrag = ref(0) // 스와이프 드래그 비율(0~1) — 드로어가 손가락을 따라온다
 const isWide = ref(false) // 넓은 화면(맥) 여부
 const pinnedSidebar = ref(localStorage.getItem('forge_sidebar_pinned') !== '0') // 고정 여부(기본 고정)
 function togglePin() {
@@ -297,39 +296,12 @@ function runningBannerText() {
   if (role) return `${role} 진행 중${idle}`
   return 'Mac에서 작업 진행 중'
 }
-// 도구 이름 → 지금 무슨 일인지. 프론트가 상태를 만들어내지 않고, 백엔드가 보낸
-// 도구 이름·검증 이벤트만 사람 말로 옮긴다. 모르면 '작업 중'.
-const TOOL_WORK = {
-  read_file: '분석 중', list_dir: '분석 중', grep: '분석 중',
-  write_file: '구현 중', edit_file: '구현 중',
-  bash: '실행 중', build_frontend: '검증 중',
-  update_tasks: '작업 중', save_skill: '정리 중', ask_user: '답변 대기',
-}
-
 // 하네스가 all_messages에 넣는 프로세스 메시지(role:user)를 사용자 발화와 구분한다.
 // 모델 컨텍스트에는 원문이 남지만, 화면엔 회원님 말풍선 대신 흐린 한 줄로 보인다.
 function processNote(content) {
   const t = typeof content === 'string' ? content : ''
   if (t.startsWith('[검증 실패')) return '프로세스 — 검증 실패, 수리 재시도'
   return ''
-}
-
-// 카드 안에서 "추론 작성 중"을 이미 표시하는 상태인가.
-// 이때 카드 밖 표시기까지 켜면 같은 상태를 두 번 말하게 된다(실측: 중복 노출).
-function phaseShowsThinking(m) {
-  const p = m.phases && m.phases[m.phases.length - 1]
-  return !!(p && p.running && p.thinking && !p.text && !p.tools.length)
-}
-
-function typingLabel(m) {
-  if (!busy.value) return liveActivityText()
-  // 검증/복구는 프로세스가 보낸 이벤트로만 표시한다(추측 없음).
-  if (m.verifyPhase) return m.verifyPhase
-  const p = m.phases[m.phases.length - 1]
-  const t = p && p.tools.find((x) => x.status === 'running')
-  if (t) return TOOL_WORK[t.name] || '작업 중'
-  if (p && p.text) return '작성 중'
-  return '작업 중'
 }
 
 // 상세 화면 없이도 "지금 무엇을" 한 줄로. 스트림 끊겨도 폴링으로 갱신.
@@ -344,8 +316,6 @@ function isLiveTurn(i) {
 }
 let mainStartX = 0
 let mainStartY = 0
-let mainDragActive = false // 가로 드로어 드래그로 확정됨
-let roomsCloseTimer = null
 let scrollLocked = false
 let scrollUnlockTimer = null
 let scrollRaf = null
@@ -353,25 +323,10 @@ let scrollRaf = null
 function onMainTouchStart(e) {
   mainStartX = e.touches[0].clientX
   mainStartY = e.touches[0].clientY
-  mainDragActive = false
   // 사용자가 스크롤 조작하는 동안 auto-scroll 잠금(스트리밍이 위로 읽기를 방해하지 않게)
   scrollLocked = true
   if (scrollUnlockTimer) clearTimeout(scrollUnlockTimer)
   if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = null }
-}
-
-function onMainTouchMove(e) {
-  // 모바일·드로어 닫힘 상태에서만: 오른쪽 스와이프 → 드로어가 손가락을 따라온다
-  if (isWide.value || showRooms.value) return
-  const t = e.touches[0]
-  const dx = t.clientX - mainStartX
-  const dy = t.clientY - mainStartY
-  const intent = horizontalIntent(dx, dy)
-  if (intent === null) return
-  if (intent === false || dx <= 0) { mainDragActive = false; return } // 세로 스크롤·왼쪽 이동 → 무시
-  if (!mainDragActive) mainDragActive = true
-  e.preventDefault() // 확정된 드래그 동안 세로 스크롤·고무줄을 막는다
-  roomsDrag.value = openRatio(dx, window.innerWidth)
 }
 
 function onMainTouchEnd(e) {
@@ -380,31 +335,8 @@ function onMainTouchEnd(e) {
   scrollUnlockTimer = setTimeout(() => { scrollLocked = false }, 400)
   const dx = e.changedTouches[0].clientX - mainStartX
   const dy = e.changedTouches[0].clientY - mainStartY
-  if (mainDragActive) {
-    mainDragActive = false
-    setRoomsOpen(decideOpen(roomsDrag.value)) // 임계 비율 이상이면 열고 아니면 닫는다
-    return
-  }
-  // 왼쪽 가장자리에서 오른쪽으로 스와이프 → 세션 드로어
-  if (mainStartX < 44 && dx > 60 && Math.abs(dx) > Math.abs(dy) * 1.4 && !showRooms.value) {
-    setRoomsOpen(true)
-  }
-}
-
-// 드로어 열기/닫기 — 닫을 땐 드래그 비율을 0으로 스냅해 슬라이드 아웃 후 제거
-function setRoomsOpen(open) {
-  if (open) {
-    if (roomsCloseTimer) { clearTimeout(roomsCloseTimer); roomsCloseTimer = null }
-    showRooms.value = true
-    roomsDrag.value = 1
-  } else {
-    roomsDrag.value = 0
-    if (roomsCloseTimer) clearTimeout(roomsCloseTimer)
-    roomsCloseTimer = setTimeout(() => {
-      if (roomsDrag.value === 0) showRooms.value = false
-      roomsCloseTimer = null
-    }, 220)
-  }
+  // 세션방 어디서든 오른쪽 스와이프 → 드로어를 단순 슬라이드로 연다(따라오는 드래그 없음)
+  if (isOpenSwipe(dx, dy) && !showRooms.value) showRooms.value = true
 }
 
 function formatTokens(n) {
@@ -1534,21 +1466,19 @@ document.addEventListener('visibilitychange', () => {
       :is-wide="isWide"
       :pinned-sidebar="pinnedSidebar"
       :show-rooms="showRooms"
-      :drag-ratio="roomsDrag"
       :refresh-rooms="loadRooms"
-      @update:rooms-drag="roomsDrag = $event"
       @select-room="selectRoom"
       @jump-to-message="jumpToMessage"
       @delete-room="deleteRoom"
       @rename-room="renameRoom"
       @open-workspace-picker="openWorkspacePicker"
       @open-create-room="showCreateRoom = true; showRooms = false"
-      @close="setRoomsOpen(false)"
+      @close="showRooms = false"
       @toggle-pin="togglePin"
     />
 
 
-    <main ref="chatEl" @scroll.passive="onChatScroll" @touchstart.passive="onMainTouchStart" @touchmove="onMainTouchMove" @touchend.passive="onMainTouchEnd">
+    <main ref="chatEl" @scroll.passive="onChatScroll" @touchstart.passive="onMainTouchStart" @touchend.passive="onMainTouchEnd">
       <div v-if="loadingMessages" class="msg-skeleton">
         <div class="skel-row user"><div class="skel-bubble"></div></div>
         <div class="skel-row"><div class="skel-line w60"></div><div class="skel-line w90"></div><div class="skel-line w75"></div></div>
@@ -1595,6 +1525,9 @@ document.addEventListener('visibilitychange', () => {
                 <span class="activity-label">{{ phaseLabel(p) }}</span>
                 <span v-if="p.model" class="activity-model">{{ shortModel(p.model) }}</span>
                 <span v-if="p.running && runningTool(p)" class="activity-live">{{ runningTool(p).name }} 실행 중…</span>
+                <!-- 검증 단계(테스트/요구사항/회귀/복구)는 프로세스가 보낸 이벤트로만 표시한다.
+                     하단 표시기를 없앴으므로 이 자리가 유일한 노출 지점이다. -->
+                <span v-else-if="m.verifyPhase && pi === m.phases.length - 1" class="activity-live">{{ m.verifyPhase }}<span class="typing-dots"><i></i><i></i><i></i></span></span>
                 <span v-else-if="p.tools.length" class="activity-count">도구 {{ p.tools.length }}</span>
                 <svg class="activity-chevron" :class="{ open: p.collapsed }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
               </div>
@@ -1634,11 +1567,6 @@ document.addEventListener('visibilitychange', () => {
                   <pre v-else>{{ t.status === 'running' ? '실행 중…' : (t.result || '(출력 없음)') }}</pre>
                 </details>
               </template>
-            </div>
-
-            <div v-if="(busy || sessionRunning) && i === messages.length - 1 && !phaseShowsThinking(m)" class="typing">
-              <span class="typing-label">{{ typingLabel(m) }}</span>
-              <span class="typing-dots"><i></i><i></i><i></i></span>
             </div>
 
             <div v-if="m.taskNotes && m.taskNotes.length" class="task-notes">
