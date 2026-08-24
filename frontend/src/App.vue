@@ -299,7 +299,6 @@ const TOOL_WORK = {
 // 모델 컨텍스트에는 원문이 남지만, 화면엔 회원님 말풍선 대신 흐린 한 줄로 보인다.
 function processNote(content) {
   const t = typeof content === 'string' ? content : ''
-  if (t.startsWith('[프로세스 확인]')) return '프로세스 — 변경 없이 끝나려 해 이어서 진행'
   if (t.startsWith('[검증 실패')) return '프로세스 — 검증 실패, 수리 재시도'
   return ''
 }
@@ -1527,17 +1526,18 @@ document.addEventListener('visibilitychange', () => {
                 <span v-if="p.model" class="activity-model">{{ shortModel(p.model) }}</span>
                 <span v-if="p.running && runningTool(p)" class="activity-live">{{ runningTool(p).name }} 실행 중…</span>
                 <span v-else-if="p.tools.length" class="activity-count">도구 {{ p.tools.length }}</span>
-                <svg class="activity-chevron" :class="{ open: !p.collapsed }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                <svg class="activity-chevron" :class="{ open: p.collapsed }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
               </div>
 
               <div v-if="p.text" class="text" v-html="renderMarkdown(p.text)"></div>
 
-              <template v-if="!p.collapsed">
-                <div v-if="p.thinking" class="thinking" :class="{ open: p.thinkOpen }" @click="p.thinkOpen = !p.thinkOpen">
-                  <div class="thinking-summary">추론</div>
-                  <div v-if="p.thinkOpen" class="thinking-body">{{ p.thinking }}</div>
-                </div>
+              <!-- 추론 영역은 phase collapse와 무관하게 항상 노출(닫힌 상태). 클릭하면 펼침. -->
+              <div v-if="p.thinking" class="thinking" :class="{ open: p.thinkOpen }" @click="p.thinkOpen = !p.thinkOpen">
+                <div class="thinking-summary">추론</div>
+                <div v-if="p.thinkOpen" class="thinking-body">{{ p.thinking }}</div>
+              </div>
 
+              <template v-if="!p.collapsed">
                 <button
                   v-if="!p.showAll && p.tools.length > ACTIVITY_LIMIT"
                   class="activity-more"
