@@ -350,7 +350,12 @@ header .todo-btn {
   position: fixed;
   inset: 0;
   z-index: 160;
+  /* 뒤 채팅이 그대로 비쳐 산만하던 것 — 은은한 dim으로 팝오버를 하나의 레이어로 분리. */
+  background: rgba(0, 0, 0, 0.4);
+  animation: menu-scrim-in 0.14s ease-out;
 }
+@keyframes menu-scrim-in { from { background: rgba(0, 0, 0, 0); } to { background: rgba(0, 0, 0, 0.4); } }
+@media (prefers-reduced-motion: reduce) { .menu-overlay { animation: none; } }
 
 .menu-panel {
   position: absolute;
@@ -1743,6 +1748,18 @@ footer .image-preview-row {
   position: relative;
   display: flex;
   flex-direction: column;
+}
+/* 상단 fade — 스크롤 콘텐츠 첫 줄이 헤더 밑에서 딱 잘리지 않고 부드럽게 사라지게. */
+.chat-area::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 24px;
+  background: linear-gradient(var(--bg), transparent);
+  pointer-events: none;
+  z-index: 2;
 }
 .jump-bottom {
   /* chat-area 바닥에 고정 — footer 바깥이라 task-bar 유무·footer 높이와 무관하게 항상
