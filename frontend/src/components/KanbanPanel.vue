@@ -13,9 +13,20 @@ const emit = defineEmits(['close'])
 const kanbanCols = [
   { key: 'todo', label: 'TODO' },
   { key: 'working', label: 'WORKING' },
-  { key: 'testing', label: 'TESTING' },
+  { key: 'testing', label: 'QA' },
   { key: 'done', label: 'DONE' },
 ]
+
+// 멈춘(실패/차단) task의 카드 뱃지. status 값 자체는 백엔드 계약(blocked 등)을 그대로 쓴다.
+const failMarks = {
+  blocked: '막힘',
+  failed: '실패',
+  abandoned: '포기',
+  unavailable: '미검증',
+}
+function failBadge(s) {
+  return failMarks[s] || ''
+}
 
 // gate 상태 → 표시 기호·레이블. passed/failed는 프로세스가 실제 검증 후 부여한다.
 const gateMarks = {
@@ -46,6 +57,8 @@ function normStatus(s) {
   if (s === 'planning') return 'todo'
   if (s === 'in_progress' || s === 'in-progress' || s === 'debug') return 'working'
   if (s === 'review' || s === 'verifying') return 'testing'
+  // 실패/차단은 QA에서 멈춘 것 — 사라지지 않게 QA(testing) 레인에 유지하고 카드에 뱃지로 표시.
+  if (s === 'blocked' || s === 'failed' || s === 'abandoned' || s === 'unavailable') return 'testing'
   return s // todo/working/testing/done는 그대로
 }
 
@@ -78,9 +91,11 @@ function toggleKanban(key) {
             v-for="t in tasks.filter((x) => normStatus(x.status) === col.key)"
             :key="t.id"
             class="kanban-card"
+            :class="{ failed: failBadge(t.status) }"
           >
             <div class="kanban-card-title">{{ t.title }}</div>
-            <div class="kanban-bar">
+            <div v-if="failBadge(t.status)" class="kanban-card-badge">{{ failBadge(t.status) }}</div>
+            <div v-else class="kanban-bar">
               <div class="kanban-bar-fill" :style="{ width: (t.progress || 0) + '%' }"></div>
             </div>
           </div>

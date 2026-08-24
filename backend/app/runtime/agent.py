@@ -1458,6 +1458,27 @@ class AgentRuntime:
         except Exception as err:
             error_log.record("finalize_tasks", str(err), session_id)
 
+    async def _fail_pending_tasks(self, session_id: str, send: EventSink) -> None:
+        """비완료 종료(verification_failed/cancelled/budget/max_steps 등) 시 아직 done이 아닌
+        task를 blocked로 강등한다. testing은 '검증 중'을 뜻하는데 run이 실패로 멈추면 아무도
+        검증하지 않으므로, testing/working에 그대로 두면 칸반이 '진행 중'처럼 거짓 표시된다."""
+        if not session_id:
+            return
+        try:
+            tasks = await store.list_tasks(session_id)
+            if not tasks:
+                return
+            changed = False
+            for t in tasks:
+                if t.get("status") in ("testing", "working"):
+                    t["status"] = "blocked"
+                    changed = True
+            if changed:
+                tasks = await store.replace_tasks(session_id, tasks)
+                await send("task_update", {"tasks": tasks})
+        except Exception as err:
+            error_log.record("fail_pending_tasks", str(err), session_id)
+
     async def _mark_testing(self, session_id: str, send: EventSink) -> None:
         """검증(test) 단계 진입 시 남은 task를 testing으로 — 프로세스가 칸반 stage를 소유한다
         (todo→working은 모델이, testing→done은 프로세스가). 칸반이 진행 상태를 정직히 반영."""
@@ -2210,6 +2231,10 @@ class AgentRuntime:
                 if status == "completed":
                     await self._extract_project_memory(session_id, ws, goal,
                                                        state["files_changed"], send)
+            else:
+                # 비완료 종료: testing/working에 남은 task를 blocked로 강등(칸반이 '진행 중'처럼
+                # 보이지 않게). done으로 마감하지도, 커밋하지도 않는다(invariant 유지).
+                await self._fail_pending_tasks(session_id, send)
             # 최종 문구는 summary(process-owned 사실)에서 deterministic하게 만든다 —
             # LLM을 다시 부르지 않고, 모델의 self-report를 근거로 쓰지 않는다.
             if summary is not None:

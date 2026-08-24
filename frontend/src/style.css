@@ -760,6 +760,18 @@ header .todo-btn {
   margin-bottom: 8px;
 }
 
+/* QA에서 멈춘(실패/차단) 카드 — 진행바 대신 상태 뱃지로 '진행 중 아님'을 분명히 한다. */
+.kanban-card.failed { border-color: #d9775766; }
+.kanban-card-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #d97757;
+  background: #d9775722;
+  border-radius: 6px;
+  padding: 1px 7px;
+}
+
 .kanban-empty {
   text-align: center;
   color: var(--muted);

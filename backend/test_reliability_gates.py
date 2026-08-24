@@ -52,6 +52,26 @@ async def main():
     assert not events3, events3
     print("finalize_tasks(task 없음): OK")
 
+    # ── _fail_pending_tasks: 비완료 종료 시 testing/working → blocked, done/todo 불변 ──
+    stored["tasks"] = [
+        {"title": "a", "status": "testing"},
+        {"title": "b", "status": "working"},
+        {"title": "c", "status": "done"},
+        {"title": "d", "status": "todo"},
+    ]
+    events_f = []
+    await rt._fail_pending_tasks("s1", await send_collector(events_f))
+    _byt = {t["title"]: t["status"] for t in stored["tasks"]}
+    assert _byt == {"a": "blocked", "b": "blocked", "c": "done", "d": "todo"}, stored
+    assert any(e[0] == "task_update" for e in events_f), events_f
+    print("fail_pending_tasks: OK — testing/working만 blocked, done/todo 불변")
+
+    # 강등 대상 없으면 재저장·이벤트 없음(불필요한 쓰기 방지)
+    events_f2 = []
+    await rt._fail_pending_tasks("s1", await send_collector(events_f2))
+    assert not events_f2, events_f2
+    print("fail_pending_tasks(변경 없음): OK")
+
     # ── _autocommit 게이트 ──
     A.settings.auto_commit = True
     events4 = []
