@@ -1533,7 +1533,9 @@ document.addEventListener('visibilitychange', () => {
 
               <!-- 추론 영역은 phase collapse와 무관하게 항상 노출(닫힌 상태). 클릭하면 펼침. -->
               <div v-if="p.thinking" class="thinking" :class="{ open: p.thinkOpen }" @click="p.thinkOpen = !p.thinkOpen">
-                <div class="thinking-summary">추론</div>
+                <div class="thinking-summary">
+                  추론<template v-if="p.running && !p.text && !p.tools.length"> 작성 중<span class="typing-dots"><i></i><i></i><i></i></span></template>
+                </div>
                 <div v-if="p.thinkOpen" class="thinking-body">{{ p.thinking }}</div>
               </div>
 
