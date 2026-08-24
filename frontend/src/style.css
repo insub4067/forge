@@ -514,6 +514,9 @@ header .todo-btn {
   padding: 12px 14px;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
+  /* button의 UA 기본 color(검정)를 상속하면 다크 패널에서 잔액이 안 보인다 — 명시. */
+  color: var(--text);
+  font-family: inherit;
 }
 
 .balance-box:hover {
@@ -1139,11 +1142,13 @@ main {
 
 /* 세션 효율 계측 그리드 */
 .metric-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  justify-content: center;  /* 타일 수가 3의 배수가 아닐 때 마지막 행을 가운데로(orphan 방지) */
   margin: 6px 0 4px;
 }
+.metric-cell { flex: 0 0 calc((100% - 16px) / 3); }
 .metric-cell {
   display: flex;
   flex-direction: column;
