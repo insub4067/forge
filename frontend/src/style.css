@@ -3755,12 +3755,48 @@ button {
 }
 
 /* 하네스 프로세스 메시지 — 사용자 말풍선이 아니라 흐린 안내 한 줄. */
+/* 프로세스 주입 메시지 — 사용자 발화와 명확히 구분되는 뱃지. 우측(사용자 열)에 뜨지만
+   말풍선이 아니라 뱃지로 렌더해 "내가 쓴 게 아니라 프로세스가 넣은 것"임을 드러낸다. */
 .msg.user .process-note {
+  margin-left: auto;
+  max-width: 88%;
   font-size: 12px;
+}
+.msg.user .process-note > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  justify-content: flex-end;
   color: var(--muted);
-  background: none;
-  padding: 2px 4px;
-  text-align: right;
+  cursor: pointer;
+  list-style: none;
+  padding: 3px 2px;
+}
+.msg.user .process-note > summary::-webkit-details-marker { display: none; }
+.process-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent, #d97757);
+  background: color-mix(in srgb, var(--accent, #d97757) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #d97757) 30%, transparent);
+}
+.process-badge::before { content: "⚙"; font-size: 10px; }
+.process-note-body {
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  text-align: left;
 }
 
 /* 헤더 방 모드 세그먼트 — 작업(work) / 채팅(chat) */

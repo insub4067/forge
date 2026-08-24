@@ -350,9 +350,20 @@ function runningBannerText() {
 }
 // 하네스가 all_messages에 넣는 프로세스 메시지(role:user)를 사용자 발화와 구분한다.
 // 모델 컨텍스트에는 원문이 남지만, 화면엔 회원님 말풍선 대신 흐린 한 줄로 보인다.
+// 하네스가 all_messages에 넣는 프로세스 메시지(role:user)의 접두사 → 뱃지 라벨.
+// [작업 중 사용자 메시지]는 실제 사용자 발화라 제외한다(주입 아님).
+const PROCESS_NOTES = [
+  ['[검증 실패', '검증 실패 · 수리'],
+  ['[요구사항 게이트 검증 실패', '요구사항 게이트 실패 · 수리'],
+  ['[Reviewer 지적', '리뷰 지적 · 수정'],
+  ['[이전 작업 요약', '컨텍스트 압축'],
+  ['[구현은 끝났다', '요구사항 게이트 등록 요청'],
+]
 function processNote(content) {
   const t = typeof content === 'string' ? content : ''
-  if (t.startsWith('[검증 실패')) return '프로세스 — 검증 실패, 수리 재시도'
+  for (const [prefix, label] of PROCESS_NOTES) {
+    if (t.startsWith(prefix)) return label
+  }
   return ''
 }
 
@@ -1585,7 +1596,10 @@ document.addEventListener('visibilitychange', () => {
       <div v-for="(m, i) in messages" :key="i" :data-msg-idx="i" class="msg" :class="m.role">
         <div class="bubble">
           <template v-if="m.role === 'user'">
-            <div v-if="processNote(m.content)" class="process-note">⚙ {{ processNote(m.content) }}</div>
+            <details v-if="processNote(m.content)" class="process-note">
+              <summary><span class="process-badge">프로세스</span>{{ processNote(m.content) }}</summary>
+              <div class="process-note-body">{{ m.content }}</div>
+            </details>
             <div v-else-if="m.queued" class="queue-badge">
               <span class="queue-dot"></span>대기큐<span class="queue-text">{{ m.content }}</span>
             </div>

@@ -21,8 +21,9 @@
 - `GET /api/agents` — roster 목록 (secret 없음, `active_role` 포함).
 - `GET /api/agents/{role}` — 단일 역할 상세 (도구 스키마 + 정책 노트).
 - `GET /api/agents/{role}/prompt` — 역할 시스템 프롬프트 원문.
-  - 목록에 없는 role은 404. 내부용 role(`triage`, `vision`, `gate_recovery`)은
-    roster에 노출하지 않는다(프롬프트도 404).
+  - 목록에 없는 role은 404. 내부용 role(`triage`, `vision`)은 roster에 노출하지
+    않는다(프롬프트도 404). `gate_recovery`는 회복 전용 role로 prompt가 존재하지만
+    기본 roster에서 제외된다.
 
 ## 프론트엔드
 
