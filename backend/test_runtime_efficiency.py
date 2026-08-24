@@ -532,5 +532,22 @@ if __name__ == "__main__":
     test_reviewer_context_is_fresh_and_minimal()
     test_gate_coverage_summarize()
     test_model_tier_reaches_pro()
+    test_runtime_smoke_fails_on_dead_backend()
     print("\n전체 통과")
 
+
+
+def test_runtime_smoke_fails_on_dead_backend():
+    """런타임 스모크는 백엔드가 응답하지 않으면 failed로 잡는다(축 A — 서버 생존).
+
+    예전엔 정적 UI 렌더만 봐서, 서버가 먹통이면 page.goto 타임아웃이 unavailable로 새어
+    '검증 안 함'이 됐다(오늘 서버 30분 먹통이 verified로 넘어갈 뻔한 지점). health를
+    브라우저 안에서 확인해 200이 아니면 failed다. 소스에 그 분기가 있는지 고정한다."""
+    import inspect
+    from app.runtime.agent import AgentRuntime
+    src = inspect.getsource(AgentRuntime._runtime_smoke)
+    assert "/api/health" in src, "런타임 스모크가 백엔드 응답성을 확인하지 않는다"
+    assert 'health_status != 200' in src
+    assert '"failed", ("런타임 스모크 실패 — 백엔드가 응답하지 않음' in src \
+        or "백엔드가 응답하지 않음" in src
+    print("OK 런타임 스모크가 서버 생존을 검증(축 A)")

@@ -11,6 +11,7 @@
 | `deepseek-harness-adoption.md` | absorbed | compaction, tool pruning, durable events, cancellation/recovery 등 다수 흡수. 당시 role pipeline은 현재와 다름. |
 | `durable-worker-resume.md` | partial | history-based Auto Resume + crash-loop guard 구현. independent durable worker/queue/checkpoint continuation은 미구현. |
 | `forge-mcp-agent-runtime.md` | partial | stdio `execute/status/result/cancel` 4 tools 구현. remote MCP/resources는 미구현. |
+| `evidence-axis-expansion.md` | partial (축 A) | 검증 축을 test/build 너머로 확장. 축 A(서버 생존/응답성)를 런타임 스모크에 추가 구현. 축 B(이음새 프로브 `probe.py`)는 별도 구현됨. 축 C(부하 회귀)는 미착수. |
 | `forge-runtime-hardening-roadmap.md` | mostly absorbed | verification/approval/context/RSI hardening 다수 완료. provider/workers 일부 남음. |
 | `gate-coverage-enforcement.md` | implemented | G0 telemetry + gate 0 completion policy + 1회 recovery. 이후 Developer가 구현 전 gate를 정상 생성하도록 prompt 강화. |
 | `global-workspace-skills.md` | implemented/diverged | 실제는 Curated/Learned/Project 3-tier + selective retrieval. proposal의 2-tier 가정은 과거. |

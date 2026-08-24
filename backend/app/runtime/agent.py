@@ -2033,6 +2033,7 @@ class AgentRuntime:
             return "unavailable", "playwright 미설치"
         try:
             errors: list[str] = []
+            health_status = None
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
                 page = await browser.new_page()
@@ -2042,6 +2043,15 @@ class AgentRuntime:
                                     wait_until="networkidle", timeout=20000)
                     header = await page.locator("header").count()
                     composer = await page.locator(".composer-input").count()
+                    # 축 A — 서버 생존/응답성. 정적 렌더만 보면 백엔드가 먹통이어도(오늘 사고)
+                    # page.goto 타임아웃이 unavailable로 새어 "검증 안 함"이 된다. health가
+                    # 짧은 타임아웃 안에 200인지 브라우저 안에서 직접 확인해 failed로 잡는다.
+                    try:
+                        health_status = await page.evaluate(
+                            "() => fetch('/api/health', {cache:'no-store'})"
+                            ".then(r => r.status).catch(() => 0)")
+                    except Exception:
+                        health_status = 0
                 finally:
                     await browser.close()
             if errors:
@@ -2049,8 +2059,11 @@ class AgentRuntime:
             if not header or not composer:
                 return "failed", ("런타임 스모크 실패 — 핵심 UI 미렌더 "
                                   f"(header={header}, composer={composer})")
+            if health_status != 200:
+                return "failed", ("런타임 스모크 실패 — 백엔드가 응답하지 않음 "
+                                  f"(/api/health={health_status}). 서버 생존/응답성 실패.")
             await send("verify_start", {"checks": ["runtime smoke"]})
-            return "passed", "런타임 스모크 통과(로드·핵심 렌더·uncaught 예외 0)"
+            return "passed", "런타임 스모크 통과(로드·핵심 렌더·백엔드 응답·uncaught 예외 0)"
         except Exception as err:
             # 8790 미기동·타임아웃 등은 검증 불가로 처리(거짓 failed 방지).
             return "unavailable", f"런타임 스모크 실행 불가: {err}"
