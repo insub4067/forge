@@ -584,6 +584,28 @@ class AgentRuntime:
         return out
 
     @staticmethod
+    def _drop_orphan_tools(messages: list[dict]) -> list[dict]:
+        """orphan tool 메시지를 전송 직전에 제거한다.
+
+        tool 메시지는 직전(중간에 다른 tool 허용) assistant의 tool_calls id와 매칭돼야 한다.
+        매칭 안 되면 provider가 400("Messages with role 'tool' must be a response to a
+        preceding message with 'tool_calls'")을 내고 run이 죽는다. compaction/projection
+        경계나 메시지 순서 이상으로 orphan이 섞여도 run이 죽지 않도록 방어한다(원본은 불변)."""
+        out: list[dict] = []
+        valid_ids: set = set()
+        for m in messages:
+            role = m.get("role")
+            if role == "tool":
+                if m.get("tool_call_id") in valid_ids:
+                    out.append(m)
+                # else: orphan → drop
+            else:
+                valid_ids = {tc.get("id") for tc in (m.get("tool_calls") or [])} \
+                    if role == "assistant" else set()
+                out.append(m)
+        return out
+
+    @staticmethod
     def _strip_images(messages: list[dict]) -> list[dict]:
         """content 리스트의 image_url 항목을 텍스트 placeholder로 치환한다.
         non-vision 모델은 이미지를 못 받으므로(400), 텍스트만 남긴다.
@@ -961,6 +983,8 @@ class AgentRuntime:
                     route["compactions"] += 1
                     await send("compaction", {"covered": self._compaction[session_id]["covered"]})
                     projected = self._project(all_messages, session_id)
+            # 방어: orphan tool 제거 — compaction/순서 이상으로 섞여도 400으로 run이 죽지 않게.
+            projected = self._drop_orphan_tools(projected)
             if has_image:
                 call_messages = [
                     system_msg,

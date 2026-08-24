@@ -106,6 +106,38 @@ def test_project_shrinks_after_compaction():
     print("OK projection shrinks after compaction (10-11)")
 
 
+def test_drop_orphan_tools():
+    # tool 메시지는 직전 assistant tool_calls id와 매칭돼야 전송된다(안 그러면 provider 400).
+    drop = AgentRuntime._drop_orphan_tools
+    # 정상 페어 — 유지
+    ok = [
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "tool_calls": [{"id": "a1"}, {"id": "a2"}]},
+        {"role": "tool", "tool_call_id": "a1", "content": "r1"},
+        {"role": "tool", "tool_call_id": "a2", "content": "r2"},
+        {"role": "assistant", "content": "done"},
+    ]
+    assert drop(ok) == ok
+    # orphan: 선행 assistant tool_calls 없는 tool → 제거
+    orphan = [
+        {"role": "user", "content": "[이전 작업 요약]"},  # compaction checkpoint
+        {"role": "tool", "tool_call_id": "x9", "content": "orphan"},
+        {"role": "assistant", "content": "hi"},
+    ]
+    out = drop(orphan)
+    assert {"role": "tool", "tool_call_id": "x9", "content": "orphan"} not in out
+    assert len(out) == 2
+    # user가 assistant(tool_calls)와 tool 사이에 끼면 그 tool은 orphan → 제거
+    mid = [
+        {"role": "assistant", "tool_calls": [{"id": "b1"}]},
+        {"role": "user", "content": "끼어듦"},
+        {"role": "tool", "tool_call_id": "b1", "content": "late"},
+    ]
+    out2 = drop(mid)
+    assert all(m.get("role") != "tool" for m in out2)
+    print("OK orphan tool 제거 (provider 400 방어)")
+
+
 def test_browser_check_local_only():
     # browser_check는 로컬 오리진만 허용해야 한다(에이전트가 임의 외부 사이트/메타데이터를 못 연다).
     from app.tools.registry import _is_local_url
@@ -138,6 +170,7 @@ if __name__ == "__main__":
     test_skill_selection()
     test_stable_prefix()
     test_project_shrinks_after_compaction()
+    test_drop_orphan_tools()
     test_browser_check_local_only()
     test_developer_escalation()
     print("\n전체 통과")
