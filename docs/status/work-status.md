@@ -87,6 +87,15 @@ Developer 구현
 계측: `gate_coverage` 이벤트(`coverage` ∈ gated / recovered_gated / generic_only /
 no_change / not_applicable), 집계는 `backend/gate_coverage.py`.
 
+**정상 경로 = Developer가 gate를 앞당겨 만든다**(복구는 안전망). 초기 실측에서 모델이
+`update_gates`를 7/7 건너뛴 원인은 프롬프트 구조였다 — `update_tasks`(칸반)는 실행 루프
+step 0에 부각되고 `update_gates`는 뒷 섹션에 있어 뒷전이었다. gate 등록을 step 0에
+update_tasks와 나란히 넣자(둘 다 "코드 쓰기 전 등록") 이후 프로브에서 `read_file →
+update_gates → write_file` 순으로 앞당겨졌다(`coverage=gated`, 복구 미발생). gate 품질
+규칙(사용자 요구사항만·심볼 존재 검사 금지·generic 재탕 금지)을 developer/gate_recovery
+프롬프트에 정렬했다. 멀티 요구사항 작업(3요구사항→gate 3개, 디스크 영속화 포함)에서
+전부 앞당겨 생성·실행·통과 확인.
+
 ## 핵심 KPI
 
 기능 수나 token 절감이 아니다. 아래 순서로 본다.
