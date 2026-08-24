@@ -688,6 +688,11 @@ class AgentRuntime:
         if not summary:
             return False
         self._compaction[session_id] = {"summary": summary, "covered": split}
+        # 영속화 — 메모리에만 두면 run 종료 시 cleanup_session이 지운다(압축 누적 무효화).
+        try:
+            await store.set_session_compaction(session_id, summary, split)
+        except Exception as err:
+            error_log.record("compaction_persist", str(err), session_id)
         return True
 
     def _project(self, all_messages: list[dict], session_id: str) -> list[dict]:
@@ -1997,6 +2002,12 @@ class AgentRuntime:
         state: dict[str, Any] = {"goal": goal, "files_changed": [], "errors": []}
         recent_calls: list[str] = []
         all_messages: list[dict] = [*history]
+        # 압축 요약 복원 — run마다 메모리가 비므로 DB에서 되살린다. 이게 없으면 이전 run의
+        # 압축이 통째로 버려져 전체 히스토리를 다시 보내고, 압축이 영원히 누적되지 않는다.
+        if session_id and session_id not in self._compaction:
+            saved = await store.get_session_compaction(session_id)
+            if saved and saved["covered"] <= len(all_messages):
+                self._compaction[session_id] = saved
         room_memory = _load_room_memory(ws)
         # 요청과 관련된 skill만 선택 삽입(전량 삽입 금지 — skill이 많아질수록 절감).
         skills = _select_skills(ws, goal)

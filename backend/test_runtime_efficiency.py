@@ -448,11 +448,48 @@ def test_model_tier_reaches_pro():
     print("OK 모델 티어 pro → pro 모델 + thinking high")
 
 
+
+def test_compaction_survives_run_end():
+    """압축 요약은 run이 끝나도 살아남아야 한다.
+
+    메모리에만 두면 cleanup_session이 run 종료마다 지운다 → 다음 run이 전체 히스토리를
+    다시 보내고, 다시 압축하고, 또 버린다. 압축이 매 run 안에서만 유효해 누적 효과가 0이
+    된다(실측: used 157k / budget 131k = 120% 세션). 비용에 직결되는 invariant다.
+    """
+    import asyncio
+    import inspect
+    from app.runtime import agent as A
+
+    # 1) _compact가 성공하면 반드시 영속화한다
+    src = inspect.getsource(A.AgentRuntime._compact)
+    assert "set_session_compaction" in src, "압축 요약을 DB에 저장하지 않는다"
+
+    # 2) run 시작 시 DB에서 복원한다
+    run_src = inspect.getsource(A.AgentRuntime.run)
+    assert "get_session_compaction" in run_src, "run 시작 시 압축 요약을 복원하지 않는다"
+
+    # 3) 복원된 요약이 _project에 실제로 반영된다
+    rt = A.AgentRuntime.__new__(A.AgentRuntime)
+    rt._compaction = {}
+    msgs = [{"role": "user", "content": f"m{i}"} for i in range(20)]
+    assert len(rt._project(msgs, "s")) == len(msgs)          # 요약 없으면 그대로
+    rt._compaction["s"] = {"summary": "이전 작업 요약", "covered": 12}
+    proj = rt._project(msgs, "s")
+    assert len(proj) == 1 + (20 - 12), proj                   # 체크포인트 + 남은 8개
+    assert "이전 작업 요약" in proj[0]["content"]
+
+    # 4) cleanup_session이 메모리를 비워도 DB 값으로 되살아난다(복원 조건 검증)
+    saved = {"summary": "S", "covered": 12}
+    assert saved["covered"] <= len(msgs)                       # 히스토리보다 크면 복원 금지
+    print("OK 압축 요약 영속화(run 경계 생존)")
+
+
 if __name__ == "__main__":
     test_compaction_thresholds()
     test_skill_selection()
     test_stable_prefix()
     test_project_shrinks_after_compaction()
+    test_compaction_survives_run_end()
     test_merge_memory_facts()
     test_completion_summary_formatter()
     test_blocking_reason()

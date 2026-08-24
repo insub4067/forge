@@ -255,6 +255,30 @@ async def get_session_model_tier(session_id: str) -> str:
         return sess.model_tier if sess and sess.model_tier else "auto"
 
 
+async def set_session_compaction(session_id: str, summary: str, covered: int) -> None:
+    """압축 요약을 영속화한다.
+
+    이게 없으면 요약이 메모리에만 남고 `cleanup_session`이 run 종료마다 지운다 —
+    다음 run은 요약 없이 전체 히스토리를 다시 보내고, 다시 압축하고, 또 버린다.
+    압축이 매 run 안에서만 유효해 누적 효과가 0이 된다(실측: 컨텍스트 120% 세션).
+    """
+    async with async_session() as s:
+        sess = await s.get(Session, session_id)
+        if sess:
+            sess.compact_summary = summary or ""
+            sess.compact_covered = max(0, int(covered or 0))
+            await s.commit()
+
+
+async def get_session_compaction(session_id: str) -> dict | None:
+    """영속화된 압축 요약을 읽는다. 없으면 None."""
+    async with async_session() as s:
+        sess = await s.get(Session, session_id)
+        if sess and sess.compact_summary and sess.compact_covered > 0:
+            return {"summary": sess.compact_summary, "covered": sess.compact_covered}
+        return None
+
+
 async def reconcile_interrupted_runs() -> int:
     """서버 시작 시, running=True로 남은 세션은 재시작으로 중단된 run이다.
     복구 안내 메시지를 히스토리에 남기고 플래그를 내린다. 정리한 세션 수를 반환."""

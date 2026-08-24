@@ -33,6 +33,10 @@ class Session(Base):
     # 이 세션의 모델 티어(사용자가 정한 것). durable resume가 이 값을 복원해
     # 재시작 후에도 같은 모델 정책으로 이어간다. 기본 "auto".
     model_tier: Mapped[str] = mapped_column(String, default="auto")
+    # 컨텍스트 압축 요약과 그것이 덮는 메시지 수. 메모리에만 두면 run이 끝날 때마다
+    # 사라져 다음 run이 전체 히스토리를 다시 보낸다(압축이 영원히 누적되지 않는다).
+    compact_summary: Mapped[str] = mapped_column(Text, default="")
+    compact_covered: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
