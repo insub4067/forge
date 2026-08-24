@@ -1352,8 +1352,10 @@ class AgentRuntime:
             error_log.record("mark_verifying", str(err), session_id)
 
     async def _autocommit(self, ws: str, goal: str, send: EventSink,
-                          paths: list[str] | None = None, push: bool = True) -> None:
+                          paths: list[str] | None = None, push: bool = True) -> tuple[bool, bool]:
         """성공 완료 시 git 워크스페이스면 자동 commit(+선택적 push) — 커밋 누락 방지.
+
+        (committed, pushed)를 돌려준다 — 완료 리포트가 추측 대신 실제 결과를 말하게 한다.
 
         push=False면 로컬 commit만 하고 origin push는 하지 않는다 — 미검증(completed_unverified)
         결과가 자동으로 원격에 나가지 않게 하는 안전장치(검증된 것만 배포 경로로).
@@ -1365,7 +1367,7 @@ class AgentRuntime:
         (그 편은 놓치는 쪽이 남의 변경을 커밋하는 쪽보다 안전하다).
         """
         if not settings.auto_commit or not ws:
-            return
+            return False, False
         rel: list[str] = []
         for raw in paths or []:
             q = str(raw or "").strip()
@@ -1381,7 +1383,7 @@ class AgentRuntime:
             if q not in rel:
                 rel.append(q)
         if not rel:
-            return
+            return False, False
 
         async def _g(*args, timeout=90):
             try:
@@ -1396,10 +1398,10 @@ class AgentRuntime:
         try:
             rc, out = await _g("rev-parse", "--is-inside-work-tree", timeout=10)
             if rc != 0 or "true" not in out:
-                return  # git 저장소가 아님
+                return False, False  # git 저장소가 아님
             rc, out = await _g("status", "--porcelain", "--", *rel, timeout=15)
             if rc != 0 or not out.strip():
-                return  # 에이전트가 바꾼 파일에 실제 변경 없음
+                return False, False  # 에이전트가 바꾼 파일에 실제 변경 없음
             msg = f"chore: FORGE 자동 커밋 — {(goal or '작업').strip()[:60]}"
             await _g("add", "--", *rel, timeout=30)
             # 경로를 명시해 커밋 — 사람이 stage해 둔 다른 변경이 섞이지 않는다.
@@ -1411,8 +1413,10 @@ class AgentRuntime:
                 pushed = rc == 0
             await send("autocommit", {"committed": committed, "pushed": pushed, "message": msg,
                                       "push_skipped": committed and not push})
+            return committed, pushed
         except Exception as err:
             error_log.record("autocommit", str(err), "")
+            return False, False
 
     async def _reflect(self, session_id: str, ws: str, status: str, send: EventSink) -> None:
         """run이 끝나면 실행 근거를 모아 개선 후보(RefinementCandidate)를 만든다.
@@ -1928,8 +1932,14 @@ class AgentRuntime:
                 # push는 completed(충분히 검증됨)만 — completed_unverified(검증 대상 없음/일부 게이트
                 # 미검증)는 로컬 commit만 하고 origin에 자동 배포하지 않는다(검증된 것만 배포 경로).
                 if state["files_changed"]:
-                    await self._autocommit(ws, goal, send, state["files_changed"],
-                                           push=(status == "completed"))
+                    committed, pushed = await self._autocommit(
+                        ws, goal, send, state["files_changed"], push=(status == "completed"))
+                    # 배포 상태는 추측하지 않는다 — 실제 commit/push 결과만 사용자에게 말한다.
+                    # (리포트를 미리 만들면 push가 실패해도 "push 완료"라고 보고한다.)
+                    if content:
+                        content += "\n" + self._deploy_line(
+                            len(state["files_changed"]), committed, pushed,
+                            push_attempted=(status == "completed"))
                 # 검증 통과 완료만 durable 프로젝트 지식으로 적립(§6) — 미검증은 오염 방지로 제외.
                 if status == "completed":
                     await self._extract_project_memory(session_id, ws, goal,
@@ -2166,7 +2176,6 @@ class AgentRuntime:
         #   gate 없음 → 기존 3상태 매핑(passed→completed, unavailable→completed_unverified)
         #   gate 전부 passed + generic passed → completed
         #   그 외(partial/unavailable/blocked/abandoned) → completed_unverified(정직 표기)
-        n_files = len(state["files_changed"])
         if gstate == "none":
             final = "completed" if vstate == "passed" else "completed_unverified"
             if vstate != "passed":
@@ -2175,11 +2184,11 @@ class AgentRuntime:
             final = "completed"
         else:
             final = "completed_unverified"
-        await finish(final, self._completion_report(final, gates_report, vstate, n_files))
+        await finish(final, self._completion_report(final, gates_report, vstate))
         return all_messages
 
     @staticmethod
-    def _completion_report(status: str, gates_report: str, vstate: str, n_files: int) -> str:
+    def _completion_report(status: str, gates_report: str, vstate: str) -> str:
         """process-owned 사실로 만든 표준 완료 리포트(모델 self-report 아님). daily-use 신뢰의 핵심:
         '무엇을 해결/검증했고, 배포했는가'를 한눈에. 파일 나열 대신 요구사항·검증·commit/push 요약."""
         lines = ["완료했습니다." if status == "completed" else "작업을 마쳤습니다(일부 미검증)."]
@@ -2189,12 +2198,18 @@ class AgentRuntime:
             lines.append("검증: 테스트·빌드 통과")
         elif vstate == "unavailable":
             lines.append("검증: 실행 가능한 test/build 없음 — 미검증")
-        if n_files:
-            lines.append(f"변경 {n_files}개 파일 · commit·push 완료" if status == "completed"
-                         else f"변경 {n_files}개 파일 · 로컬 commit(미검증이라 push 안 함)")
-        else:
-            lines.append("코드 변경 없음")
         return "\n".join(lines)
+
+    @staticmethod
+    def _deploy_line(n_files: int, committed: bool, pushed: bool, push_attempted: bool) -> str:
+        """실제 commit/push 결과 한 줄. 실패를 성공으로 보고하지 않는 게 유일한 목적."""
+        if not committed:
+            return f"변경 {n_files}개 파일 · 자동 commit 안 됨 — 수동 확인 필요"
+        if pushed:
+            return f"변경 {n_files}개 파일 · commit·push 완료"
+        if push_attempted:
+            return f"변경 {n_files}개 파일 · 로컬 commit 완료 · push 실패 — 수동 push 필요"
+        return f"변경 {n_files}개 파일 · 로컬 commit(미검증이라 push 안 함)"
 
     @staticmethod
     def _finish_message(status: str) -> str:

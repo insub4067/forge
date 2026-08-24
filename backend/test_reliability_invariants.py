@@ -60,6 +60,7 @@ def make_rt(verify_states, dev_status="done", changed=True, change_from=1):
         committed["count"] += 1
         committed["paths"] = paths
         committed["push"] = push
+        return True, push
     rt._autocommit = fake_autocommit
 
     async def fake_finalize(sid, send):

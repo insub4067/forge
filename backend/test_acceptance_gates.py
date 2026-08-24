@@ -150,6 +150,7 @@ def _make_run_rt(gates, verify_states):
 
     async def fake_autocommit(ws, goal, send, files, push=True):
         commits.append({"files": list(files), "push": push})
+        return True, push
     rt._autocommit = fake_autocommit
 
     async def noop(*a, **k):

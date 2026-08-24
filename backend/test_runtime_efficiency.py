@@ -123,19 +123,17 @@ def test_merge_memory_facts():
 
 
 def test_completion_report():
-    # 표준 완료 리포트: 요구사항 요약 + 검증 + commit/push를 정직하게. (섹션5 daily-use)
+    # 표준 완료 리포트: 요구사항 요약 + 검증. (섹션5 daily-use)
+    # commit/push 줄은 실제 결과를 아는 finish()가 _deploy_line으로 붙인다.
     cr = AgentRuntime._completion_report
-    r = cr("completed", "요구사항 2\n✓ 로그인\n✓ 실패메시지", "passed", 3)
+    r = cr("completed", "요구사항 2\n✓ 로그인\n✓ 실패메시지", "passed")
     assert r.startswith("완료했습니다.")
-    assert "✓ 로그인" in r and "테스트·빌드 통과" in r and "commit·push 완료" in r
-    # 미검증은 push 안 했다고 정직하게
-    r2 = cr("completed_unverified", "요구사항 1\n! 다크모드 — 검증 방법 없음", "unavailable", 2)
-    assert "일부 미검증" in r2 and "push 안 함" in r2 and "! 다크모드" in r2
-    assert "미검증" in r2
-    # 변경 0건
-    r3 = cr("completed", "", "passed", 0)
-    assert "코드 변경 없음" in r3
-    print("OK 표준 완료 리포트(요구사항·검증·commit/push 정직)")
+    assert "✓ 로그인" in r and "테스트·빌드 통과" in r
+    r2 = cr("completed_unverified", "요구사항 1\n! 다크모드 — 검증 방법 없음", "unavailable")
+    assert "일부 미검증" in r2 and "! 다크모드" in r2 and "미검증" in r2
+    # 리포트는 배포 상태를 추측하지 않는다 — 실제 push 결과를 모르기 때문.
+    assert "push" not in r and "push" not in r2
+    print("OK 표준 완료 리포트(요구사항·검증)")
 
 
 def test_merge_gates_ledger():

@@ -90,3 +90,29 @@ if __name__ == "__main__":
             fn()
             print(f"{name}: OK")
     print("\n자동 커밋 범위 통과 ✓")
+
+
+async def _outcome(ws, paths):
+    async def send(t, d):
+        pass
+    return await A.AgentRuntime()._autocommit(ws, "테스트 작업", send, paths)
+
+
+def test_autocommit_returns_real_outcome():
+    """_autocommit은 실제 commit 결과를 돌려준다 — 완료 리포트가 추측하지 않게."""
+    ws = _repo()
+    open(os.path.join(ws, "a.txt"), "w").write("x")
+    assert asyncio.run(_outcome(ws, ["a.txt"])) == (True, False)   # 원격 없음 → push 실패
+    assert asyncio.run(_outcome(ws, ["a.txt"])) == (False, False)  # 변경 없음 → 커밋 안 함
+    assert asyncio.run(_outcome(ws, [])) == (False, False)         # 대상 없음
+
+
+def test_deploy_line_never_claims_unearned_push():
+    """push가 실패했으면 성공으로 보고하지 않는다 (false completion 방지)."""
+    d = A.AgentRuntime._deploy_line
+    assert "push 완료" in d(2, committed=True, pushed=True, push_attempted=True)
+    assert "push 실패" in d(2, committed=True, pushed=False, push_attempted=True)
+    assert "push 안 함" in d(2, committed=True, pushed=False, push_attempted=False)
+    assert "commit 안 됨" in d(2, committed=False, pushed=False, push_attempted=True)
+    for line in (d(2, True, False, True), d(2, False, False, True)):
+        assert "push 완료" not in line
