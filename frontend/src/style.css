@@ -1720,8 +1720,12 @@ footer .image-preview-row {
   flex-shrink: 0;
 }
 
+.composer-wrap {
+  position: relative;  /* jump-bottom 배치 기준 — composer 카드 바로 위에 고정 */
+}
 .jump-bottom {
-  /* footer 기준 — composer 바로 위에 떠서 높이 변화를 따라간다(safe-area 재적용 없음) */
+  /* composer-wrap 기준. footer 전체(task-bar 포함) 위에 매달던 예전 방식은 footer가
+     커질 때 버튼이 화면 중앙까지 밀려 콘텐츠를 가렸다(실측 버그). */
   position: absolute;
   bottom: 100%;
   margin-bottom: 8px;

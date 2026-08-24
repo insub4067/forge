@@ -1748,15 +1748,16 @@ document.addEventListener('visibilitychange', () => {
     </div>
 
     <footer>
-      <button v-if="!isAtBottom" class="jump-bottom" @click="jumpToBottom" aria-label="맨 아래로">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
-      </button>
       <div v-if="taskBar" class="task-bar" @click="showKanban = true; loadTasks()">
         <span class="task-bar-dot" :class="{ running: busy || sessionRunning }"></span>
         <span class="task-bar-title">{{ taskBar.title }}</span>
         <span class="task-bar-count">{{ taskBar.pos }}/{{ taskBar.total }}</span>
       </div>
       <input ref="fileInput" type="file" multiple accept="image/*,.md,.txt,.log,.json,.csv,.yml,.yaml,.toml,.py,.js,.ts,.jsx,.tsx,.vue,.html,.css,.sh,.xml,.java,.go,.rs,.c,.cpp,.h,.sql,text/*" hidden @change="onFileChange" />
+      <div class="composer-wrap">
+      <button v-if="!isAtBottom" class="jump-bottom" @click="jumpToBottom" aria-label="맨 아래로">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+      </button>
       <div class="composer" :class="{ 'drag-over': dragActive }" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
     <div v-if="attachedText" class="file-chip">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
@@ -1806,6 +1807,7 @@ document.addEventListener('visibilitychange', () => {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
           </button>
         </div>
+      </div>
       </div>
     </footer>
 
