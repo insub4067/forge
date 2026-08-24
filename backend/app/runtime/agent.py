@@ -1694,6 +1694,63 @@ class AgentRuntime:
                     lines.append(f"  Evidence: {str(g.get('evidence'))[:300]}")
         return "\n".join(lines)
 
+    @staticmethod
+    def _merge_memory_facts(existing: str, facts: list[str], cap: int = 4000) -> str | None:
+        """ROOM_MEMORY에 새 durable 사실을 dedup·상한 적용해 병합한다(순수).
+        추가할 게 없거나(중복) 상한을 넘으면 None(무한 성장·중복 방지)."""
+        add = [f.strip() for f in facts
+               if f.strip() and f.strip().lstrip("-").strip() not in existing]
+        if not add:
+            return None
+        header = "" if "## 학습된 프로젝트 지식" in existing \
+            else "\n## 학습된 프로젝트 지식 (FORGE 자동 적립)\n"
+        sep = "" if (not existing or existing.endswith("\n")) else "\n"
+        block = sep + header + "\n".join(add) + "\n"
+        if len(existing) + len(block) > cap:
+            return None
+        return existing + block
+
+    async def _extract_project_memory(self, session_id: str, ws: str, goal: str,
+                                      files_changed: list, send: EventSink) -> None:
+        """검증 통과 완료 시 durable 프로젝트 지식을 ROOM_MEMORY.md에 적립한다(§6).
+        process-owned 사실(목표·통과 gate·검증 명령)만 utility 모델로 1~3줄 distill →
+        dedup·상한으로 append. 다음 세션(fork 포함)이 재설명 없이 잇는다. best-effort."""
+        if not settings.project_memory or not ws or not session_id or not files_changed:
+            return
+        try:
+            gates = await store.list_gates(session_id)
+            passed = [g["title"] for g in gates if g.get("status") == "passed"]
+            methods = [g.get("verification_method", "") for g in gates
+                       if g.get("status") == "passed" and g.get("verification_method")]
+            src = (f"목표: {goal[:200]}\n"
+                   f"통과한 요구사항: {', '.join(passed) or '(gate 없음)'}\n"
+                   f"검증 명령: {'; '.join(m[:80] for m in methods[:5]) or '(없음)'}")
+            prompt = [
+                {"role": "system", "content":
+                    "다음 '검증 통과한' 작업 기록에서, 이 프로젝트에서 앞으로 재사용할 durable 지식만 "
+                    "1~3줄로 뽑아라(빌드/테스트 방법, 코딩 규약, 반복 문제, 특수 절차). 이번 작업 특정 "
+                    "세부·대화·추측은 제외한다. 각 줄은 '- '로 시작하는 간결한 한국어 사실. 재사용 가치가 "
+                    "없으면 'NONE'만 출력."},
+                {"role": "user", "content": src},
+            ]
+            parts: list[str] = []
+            async for d in self._adapter_for(self.router.utility_model).stream_chat(prompt):
+                if d.get("content"):
+                    parts.append(d["content"])
+            out = "".join(parts).strip()
+            if not out or out.upper().startswith("NONE"):
+                return
+            facts = [ln for ln in out.splitlines() if ln.strip().startswith("-")]
+            path = Path(ws) / "ROOM_MEMORY.md"
+            existing = path.read_text(encoding="utf-8") if path.exists() else ""
+            merged = self._merge_memory_facts(existing, facts)
+            if merged is None:
+                return
+            path.write_text(merged, encoding="utf-8")
+            await send("project_memory", {"added": [f.strip() for f in facts]})
+        except Exception as err:
+            error_log.record("project_memory", str(err), session_id)
+
     def _record_context_breakdown(self, session_id, role, system_msg, projected, skills, room_memory):
         """전송 직전 context를 영역별로 추정해 저장한다(debug view/최적화 근거).
         절대값은 추정, 상대 비중 파악이 목적. 실측 총량은 usage(measured)가 별도로 남는다."""
@@ -1873,6 +1930,10 @@ class AgentRuntime:
                 if state["files_changed"]:
                     await self._autocommit(ws, goal, send, state["files_changed"],
                                            push=(status == "completed"))
+                # 검증 통과 완료만 durable 프로젝트 지식으로 적립(§6) — 미검증은 오염 방지로 제외.
+                if status == "completed":
+                    await self._extract_project_memory(session_id, ws, goal,
+                                                       state["files_changed"], send)
             # done 이벤트를 보내면서 세션 final_status를 영속화(성공 정의·집계 기준).
             if session_id:
                 await store.set_session_final_status(session_id, status)

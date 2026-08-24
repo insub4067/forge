@@ -106,6 +106,22 @@ def test_project_shrinks_after_compaction():
     print("OK projection shrinks after compaction (10-11)")
 
 
+def test_merge_memory_facts():
+    # 프로젝트 메모리 적립: dedup + 상한 + 헤더 1회.
+    mm = AgentRuntime._merge_memory_facts
+    # 빈 메모리에 새 사실 → 헤더+사실
+    out = mm("", ["- 빌드: npm run build", "- 테스트: pytest"])
+    assert out and "학습된 프로젝트 지식" in out and "npm run build" in out and "pytest" in out
+    # 이미 있는 사실은 dedup(추가 안 함)
+    assert mm(out, ["- 빌드: npm run build"]) is None
+    # 새 사실만 추가(헤더 중복 안 함)
+    out2 = mm(out, ["- 빌드: npm run build", "- 규약: 존댓말"])
+    assert out2 is not None and out2.count("학습된 프로젝트 지식") == 1 and "존댓말" in out2
+    # 상한 초과 → None(무한 성장 방지)
+    assert mm("x" * 3999, ["- 아주 긴 새 사실 " + "y" * 50], cap=4000) is None
+    print("OK 프로젝트 메모리 dedup+상한+헤더1회")
+
+
 def test_completion_report():
     # 표준 완료 리포트: 요구사항 요약 + 검증 + commit/push를 정직하게. (섹션5 daily-use)
     cr = AgentRuntime._completion_report
@@ -231,6 +247,7 @@ if __name__ == "__main__":
     test_skill_selection()
     test_stable_prefix()
     test_project_shrinks_after_compaction()
+    test_merge_memory_facts()
     test_completion_report()
     test_merge_gates_ledger()
     test_over_budget()

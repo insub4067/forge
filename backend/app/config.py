@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # 실행의 runaway 비용을 막는 가드레일. 정상 작업(관측상 ~$1 이하)은 안 건드리고 폭주만
     # 잡도록 넉넉히. 0이면 무제한. 세션별로 UI/set_budget로 재정의 가능.
     session_budget_usd: float = 2.0
+    # 작업 완료(검증 통과) 시 durable 프로젝트 지식을 ROOM_MEMORY.md에 자동 적립한다(다음 세션이
+    # 재설명 없이 잇게). 검증된 것만·dedup·크기 상한. 끄려면 PROJECT_MEMORY=0.
+    project_memory: bool = True
     # 작업 성공 완료 시 하네스가 자동으로 git commit(+push)한다 — 커밋 누락 방지. 기본 True.
     # git 워크스페이스이고 변경이 있을 때만. 끄려면 AUTO_COMMIT=0.
     auto_commit: bool = True
