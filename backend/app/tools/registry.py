@@ -302,19 +302,45 @@ def _resolve(workspace: str, input_path: str) -> Path:
     return p
 
 
-def _list_tree(path: Path, depth: int) -> list[str]:
+def _read_file_capped(path: Path) -> str:
+    """파일을 크기 상한 안에서 읽는다. 거대 파일(수백 MB 로그 등)을 통째로 메모리에 올려
+    서버를 먹통으로 만드는 것을 방지한다. 상한을 넘으면 앞부분만 + 안내."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        size = 0
+    if size > _READ_FILE_MAX_BYTES:
+        with open(path, "rb") as f:
+            raw = f.read(_READ_FILE_MAX_BYTES)
+        head = raw.decode("utf-8", errors="replace")
+        return (head + f"\n\n... (파일이 {size:,} bytes로 너무 큽니다 — 앞 "
+                f"{_READ_FILE_MAX_BYTES:,} bytes만 표시. offset/limit으로 범위를 지정하세요)")
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _list_tree(path: Path, depth: int, budget: dict | None = None) -> list[str]:
+    import time
+    if budget is None:
+        budget = {"n": 0, "deadline": time.monotonic() + _LISTDIR_MAX_SECONDS, "capped": False}
     lines: list[str] = []
     try:
         entries = sorted(path.iterdir(), key=lambda e: (e.is_file(), e.name))
     except PermissionError:
         return [f"{'  ' * depth}? (접근 불가)"]
     for e in entries:
-        if e.name in {"node_modules", ".git", "__pycache__", ".venv"}:
+        # 항목 수·시간 상한 — 홈처럼 거대한 트리에서 폭주해 루프를 막지 않게 조기 종료.
+        if budget["n"] >= _LISTDIR_MAX_ENTRIES or time.monotonic() > budget["deadline"]:
+            budget["capped"] = True
+            return lines
+        if e.name in {"node_modules", ".git", "__pycache__", ".venv", "dist", ".next", "build"}:
             continue
+        if e.is_symlink():  # 심링크 루프로 무한 재귀 방지
+            continue
+        budget["n"] += 1
         if e.is_dir():
             lines.append(f"{'  ' * depth}{e.name}/")
             if depth < 2:
-                lines.extend(_list_tree(e, depth + 1))
+                lines.extend(_list_tree(e, depth + 1, budget))
         else:
             lines.append(f"{'  ' * depth}{e.name}")
     return lines
@@ -326,6 +352,11 @@ def _list_tree(path: Path, depth: int) -> list[str]:
 _GREP_MAX_FILES = 20000
 _GREP_MAX_HITS = 100
 _GREP_MAX_SECONDS = 8.0
+# 파일시스템 도구 공용 상한 — 동기 재귀/대용량 읽기가 이벤트 루프를 막고 서버를 먹통으로
+# 만드는 것을 방지한다(홈 디렉터리·거대 로그 파일 등).
+_LISTDIR_MAX_ENTRIES = 2000   # 트리에 나열할 최대 항목 수
+_LISTDIR_MAX_SECONDS = 5.0
+_READ_FILE_MAX_BYTES = 5_000_000  # read_file/find_symbol이 통째로 읽는 최대 크기(5MB)
 
 
 def _grep(path: Path, pattern: str, include: str | None, out: list[str],
@@ -500,7 +531,7 @@ async def _browser_check(url: str, selectors: list[str]) -> str:
 async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]:
     if name == "find_symbol":
         p = _resolve(workspace, str(args["path"]))
-        text = p.read_text(encoding="utf-8", errors="replace")
+        text = await asyncio.to_thread(_read_file_capped, p)
         return _find_symbol_range(text, str(args.get("symbol", ""))), ""
     if name == "read_tool_result":
         from ..runtime import tool_store
@@ -515,7 +546,7 @@ async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]
         return await _browser_check(url, [str(s) for s in sels]), ""
     if name == "read_file":
         p = _resolve(workspace, str(args["path"]))
-        text = p.read_text(encoding="utf-8", errors="replace")
+        text = await asyncio.to_thread(_read_file_capped, p)
         offset = args.get("offset")
         limit = args.get("limit")
         if offset or limit:
@@ -536,9 +567,20 @@ async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]
     if name == "list_dir":
         p = _resolve(workspace, str(args["path"]))
         if p.is_file():
-            return p.read_text(encoding="utf-8", errors="replace"), ""
-        lines = _list_tree(p, 0)
-        return "\n".join(lines) or "(빈 디렉토리)", ""
+            return await asyncio.to_thread(_read_file_capped, p), ""
+        # 동기 재귀라 이벤트 루프를 막는다 — 스레드로 오프로드한다. budget은 _list_tree가
+        # 스레드 안에서 monotonic 기준으로 초기화한다(여기서 deadline을 만들면 스레드 시작
+        # 지연만큼 시간이 깎인다). capped 여부만 받아 온다.
+        budget: dict = {}
+        def _run():
+            b = {"n": 0, "deadline": __import__("time").monotonic() + _LISTDIR_MAX_SECONDS,
+                 "capped": False}
+            r = _list_tree(p, 0, b)
+            budget["capped"] = b["capped"]
+            return r
+        lines = await asyncio.to_thread(_run)
+        tail = "\n(항목 상한 도달 — 더 좁은 경로로 확인하세요)" if budget.get("capped") else ""
+        return ("\n".join(lines) + tail) or "(빈 디렉토리)", ""
     if name == "grep":
         # 모델이 준 path를 존중한다(무시하고 워크스페이스 전체를 훑으면 홈 디렉터리에서 폭주).
         p = _resolve(workspace, str(args.get("path") or "."))

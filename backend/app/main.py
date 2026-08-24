@@ -54,6 +54,16 @@ _COLUMN_PATCHES = [
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 이벤트 루프 watchdog — 콜백이 루프를 오래 잡으면(동기 블로킹) 경고 로그를 남긴다.
+    # 조용한 먹통이 가장 나쁘다: 로그에 "slow callback"이 찍히면 어느 도구가 범인인지 안다.
+    # (실제로 grep/list_dir 동기 재귀가 홈 디렉터리에서 서버를 먹통으로 만든 적이 있다.)
+    try:
+        import asyncio as _aio
+        loop = _aio.get_running_loop()
+        loop.set_debug(True)
+        loop.slow_callback_duration = 1.0  # 1초 이상 루프를 잡은 콜백을 경고
+    except Exception:
+        pass
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)

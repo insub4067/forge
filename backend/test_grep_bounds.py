@@ -62,3 +62,48 @@ if __name__ == "__main__":
         if n.startswith("test_") and callable(f):
             f()
     print("grep 경계 테스트 통과 ✓")
+
+
+# ─── list_dir / read_file 자기보호 (grep과 같은 blast-radius 방어) ───
+
+def test_list_dir_caps_entries_and_offloads():
+    """list_dir이 거대 트리에서 항목 상한으로 멈추고 루프를 막지 않는다."""
+    import pathlib
+    with tempfile.TemporaryDirectory() as ws:
+        for i in range(registry._LISTDIR_MAX_ENTRIES + 500):
+            open(os.path.join(ws, f"f{i}.txt"), "w").close()
+        out, _ = asyncio.run(registry.execute_tool("list_dir", {"path": "."}, ws))
+        lines = out.splitlines()
+        # 상한 + 안내줄 정도만(전부 나열하지 않는다)
+        assert len(lines) <= registry._LISTDIR_MAX_ENTRIES + 2, len(lines)
+        assert "항목 상한 도달" in out
+
+
+def test_list_dir_skips_symlink_loops():
+    with tempfile.TemporaryDirectory() as ws:
+        os.makedirs(os.path.join(ws, "real"))
+        open(os.path.join(ws, "real", "a.txt"), "w").close()
+        try:
+            os.symlink(ws, os.path.join(ws, "loop"))
+        except OSError:
+            return
+        out, _ = asyncio.run(registry.execute_tool("list_dir", {"path": "."}, ws))
+        assert "real/" in out  # 무한 루프 없이 완료
+
+
+def test_read_file_caps_huge_file():
+    """거대 파일은 통째로 읽지 않고 앞부분 + 안내만 준다."""
+    with tempfile.TemporaryDirectory() as ws:
+        big = os.path.join(ws, "big.log")
+        with open(big, "wb") as f:
+            f.write(b"x" * (registry._READ_FILE_MAX_BYTES + 1000))
+        out, _ = asyncio.run(registry.execute_tool("read_file", {"path": "big.log"}, ws))
+        assert "너무 큽니다" in out
+        assert len(out) < registry._READ_FILE_MAX_BYTES + 500  # 통째로 안 실림
+
+
+def test_read_file_normal_file_unaffected():
+    with tempfile.TemporaryDirectory() as ws:
+        open(os.path.join(ws, "s.py"), "w").write("print(1)\n")
+        out, _ = asyncio.run(registry.execute_tool("read_file", {"path": "s.py"}, ws))
+        assert "print(1)" in out and "너무 큽니다" not in out
