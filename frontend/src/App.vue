@@ -134,6 +134,28 @@ const fsPath = ref('')
 const fsParent = ref(null)
 const fsEntries = ref([])
 const pickerRoomId = ref(null)
+const homePath = ref('')  // 홈 디렉터리 — 최초 세션이 workspace_path로 저장하는 값. 미설정 판별 기준.
+const needsWorkspace = computed(() => {
+  const room = currentRoom()
+  // 방이 아예 없으면(첫 진입·전부 삭제) 워크스페이스 선택부터 유도한다.
+  // 선택하면 chooseWorkspace가 방을 만들어 이 상태를 벗어난다(선택해도 계속 뜨던 무한 반복
+  // 은, 없는 방에 PATCH하던 게 원인이었고 chooseWorkspace/ensureRoom 수정으로 해소된다).
+  if (!room) return true
+  // 워크스페이스가 홈/루트/빈 값이면 '미설정'으로 보고 선택을 유도한다(홈에서 작업 시 git·skills가 깨진다).
+  const ws = (room.workspace_path || '').trim()
+  if (!ws || ws === '/' || ws === '~') return true
+  if (homePath.value && ws === homePath.value) return true
+  return false
+})
+async function loadHomePath() {
+  try {
+    const res = await fetch('/api/fs/list?path=')
+    if (res.ok) {
+      const data = await res.json()
+      homePath.value = data.path || ''
+    }
+  } catch {}
+}
 const showGit = ref(false)
 const steerMode = ref('queue') // 'queue' = 작업큐 대기(기본), 'switch' = 중단 후 새로 시작
 const pendingSend = ref(null)
@@ -493,6 +515,11 @@ function saveBudget() {
 function openRoomSettings() {
   const r = currentRoom()
   if (!r) { showRooms.value = true; return }
+  // 워크스페이스 미설정 세션은 방 설정보다 선택 유도가 먼저다(헤더 탭 → 피커).
+  if (needsWorkspace.value) {
+    openWorkspacePicker(r.id)
+    return
+  }
   roomSettingsTitle.value = r.title || ''
   // 실제 mode를 그대로 노출: ''(빈값)=자동 분류. 예전엔 ''를 'work'로 뭉개 "작업 모드인 줄"
   // 착각하게 만들었다(실제론 auto라 코딩 턴이 chat으로 분류돼 편집이 막혔다).
@@ -728,6 +755,18 @@ async function renameRoom(id) {
   } catch {}
 }
 
+// 미설정 상태에서 워크스페이스를 고른다 — 방이 없으면(첫 진입·전부 삭제됨) 먼저 만든다.
+// 방 없이 피커만 열면 선택해도 PATCH 대상이 없어 저장이 안 되고 계속 미설정으로 남는다.
+async function chooseWorkspace() {
+  let id = currentRoomId.value
+  if (!id || !currentRoom()) {
+    id = await ensureRoom('')
+    if (!id) return
+    await loadRooms()
+  }
+  openWorkspacePicker(id)
+}
+
 async function openWorkspacePicker(roomId) {
   pickerRoomId.value = roomId || null
   showWorkspacePicker.value = true
@@ -780,7 +819,8 @@ async function pickCurrentPath() {
 }
 
 async function ensureRoom(text) {
-  if (currentRoomId.value) return currentRoomId.value
+  // 유효한(실제 존재하는) 방일 때만 재사용한다 — 유령 id면 새로 만든다.
+  if (currentRoomId.value && currentRoom()) return currentRoomId.value
   try {
     const res = await fetch('/api/rooms', {
       method: 'POST',
@@ -1174,6 +1214,12 @@ async function send() {
     if (text) await steerDuringRun(text)
     return
   }
+  // 워크스페이스 미설정 세션에서 작업성 요청은 먼저 선택을 유도한다. chat(읽기전용)은 허용.
+  if (needsWorkspace.value && currentRoom()?.mode !== 'chat') {
+    alert('워크스페이스를 먼저 선택하세요. 홈 폴더에서 작업하면 git·스킬 동작이 깨질 수 있습니다.')
+    openWorkspacePicker(currentRoomId.value)
+    return
+  }
   busy.value = true
   input.value = ''
   gates.value = []  // 새 run 시작 — 이전 run의 게이트 상태 제거(이번 run이 다시 등록)
@@ -1408,11 +1454,18 @@ onMounted(async () => {
   mq.addEventListener('change', applyWide)
   loadBalance() // 앱 실행 시 잔액 최초 1회 fetch(전역 상태로 공유)
   startHealthPoll() // 서버 도달성 상시 감시 — 먹통이면 배너로 알린다
+  loadHomePath() // 워크스페이스 미설정(홈) 판별 기준
   await loadRooms()
   // 유효한 현재 세션이 없으면 가장 최근 세션으로 랜딩
   const valid = rooms.value.some((r) => r.id === currentRoomId.value)
-  if (!valid && rooms.value.length) {
-    currentRoomId.value = rooms.value[0].id
+  if (!valid) {
+    if (rooms.value.length) {
+      currentRoomId.value = rooms.value[0].id
+    } else {
+      // 방이 하나도 없다 — 유령 id를 비운다(안 그러면 currentRoom()이 null이라
+      // 워크스페이스 미설정 배지가 뜨고, 선택해도 없는 방에 PATCH돼 계속 반복된다).
+      currentRoomId.value = ''
+    }
     localStorage.setItem('forge_room', currentRoomId.value)
   }
   // 첫 랜딩도 방 전환과 같은 규칙으로 세션 설정을 복원한다(selectRoom을 거치지 않는 경로).
@@ -1446,7 +1499,9 @@ document.addEventListener('visibilitychange', () => {
           <span v-if="currentRoom()?.mode === 'chat'" class="room-mode-badge chat">채팅</span>
         </span>
         <span class="room-sub">
-          <span v-if="busy" class="status-live">실행 중</span><template v-if="busy"> · </template>{{ shortPath(currentRoom()?.workspace_path) || 'Mobile Coding Agent' }}
+          <span v-if="busy" class="status-live">실행 중</span><template v-if="busy"> · </template>
+          <template v-if="needsWorkspace"><span class="ws-badge">워크스페이스 미설정 · 선택</span></template>
+          <template v-else>{{ shortPath(currentRoom()?.workspace_path) || 'Mobile Coding Agent' }}</template>
         </span>
       </button>
       <div class="header-right">
@@ -1508,8 +1563,15 @@ document.addEventListener('visibilitychange', () => {
         <img src="/logo.svg" class="welcome-logo" alt="FORGE" />
         <div class="welcome-brand">FORGE</div>
         <p class="welcome-title">무엇을 작업할까요?</p>
-        <p class="sub">{{ shortPath(currentRoom()?.workspace_path) || '워크스페이스 미설정' }}에서 자율로 작업합니다.</p>
-        <div class="quick-actions">
+        <template v-if="needsWorkspace">
+          <div class="ws-guide">
+            <p class="ws-guide-title">워크스페이스가 설정되지 않았습니다</p>
+            <p class="ws-guide-sub">작업할 폴더를 먼저 선택하세요. 홈 폴더에서 작업하면 git·스킬 동작이 깨질 수 있습니다.</p>
+            <button class="ws-guide-btn" @click="chooseWorkspace()">워크스페이스 선택</button>
+          </div>
+        </template>
+        <p v-else class="sub">{{ shortPath(currentRoom()?.workspace_path) }}에서 자율로 작업합니다.</p>
+        <div v-if="!needsWorkspace" class="quick-actions">
           <button class="quick-action" @click="quickAction('이 프로젝트의 구조와 핵심 동작을 파악해서 요약해줘')">프로젝트 파악</button>
           <button class="quick-action" @click="quickAction('현재 git 변경사항을 리뷰해줘')">변경사항 리뷰</button>
           <button class="quick-action" @click="quickAction('git 상태와 최근 커밋을 확인해서 알려줘')">Git 상태 확인</button>

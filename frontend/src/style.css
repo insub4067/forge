@@ -1221,6 +1221,46 @@ main {
   opacity: 0.7;
 }
 
+/* 워크스페이스 미설정(빈 세션) 유도 카드 */
+.ws-guide {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px dashed var(--accent);
+  background: var(--panel);
+  text-align: center;
+  max-width: 340px;
+}
+.ws-guide-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.ws-guide-sub {
+  font-size: 13px;
+  opacity: 0.75;
+  margin: 6px 0 12px;
+}
+.ws-guide-btn {
+  padding: 12px 18px;
+  border-radius: 12px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  min-height: 44px;
+}
+.ws-guide-btn:active {
+  opacity: 0.85;
+}
+
+/* 헤더의 미설정 배지 */
+.ws-badge {
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .msg {
   display: flex;
   flex-direction: column;
