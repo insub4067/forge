@@ -2414,10 +2414,13 @@ class AgentRuntime:
 
         if vstate == "passed":
             lines.append("✓ 기존 테스트·빌드 통과")
+            # "최종 회귀 확인"은 integration이 실제로 회귀 검사를 돌렸을 때만 참이다.
+            # generic이 unavailable이면 integration도 회귀를 확인한 게 아니라 gate 실패가
+            # 없었을 뿐이다 — 그때 이 줄을 찍으면 "회귀 미확인"과 정면으로 모순된다(실측).
+            if s.get("integration_verification") == "passed":
+                lines.append("✓ 최종 회귀 확인")
         elif vstate == "unavailable":
             lines.append("! 실행 가능한 test/build 없음 — 회귀 미확인")
-        if s.get("integration_verification") == "passed":
-            lines.append("✓ 최종 회귀 확인")
         # gate가 없었다는 사실을 침묵하지 않는다 — 침묵하면 완전 검증으로 읽힌다.
         if gstate == "none":
             lines.append("! 요구사항 게이트 없음 — 요청 충족 여부는 검증되지 않았습니다")

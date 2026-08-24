@@ -161,6 +161,16 @@ def test_completion_summary_formatter():
               "commit_status": True, "push_status": False})
     assert "요구사항 게이트 없음" in r3
 
+    # generic이 unavailable이면 "최종 회귀 확인"을 찍지 않는다(자기모순 방지, 실측 버그).
+    r6 = fmt({"status": "completed_unverified", "gate_state": "passed",
+              "generic_verification": "unavailable", "integration_verification": "passed",
+              "files_changed_count": 2,
+              "verified_requirements": [{"title": "빈 문자열", "status": "passed"}],
+              "unverified_requirements": [], "failed_requirements": [],
+              "commit_status": True, "push_status": False})
+    assert "회귀 미확인" in r6
+    assert "최종 회귀 확인" not in r6, r6   # 모순 금지
+
     # push 실패를 성공으로 보고하지 않는다
     r4 = fmt({"status": "completed", "gate_state": "passed", "generic_verification": "passed",
               "integration_verification": "passed", "files_changed_count": 2,
