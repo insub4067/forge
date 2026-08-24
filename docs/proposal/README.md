@@ -18,6 +18,7 @@
 | `global-workspace-skills.md` | implemented/diverged | 실제는 Curated/Learned/Project 3-tier + selective retrieval. proposal의 2-tier 가정은 과거. |
 | `hermes-agent-adoption.md` | partial | Skills/context/scheduler/narrow core 아이디어 일부 반영. Tool Script, generic ExecutionBackend, subagents는 미구현. |
 | `home-camera-monitor.md` | PoC only | `imagesnap` polling Camera PoC. WebRTC/registry/RTSP/condition detection은 미구현. |
+| `intent-interpreter-task-ir.md` | proposal | 현재 Triage의 chat/work 분류를 보존하면서 자연어→Task IR 의미 정규화를 Shadow mode부터 실험. Interpreter는 WHAT만 구조화하고 HOW/verification/completion authority는 기존 Planner/Developer/Harness에 유지. |
 | `live-screen-preview.md` | implemented/diverged | 현재 screenshot JPEG polling + 사람용 mouse/keyboard input. proposal의 WebRTC view-only 구조는 구현되지 않음. |
 | `low-cost-model-routing.md` | rejected-experiment / future | current main은 DeepSeek only. Ox 제거, Ling/OpenRouter 실험도 repeated tool-call 문제로 revert. CPS 평가 틀만 유효. |
 | `onprem-inference-optimization.md` | deferred | OpenAI-compatible internal provider/vLLM/SGLang/speculative serving은 현재 미구현. 실제 사내 inference 요구/hardware가 생기면 재검토. |
