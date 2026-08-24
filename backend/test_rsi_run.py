@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from rsi import promotion_gate
+import rsi_run as R
 from rsi_run import FORGE_PREFIX, load_baseline, run_candidate_cmd, write_report
 
 
@@ -131,3 +132,47 @@ if __name__ == "__main__":
             fn()
             print(f"✓ {name}")
     print("rsi_run orchestration 로직 테스트 통과")
+
+
+def _repo(tmp):
+    import subprocess
+    d = Path(tmp)
+    subprocess.run(["git", "init", "-q", str(d)], check=True)
+    for a in (["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+        subprocess.run(["git", "-C", str(d), *a], check=True)
+    (d / "f.txt").write_text("base")
+    subprocess.run(["git", "-C", str(d), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(d), "commit", "-qm", "init"], check=True)
+    sha = subprocess.run(["git", "-C", str(d), "rev-parse", "HEAD"],
+                         capture_output=True, text=True).stdout.strip()
+    return d, sha
+
+
+def test_noop_candidate_detected():
+    """아무것도 안 바꾼 candidate는 벤치 전에 걸러야 한다 — 같은 코드의 결과 차이는
+    전부 노이즈고, 그 노이즈로 PROMOTE가 나면 없는 개선을 기록한다."""
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        d, sha = _repo(tmp)
+        assert R.worktree_is_unchanged(d, sha) is True
+        # 미커밋 변경
+        (d / "f.txt").write_text("changed")
+        assert R.worktree_is_unchanged(d, sha) is False
+        # 커밋해도 변경으로 본다(candidate-cmd가 커밋할 수 있다)
+        subprocess.run(["git", "-C", str(d), "commit", "-qam", "work"], check=True)
+        assert R.worktree_is_unchanged(d, sha) is False
+
+
+def test_write_report_handles_noop_candidate():
+    """no-op 경로는 candidate 집계가 비어 있다 — 리포트가 KeyError로 죽으면 안 된다."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "r.md"
+        R.write_report({"overall": {"success_rate": 0.9, "cost_per_success": 0.01,
+                                    "elapsed_p50": 10, "runs": 21}},
+                       {"overall": {}, "variant": "no-op"},
+                       {"decision": "REJECT", "reason": "no-op"},
+                       out=out, variant="no-op", candidate_cmd="forge:x", worktree="/tmp/w")
+        body = out.read_text()
+        assert "REJECT" in body and "no-op" in body

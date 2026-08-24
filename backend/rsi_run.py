@@ -117,6 +117,17 @@ def _run_forge(goal: str, worktree: Path, *, timeout: int = 7200) -> None:
         )
 
 
+def worktree_is_unchanged(worktree: Path, base_sha: str) -> bool:
+    """candidate가 아무것도 바꾸지 않았는지. 자기수정이 실패하거나 "고칠 게 없다"로 끝나면
+    코드가 baseline과 동일한데, 그대로 벤치를 돌리면 21-task 비용을 쓰고 노이즈로 PROMOTE가
+    날 수 있다 — 아무것도 아닌 것을 개선으로 기록하는 것이다. 벤치 전에 잘라낸다.
+    미커밋 변경과 새 커밋을 둘 다 본다(candidate-cmd가 커밋할 수도 있다)."""
+    if _run(["git", "status", "--porcelain"], worktree, timeout=60).stdout.strip():
+        return False
+    head = _run(["git", "rev-parse", "HEAD"], worktree, timeout=60).stdout.strip()
+    return bool(head) and head == base_sha
+
+
 def run_benchmark(worktree: Path, *, repeat: int, json_path: Path, tier: str,
                   only: str = "", complex_only: bool = False) -> dict:
     """candidate worktree에서 동일 benchmark를 실행해 집계 JSON을 저장한다."""
@@ -150,7 +161,7 @@ def write_report(baseline: dict, candidate: dict, decision: dict, *, out: Path,
         "",
         "| 지표 | baseline | candidate |",
         "|------|----------|-----------|",
-        f"| success_rate | {b['success_rate']} | {c['success_rate']} |",
+        f"| success_rate | {b['success_rate']} | {c.get('success_rate')} |",
         f"| cost_per_success | {b.get('cost_per_success')} | {c.get('cost_per_success')} |",
         f"| elapsed_p50 | {b.get('elapsed_p50')} | {c.get('elapsed_p50')} |",
         f"| runs | {b.get('runs')} | {c.get('runs')} |",
@@ -182,12 +193,25 @@ def main():
     baseline = load_baseline(args.baseline)
     print(f"baseline 로드: success_rate={baseline['overall']['success_rate']}")
 
+    base_sha = _run(["git", "rev-parse", "HEAD"], REPO_ROOT).stdout.strip()
     worktree = create_worktree(REPO_ROOT)
     print(f"candidate worktree: {worktree}")
 
     try:
         print(f"candidate-cmd 실행: {args.candidate_cmd}")
         run_candidate_cmd(args.candidate_cmd, worktree)
+
+        # no-op candidate는 벤치를 돌리지 않는다 — baseline과 같은 코드라 결과 차이는
+        # 전부 노이즈이고, 그 노이즈로 PROMOTE가 나면 없는 개선을 기록하게 된다.
+        if worktree_is_unchanged(worktree, base_sha):
+            decision = {"decision": "REJECT", "reason": "candidate가 코드를 바꾸지 않았다(no-op) — 벤치 생략"}
+            print(f"판정: {decision['decision']} — {decision['reason']}")
+            if args.report:
+                write_report(baseline, {"overall": {}, "variant": "no-op"}, decision,
+                             out=Path(args.report), variant="no-op",
+                             candidate_cmd=args.candidate_cmd, worktree=str(worktree))
+                print(f"→ report: {args.report}")
+            return
 
         cand_json = Path(args.json) if args.json else Path(tempfile.mkdtemp()) / "candidate.json"
         candidate = run_benchmark(worktree, repeat=args.repeat, json_path=cand_json,
