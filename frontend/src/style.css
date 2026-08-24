@@ -1720,15 +1720,19 @@ footer .image-preview-row {
   flex-shrink: 0;
 }
 
-.composer-wrap {
-  position: relative;  /* jump-bottom 배치 기준 — composer 카드 바로 위에 고정 */
+.chat-area {
+  /* main(스크롤)과 jump-bottom을 함께 담는 비스크롤 영역. 바닥이 footer 상단과 일치한다. */
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
 }
 .jump-bottom {
-  /* composer-wrap 기준. footer 전체(task-bar 포함) 위에 매달던 예전 방식은 footer가
-     커질 때 버튼이 화면 중앙까지 밀려 콘텐츠를 가렸다(실측 버그). */
+  /* chat-area 바닥에 고정 — footer 바깥이라 task-bar 유무·footer 높이와 무관하게 항상
+     입력창 바로 위에 뜬다. main 스크롤에도 함께 움직이지 않는다. */
   position: absolute;
-  bottom: 100%;
-  margin-bottom: 8px;
+  bottom: 8px;
   left: 50%;
   transform: translateX(-50%);
   width: 40px;
