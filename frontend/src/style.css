@@ -4030,7 +4030,12 @@ button {
   -webkit-tap-highlight-color: transparent;
   min-height: 172px;
 }
-.agent-card:active { transform: scale(0.97); }
+.agent-card { transition: transform 0.12s ease, border-color 0.12s ease; }
+.agent-card:active { transform: scale(0.98); border-color: var(--accent); }
+.agent-card:active .agent-avatar { transform: translateY(-2px); transition: transform 0.12s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .agent-card, .agent-card:active, .agent-card:active .agent-avatar { transition: none; transform: none; }
+}
 .agent-card.working { border-color: var(--accent); }
 
 .agent-avatar {
@@ -4087,18 +4092,19 @@ button {
 .agent-cap.big { font-size: 12px; padding: 3px 9px; }
 
 /* ── 내부 시스템 ── */
-.crew-internal { margin-top: 22px; border-top: 1px dashed var(--border); padding-top: 14px; }
-.crew-internal-title { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 8px; }
+/* 내부 시스템 = harness mechanism. 캐릭터 카드가 아니라 compact list로 위계를 낮춘다. */
+.crew-internal { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 14px; }
+.crew-internal-title { font-size: 11.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
 .crew-internal-row {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  margin-bottom: 6px;
+  align-items: baseline;
+  gap: 9px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--border);
 }
+.crew-internal-row:last-child { border-bottom: none; }
+.crew-internal-mark { color: var(--muted); font-size: 11px; flex-shrink: 0; }
+.crew-internal-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .crew-internal-name { font-size: 13px; font-weight: 600; }
 .crew-internal-flavor { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
 
@@ -4120,6 +4126,10 @@ button {
 .detail-label { font-size: 11.5px; font-weight: 600; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 10px; text-transform: uppercase; }
 .detail-desc { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--text); }
 .detail-desc.lead { color: var(--muted); margin: 2px 0 4px; }
+.detail-hint { margin: 10px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.agent-detail { animation: detail-in 0.2s ease-out; }
+@keyframes detail-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .agent-detail { animation: none; } }
 .detail-kv { display: flex; flex-direction: column; gap: 7px; }
 .detail-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
 .detail-key { color: var(--muted); flex-shrink: 0; }
@@ -4162,7 +4172,9 @@ button {
   font-family: inherit;
 }
 .prompt-open-btn:active { transform: scale(0.99); }
-.prompt-source { font-size: 11px; color: var(--muted); margin-top: 8px; word-break: break-all; }
+.prompt-source { display: flex; flex-direction: column; gap: 1px; font-size: 11px; color: var(--muted); margin-top: 8px; min-width: 0; }
+.prompt-source .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-rev { color: var(--muted); opacity: 0.85; }
 
 /* ── Prompt Viewer ── */
 .prompt-overlay {
@@ -4195,6 +4207,31 @@ button {
   cursor: pointer;
   font-family: inherit;
 }
+
+/* Read / Raw 토글 */
+.prompt-mode { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.prompt-mode-btn {
+  background: var(--panel);
+  color: var(--muted);
+  border: none;
+  padding: 7px 11px;
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.prompt-mode-btn.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+/* Read 모드 typography — 터미널이 아니라 문서 Inspector */
+.prompt-read { font-size: 14px; line-height: 1.68; }
+.prompt-read h1 { font-size: 19px; margin: 20px 0 10px; }
+.prompt-read h2 { font-size: 16px; margin: 18px 0 8px; }
+.prompt-read h3 { font-size: 14.5px; margin: 16px 0 6px; }
+.prompt-read h1:first-child, .prompt-read h2:first-child { margin-top: 0; }
+.prompt-read p, .prompt-read li { margin: 6px 0; }
+.prompt-read ul, .prompt-read ol { padding-left: 20px; }
+.prompt-read code { background: var(--panel-2); border-radius: 4px; padding: 1px 5px; font-size: 0.9em; }
+.prompt-read pre { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-x: auto; }
+.prompt-read pre code { background: none; padding: 0; }
 .prompt-note {
   font-size: 11.5px;
   color: var(--muted);

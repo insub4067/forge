@@ -3,6 +3,8 @@
 // 단, 표시되는 모든 정보(역할·모델·도구·fresh/read-only·상태·프롬프트)는 /api/agents에서
 // 내려온 값을 그대로 쓴다. frontend에서 metadata를 하드코딩하거나 복제하지 않는다.
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import AgentAvatar from './AgentAvatar.vue'
 
 const props = defineProps({
@@ -22,8 +24,19 @@ const promptData = ref(null)
 const promptLoading = ref(false)
 const promptError = ref('')
 const copied = ref(false)
+const promptMode = ref('read') // 'read' | 'raw'
 
 const selected = computed(() => agents.value.find((a) => a.id === selectedId.value) || null)
+
+// 긴 hash가 title 영역을 깨지 않게 모바일에선 짧게. 전체는 복사/detail에서 확인 가능.
+function shortHash(h) {
+  return h ? String(h).slice(0, 7) : ''
+}
+
+const promptHtml = computed(() => {
+  if (!promptData.value) return ''
+  return DOMPurify.sanitize(marked.parse(promptData.value.prompt || ''))
+})
 
 const STATUS = {
   working: { label: '작업 중', dot: 'working', cls: 'working' },
@@ -155,7 +168,7 @@ onUnmounted(() => {
         </div>
         <div v-else-if="error" class="crew-error">{{ error }}</div>
         <template v-else>
-          <p class="crew-lead">내 컴퓨터에서 함께 일하는 팀. 누구를 눌러도 실제 모델·도구·프롬프트가 보입니다.</p>
+          <p class="crew-lead">각 Agent의 실제 모델·도구·Prompt를 확인할 수 있습니다.</p>
           <div class="crew-grid">
             <button
               v-for="a in agents"
@@ -178,10 +191,13 @@ onUnmounted(() => {
           </div>
 
           <div v-if="internal.length" class="crew-internal">
-            <div class="crew-internal-title">내부 시스템 · 라우팅</div>
+            <div class="crew-internal-title">내부 시스템</div>
             <div v-for="i in internal" :key="i.id" class="crew-internal-row">
-              <span class="crew-internal-name">{{ i.name }}</span>
-              <span class="crew-internal-flavor">{{ i.flavor }}</span>
+              <span class="crew-internal-mark" aria-hidden="true">◇</span>
+              <div class="crew-internal-text">
+                <span class="crew-internal-name">{{ i.name }}</span>
+                <span class="crew-internal-flavor">{{ i.flavor }}</span>
+              </div>
             </div>
           </div>
         </template>
@@ -225,6 +241,9 @@ onUnmounted(() => {
                 <span class="detail-val">{{ selected.read_only ? '읽기 전용' : '전체' }}</span>
               </div>
             </div>
+            <p class="detail-hint">{{ selected.fresh_context
+              ? 'Fresh — 긴 Developer 대화를 그대로 상속하지 않고 독립된 새 컨텍스트에서 판단합니다.'
+              : 'Persistent — 현재 작업의 실행 맥락을 이어받아 구현을 계속합니다.' }}</p>
           </div>
 
           <div class="detail-block">
@@ -248,7 +267,10 @@ onUnmounted(() => {
               {{ promptLoading ? '불러오는 중…' : '실제 Base Role Prompt 보기' }}
             </button>
             <div v-if="promptError" class="detail-policy">{{ promptError }}</div>
-            <div class="prompt-source mono">{{ selected.prompt_source }} · {{ selected.prompt_hash }}</div>
+            <div class="prompt-source">
+              <span class="mono">{{ selected.prompt_source }}</span>
+              <span class="prompt-rev mono">revision {{ shortHash(selected.prompt_hash) }}</span>
+            </div>
           </div>
         </div>
       </template>
@@ -259,15 +281,23 @@ onUnmounted(() => {
       <div class="prompt-head">
         <div class="prompt-head-text">
           <div class="prompt-title">{{ promptData.id }} · System Prompt</div>
-          <div class="prompt-source mono">{{ promptData.source }} · {{ promptData.hash }}</div>
+          <div class="prompt-source">
+            <span class="mono">{{ promptData.source }}</span>
+            <span class="prompt-rev mono">revision {{ shortHash(promptData.hash) }}</span>
+          </div>
         </div>
         <div class="prompt-head-actions">
+          <div class="prompt-mode" role="group" aria-label="보기 모드">
+            <button class="prompt-mode-btn" :class="{ on: promptMode === 'read' }" @click="promptMode = 'read'">읽기</button>
+            <button class="prompt-mode-btn" :class="{ on: promptMode === 'raw' }" @click="promptMode = 'raw'">Raw</button>
+          </div>
           <button class="prompt-btn" @click="copyPrompt()">{{ copied ? '복사됨' : '복사' }}</button>
           <button class="prompt-btn" @click="closePrompt()">닫기</button>
         </div>
       </div>
       <div class="prompt-note">읽기 전용 — 런타임이 사용하는 Base Role Prompt입니다. 동적 메모리·스킬·대화·비밀값은 포함하지 않습니다.</div>
-      <pre class="prompt-body mono">{{ promptData.prompt }}</pre>
+      <div v-if="promptMode === 'read'" class="prompt-body prompt-read" v-html="promptHtml"></div>
+      <pre v-else class="prompt-body mono">{{ promptData.prompt }}</pre>
     </div>
   </div>
 </template>
