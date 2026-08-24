@@ -1008,26 +1008,11 @@ function handleEvent(evt, assistant) {
       activeQuestion.value = { id: d.id, question: d.question, options: d.options || [] }
       questionAnswer.value = ''
       break
-    case 'task_update': {
-      const newTasks = d.tasks || []
-      const labels = { todo: '할 일', working: '진행', testing: '테스트', done: '완료', planning: '할 일', in_progress: '진행', 'in-progress': '진행', review: '테스트', verifying: '테스트', debug: '진행' }
-      // 태스크당 한 줄 — 상태가 바뀌어도 줄이 늘지 않는다(id가 신원, 제목은 백엔드가 고정).
-      // 재연결로 예전 이벤트가 재생돼도 같은 줄이 갱신될 뿐 중복되지 않는다.
-      if (!assistant.taskNotes) assistant.taskNotes = []
-      for (const t of newTasks) {
-        const key = t.id != null ? `id:${t.id}` : `t:${t.title}`
-        let note = assistant.taskNotes.find((n) => n.key === key)
-        if (!note) {
-          note = { key, title: t.title, to: '', done: false }
-          assistant.taskNotes.push(note)
-        }
-        note.title = t.title
-        note.to = labels[t.status] || t.status
-        note.done = t.status === 'done'
-      }
-      tasks.value = newTasks
+    case 'task_update':
+      // 진행 상황은 하단 task-bar가 "현재 태스크 n/전체"로 보여준다.
+      // 메시지 카드에 목록을 또 나열하면 같은 정보를 두 번 말하게 된다.
+      tasks.value = d.tasks || []
       break
-    }
     case 'gates_update':
       gates.value = d.gates || []
       break
@@ -1567,14 +1552,6 @@ document.addEventListener('visibilitychange', () => {
                   <pre v-else>{{ t.status === 'running' ? '실행 중…' : (t.result || '(출력 없음)') }}</pre>
                 </details>
               </template>
-            </div>
-
-            <div v-if="m.taskNotes && m.taskNotes.length" class="task-notes">
-              <div v-for="tn in m.taskNotes" :key="tn.key" class="task-note" :class="{ done: tn.done }">
-                <span class="task-note-icon">{{ tn.done ? '✓' : '•' }}</span>
-                <span class="task-note-title">{{ tn.title }}</span>
-                <span class="task-note-status">{{ tn.to }}</span>
-              </div>
             </div>
 
             <div v-if="(m.state && (m.state.files_changed?.length || m.state.errors?.length)) || m.compacted" class="state-summary">

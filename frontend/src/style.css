@@ -1115,29 +1115,6 @@ main {
   font-size: 18px;
 }
 
-/* 칸반 카드 상태 변경 알림(채팅 인라인) */
-.task-notes {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 8px 0;
-}
-.task-note {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--muted);
-  padding: 5px 10px;
-  background: var(--panel-2, rgba(255, 255, 255, 0.04));
-  border-radius: 8px;
-  border-left: 2px solid var(--border);
-}
-.task-note.done { border-left-color: #4caf7d; }
-.task-note-icon { color: var(--accent, #d97757); font-weight: 700; }
-.task-note.done .task-note-icon { color: #4caf7d; }
-.task-note-title { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-note-status { font-size: 11px; opacity: 0.8; }
 
 /* 세션 효율 계측 그리드 */
 .metric-grid {
