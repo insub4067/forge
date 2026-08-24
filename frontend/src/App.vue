@@ -14,6 +14,7 @@ import SessionDetailPanel from './components/SessionDetailPanel.vue'
 import FileBrowserPanel from './components/FileBrowserPanel.vue'
 import FsIcon from './components/FsIcon.vue'
 import { balance as adminBalance, loadBalance } from './store'
+import { openRatio, decideOpen, horizontalIntent } from './lib/drawerDrag.js'
 
 // 단일 줄바꿈도 <br>로 — 답변 줄바꿈을 적극 반영
 marked.setOptions({ breaks: true, gfm: true })
@@ -110,6 +111,7 @@ const rooms = ref([])
 const currentRoomId = ref(localStorage.getItem('forge_room') || '')
 const loadingMessages = ref(false)
 const showRooms = ref(false)
+const roomsDrag = ref(0) // 스와이프 드래그 비율(0~1) — 드로어가 손가락을 따라온다
 const isWide = ref(false) // 넓은 화면(맥) 여부
 const pinnedSidebar = ref(localStorage.getItem('forge_sidebar_pinned') !== '0') // 고정 여부(기본 고정)
 function togglePin() {
@@ -342,6 +344,8 @@ function isLiveTurn(i) {
 }
 let mainStartX = 0
 let mainStartY = 0
+let mainDragActive = false // 가로 드로어 드래그로 확정됨
+let roomsCloseTimer = null
 let scrollLocked = false
 let scrollUnlockTimer = null
 let scrollRaf = null
@@ -349,10 +353,25 @@ let scrollRaf = null
 function onMainTouchStart(e) {
   mainStartX = e.touches[0].clientX
   mainStartY = e.touches[0].clientY
+  mainDragActive = false
   // 사용자가 스크롤 조작하는 동안 auto-scroll 잠금(스트리밍이 위로 읽기를 방해하지 않게)
   scrollLocked = true
   if (scrollUnlockTimer) clearTimeout(scrollUnlockTimer)
   if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = null }
+}
+
+function onMainTouchMove(e) {
+  // 모바일·드로어 닫힘 상태에서만: 오른쪽 스와이프 → 드로어가 손가락을 따라온다
+  if (isWide.value || showRooms.value) return
+  const t = e.touches[0]
+  const dx = t.clientX - mainStartX
+  const dy = t.clientY - mainStartY
+  const intent = horizontalIntent(dx, dy)
+  if (intent === null) return
+  if (intent === false || dx <= 0) { mainDragActive = false; return } // 세로 스크롤·왼쪽 이동 → 무시
+  if (!mainDragActive) mainDragActive = true
+  e.preventDefault() // 확정된 드래그 동안 세로 스크롤·고무줄을 막는다
+  roomsDrag.value = openRatio(dx, window.innerWidth)
 }
 
 function onMainTouchEnd(e) {
@@ -361,9 +380,30 @@ function onMainTouchEnd(e) {
   scrollUnlockTimer = setTimeout(() => { scrollLocked = false }, 400)
   const dx = e.changedTouches[0].clientX - mainStartX
   const dy = e.changedTouches[0].clientY - mainStartY
+  if (mainDragActive) {
+    mainDragActive = false
+    setRoomsOpen(decideOpen(roomsDrag.value)) // 임계 비율 이상이면 열고 아니면 닫는다
+    return
+  }
   // 왼쪽 가장자리에서 오른쪽으로 스와이프 → 세션 드로어
   if (mainStartX < 44 && dx > 60 && Math.abs(dx) > Math.abs(dy) * 1.4 && !showRooms.value) {
+    setRoomsOpen(true)
+  }
+}
+
+// 드로어 열기/닫기 — 닫을 땐 드래그 비율을 0으로 스냅해 슬라이드 아웃 후 제거
+function setRoomsOpen(open) {
+  if (open) {
+    if (roomsCloseTimer) { clearTimeout(roomsCloseTimer); roomsCloseTimer = null }
     showRooms.value = true
+    roomsDrag.value = 1
+  } else {
+    roomsDrag.value = 0
+    if (roomsCloseTimer) clearTimeout(roomsCloseTimer)
+    roomsCloseTimer = setTimeout(() => {
+      if (roomsDrag.value === 0) showRooms.value = false
+      roomsCloseTimer = null
+    }, 220)
   }
 }
 
@@ -1494,19 +1534,21 @@ document.addEventListener('visibilitychange', () => {
       :is-wide="isWide"
       :pinned-sidebar="pinnedSidebar"
       :show-rooms="showRooms"
+      :drag-ratio="roomsDrag"
       :refresh-rooms="loadRooms"
+      @update:rooms-drag="roomsDrag = $event"
       @select-room="selectRoom"
       @jump-to-message="jumpToMessage"
       @delete-room="deleteRoom"
       @rename-room="renameRoom"
       @open-workspace-picker="openWorkspacePicker"
       @open-create-room="showCreateRoom = true; showRooms = false"
-      @close="showRooms = false"
+      @close="setRoomsOpen(false)"
       @toggle-pin="togglePin"
     />
 
 
-    <main ref="chatEl" @scroll.passive="onChatScroll" @touchstart.passive="onMainTouchStart" @touchend.passive="onMainTouchEnd">
+    <main ref="chatEl" @scroll.passive="onChatScroll" @touchstart.passive="onMainTouchStart" @touchmove="onMainTouchMove" @touchend.passive="onMainTouchEnd">
       <div v-if="loadingMessages" class="msg-skeleton">
         <div class="skel-row user"><div class="skel-bubble"></div></div>
         <div class="skel-row"><div class="skel-line w60"></div><div class="skel-line w90"></div><div class="skel-line w75"></div></div>

@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import { makeMoveThrottle } from '../lib/moveThrottle.js'
 import { pullDistance, pullReady } from '../lib/pullToRefresh.js'
 import { toScreenXY, containContentRect } from '../lib/screenCoord.js'
+import { closeRatio, decideOpen, horizontalIntent } from '../lib/drawerDrag.js'
 
 const props = defineProps({
   rooms: { type: Array, default: () => [] },
@@ -13,6 +14,7 @@ const props = defineProps({
   isWide: { type: Boolean, default: false },
   pinnedSidebar: { type: Boolean, default: true },
   showRooms: { type: Boolean, default: false },
+  dragRatio: { type: Number, default: 0 }, // 스와이프 드래그 비율(0~1) — 부모(App.vue) 소유
   // 세션 목록 새로고침(rooms는 부모 소유) — await 가능한 함수 prop.
   refreshRooms: { type: Function, default: null },
 })
@@ -25,6 +27,7 @@ const emit = defineEmits([
   'open-create-room',
   'close',
   'toggle-pin',
+  'update:rooms-drag',
 ])
 
 const sidebarTab = ref('sessions') // sessions | jobs | mac
@@ -523,16 +526,62 @@ watch(
     if (!v) stopScreen() // 닫으면 화면 폴링 정지
   }
 )
+
+// 열린 드로어 배경을 왼쪽으로 스와이프하면 드로어가 손가락을 따라 닫힌다
+let ovX = 0
+let ovY = 0
+let ovActive = false
+function onOverlayTouchStart(e) {
+  if (props.isWide) return
+  if (e.target.closest && e.target.closest('.rooms-panel')) return // 패널 내부는 룸 스와이프에 맡긴다
+  ovX = e.touches[0].clientX
+  ovY = e.touches[0].clientY
+  ovActive = false
+}
+function onOverlayTouchMove(e) {
+  if (props.isWide || !ovX) return
+  const t = e.touches[0]
+  const dx = t.clientX - ovX
+  const dy = t.clientY - ovY
+  const intent = horizontalIntent(dx, dy)
+  if (intent === null) return
+  if (intent === false) { ovX = 0; ovActive = false; return } // 세로 스크롤 → 취소
+  ovActive = true
+  e.preventDefault()
+  emit('update:rooms-drag', closeRatio(dx, window.innerWidth))
+}
+function onOverlayTouchEnd() {
+  if (!ovActive) { ovX = 0; return }
+  ovActive = false
+  ovX = 0
+  if (decideOpen(props.dragRatio)) emit('update:rooms-drag', 1) // 임계 이상이면 원위치 복원
+  else emit('close') // 아니면 닫기(부모가 슬라이드 아웃)
+}
+function onOverlayTouchCancel() {
+  if (ovActive && props.dragRatio > 0 && props.dragRatio < 1) emit('update:rooms-drag', 1)
+  ovActive = false
+  ovX = 0
+}
 </script>
 
 <template>
   <div
-    v-if="showRooms || isWide"
+    v-if="showRooms || isWide || dragRatio > 0"
     class="rooms-overlay"
     :class="{ pinned: isWide && pinnedSidebar, peek: isWide && !pinnedSidebar }"
-    @click="!isWide && emit('close')"
+    :style="isWide ? {} : { background: `rgba(0,0,0,${0.5 * dragRatio})` }"
+    @click="!isWide && dragRatio >= 1 && emit('close')"
+    @touchstart="onOverlayTouchStart"
+    @touchmove="onOverlayTouchMove"
+    @touchend="onOverlayTouchEnd"
+    @touchcancel="onOverlayTouchCancel"
   >
-    <div class="rooms-panel" @click.stop>
+    <div
+      class="rooms-panel"
+      :class="{ dragging: !isWide && dragRatio > 0 && dragRatio < 1 }"
+      :style="isWide ? {} : { transform: `translateX(${(dragRatio - 1) * 100}%)` }"
+      @click.stop
+    >
       <div class="drawer-head">
         <span class="drawer-title">{{ sidebarTab === 'sessions' ? '세션' : sidebarTab === 'jobs' ? '예약 작업' : '맥' }}</span>
         <div class="drawer-head-actions">

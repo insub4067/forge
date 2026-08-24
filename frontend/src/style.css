@@ -997,6 +997,8 @@ main {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* 가로 스와이프는 JS 드로어 드래그로, 세로 스크롤은 브라우저에 맡긴다 */
+  touch-action: pan-y;
   /* footer가 in-flow라 magic padding·safe-area 불필요. 마지막 메시지와 composer
      사이 개방감을 위해 하단 여백 확보(safe-area는 footer가 담당) */
   padding: 18px 16px 32px;
@@ -2354,6 +2356,8 @@ footer .image-preview-row {
   display: flex;
   flex-direction: row;
   padding: 0;
+  /* 배경(패널 바깥)을 왼쪽으로 스와이프해 닫기 — 세로 스크롤은 브라우저에 */
+  touch-action: pan-y;
 }
 .rooms-panel {
   width: 86%;
@@ -2368,7 +2372,14 @@ footer .image-preview-row {
   flex-direction: column;
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
   animation: drawer-in 0.18s ease-out;
+  /* 드래그 스냅(열림/닫힘 확정) 시 부드럽게 */
+  transition: transform 0.18s ease-out;
   padding-top: env(safe-area-inset-top);
+}
+/* 드래그 중에는 애니메이션·전환 없이 손가락을 그대로 따라온다 */
+.rooms-panel.dragging {
+  animation: none;
+  transition: none;
 }
 @keyframes drawer-in {
   from { transform: translateX(-100%); }
