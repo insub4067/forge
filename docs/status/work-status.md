@@ -28,6 +28,22 @@ User goal
 - 모델 self-report는 completion evidence가 아니다.
 - current source가 memory보다 우선한다.
 
+## 자기 핵심 경로 프로브
+
+단위 테스트는 함수를, 실제 버그는 **경로 이음새**(요청→핸들러→store→모델→응답)에서
+난다. `backend/probe.py`가 그 이음새를 라이브 서버 대상으로 검사한다.
+
+```bash
+cd backend && ./.venv/bin/python probe.py          # 무비용 이음새 검사(서버만 필요)
+cd backend && ./.venv/bin/python probe.py --full    # + 실제 세션 1회(비용·비결정적)
+```
+
+무LLM 검사(health·폭주 응답성·모델 티어 세션별·이미지 인라인)는 `test_probe_smoke.py`로
+pytest에도 편입돼 서버가 떠 있으면 자동으로 돈다(없으면 skip). `--full`은 실제 코드 작업을
+격리 워크스페이스에서 돌려 gate 생성·완료 보고 형식·자동 커밋·프로젝트 메모리 provenance
+까지 확인하고 정리한다. 오늘 나온 이음새 버그들(이미지 미전달·워크스페이스 유령 id·압축
+유실·grep/list_dir 폭주)이 이런 프로브 하나면 잡혔을 것들이다.
+
 ## 최근 완료된 중요한 hardening
 
 ### Acceptance / completion
