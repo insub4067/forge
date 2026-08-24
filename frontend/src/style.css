@@ -615,6 +615,9 @@ header .todo-btn {
 .modal-field {
   width: 100%;
   max-width: 100%;
+  /* iOS WebKit의 input[type=time]/datetime-local은 내재 min-width 때문에 100%로 안 줄고
+     컨테이너를 넘쳤다. min-width:0으로 축소를 허용해 카드 안에 맞춘다. */
+  min-width: 0;
   box-sizing: border-box;
   background: var(--panel-2);
   border: 1px solid var(--border);
