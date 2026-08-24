@@ -1,6 +1,6 @@
 # FORGE — 작업 진행 상태
 
-> 마지막 갱신: 2026-08-23 `main`
+> 마지막 갱신: 2026-08-24 `main`
 
 ## 현재 요약
 
@@ -47,7 +47,14 @@ Developer done
 → PASS만 completed
 ```
 
-남은 결함: 현재 pytest exit code 처리에서 실행/설정 오류 일부가 false failure 방지를 위해 통과될 수 있다. `PASSED / FAILED / UNAVAILABLE` 3상태로 분리하는 것이 다음 신뢰성 작업이다.
+(2026-08-24 해결) pytest exit code 처리는 `PASSED / FAILED / UNAVAILABLE` 3상태로 분리됐다.
+exit 2/3/4/5와 timeout은 `unavailable`로 남아 "검증 못 함"이 "검증 성공"으로 승격되지 않는다.
+
+**남은 결함(2026-08-24 실측)**: 완료 판정의 재료인 acceptance gate 생성이 모델 재량이다.
+격리 프로브 3건 전부 gate 0개로 `completed`가 났고, 그 경우 완료 근거는 generic verify
+(기존 test/build 통과) 하나뿐이라 사용자 요구사항 충족은 확인되지 않는다.
+계측(`gate_coverage` 이벤트 + `backend/gate_coverage.py`)과 정직 표기는 들어갔고,
+강제 방식은 실사용 데이터를 보고 정한다 → `docs/proposal/gate-coverage-enforcement.md`.
 
 ## Durable Resume
 
@@ -86,9 +93,12 @@ Scheduled Job 기반은 구현됐지만 Condition/Deferred, restart/idempotency/
 ## 다음 우선순위
 
 ### P0 — Reliability semantics
-- [ ] verification `PASSED / FAILED / UNAVAILABLE`
-- [ ] failed/unavailable에서 commit/push invariant 테스트
-- [ ] resume-safe approval/capability
+- [x] verification `PASSED / FAILED / UNAVAILABLE` (`_verify` 3상태)
+- [x] failed/unavailable에서 commit/push invariant 테스트 (`test_acceptance_gates`,
+      `test_reliability_invariants` — verification_failed는 커밋 금지, completed_unverified는 push 금지)
+- [x] resume-safe approval/capability (재개가 저장된 auto_approve·model_tier를 복원, 권한 확대 없음)
+- [ ] **acceptance gate 커버리지 강제** — 계측(G0)·정직 표기(G1) 완료, 강제(G2)는 실사용 데이터 대기.
+      현 최우선 신뢰성 과제 → `docs/proposal/gate-coverage-enforcement.md`
 
 ### P1 — Evaluation
 - [ ] benchmark task/난이도 확대
