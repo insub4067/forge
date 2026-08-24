@@ -3,6 +3,7 @@
 // 단, 표시되는 모든 정보(역할·모델·도구·fresh/read-only·상태·프롬프트)는 /api/agents에서
 // 내려온 값을 그대로 쓴다. frontend에서 metadata를 하드코딩하거나 복제하지 않는다.
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import AgentAvatar from './AgentAvatar.vue'
 
 const props = defineProps({
   sessionId: { type: String, default: '' },
@@ -163,35 +164,16 @@ onUnmounted(() => {
               :class="[a.status, a.icon]"
               @click="openDetail(a)"
             >
-              <div class="agent-avatar">
-                <svg class="robot" viewBox="0 0 64 64" aria-hidden="true">
-                  <line class="antenna" x1="32" y1="3" x2="32" y2="9" />
-                  <circle class="antenna-dot" cx="32" cy="3" r="2.6" />
-                  <rect class="head" x="13" y="9" width="38" height="27" rx="8" />
-                  <circle class="eye" cx="24.5" cy="22" r="3.4" />
-                  <circle class="eye" cx="39.5" cy="22" r="3.4" />
-                  <path class="mouth" d="M25 29h14" />
-                  <rect class="body" x="17" y="40" width="30" height="20" rx="6" />
-                  <line class="arm" x1="10" y1="45" x2="17" y2="49" />
-                  <line class="arm" x1="54" y1="45" x2="47" y2="49" />
-                </svg>
-                <span class="agent-accessory" :class="a.icon" aria-hidden="true">
-                  <svg v-if="a.icon === 'hammer'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4l5 5-4 4-5-5 4-4z"/><path d="M11 8L4 15v5h5l7-7"/></svg>
-                  <svg v-else-if="a.icon === 'map'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg>
-                  <svg v-else-if="a.icon === 'magnifier'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><path d="M8 11h6M11 8v6"/></svg>
-                  <svg v-else-if="a.icon === 'chat'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                  <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>
-                </span>
-              </div>
+              <AgentAvatar :role="a.icon" :status="a.status" size="md" />
               <div class="agent-card-name">{{ a.name }}</div>
               <div class="agent-card-nick">{{ a.display_name }}</div>
-              <div class="agent-card-tier">{{ tierLabel(a) }}</div>
               <div class="agent-card-status" :class="statusOf(a).cls">
                 <span class="agent-status-dot" :class="statusOf(a).dot"></span>{{ statusOf(a).label }}
               </div>
               <div class="agent-card-caps">
                 <span v-for="c in a.capabilities.slice(0, 3)" :key="c" class="agent-cap">{{ c }}</span>
               </div>
+              <div class="agent-card-tier">{{ tierLabel(a) }}</div>
             </button>
           </div>
 
@@ -209,32 +191,18 @@ onUnmounted(() => {
       <template v-else>
         <div class="agent-detail">
           <div class="detail-hero">
-            <div class="agent-avatar detail-avatar" :class="selected.icon">
-              <svg class="robot" viewBox="0 0 64 64" aria-hidden="true">
-                <line class="antenna" x1="32" y1="3" x2="32" y2="9" />
-                <circle class="antenna-dot" cx="32" cy="3" r="2.6" />
-                <rect class="head" x="13" y="9" width="38" height="27" rx="8" />
-                <circle class="eye" cx="24.5" cy="22" r="3.4" />
-                <circle class="eye" cx="39.5" cy="22" r="3.4" />
-                <path class="mouth" d="M25 29h14" />
-                <rect class="body" x="17" y="40" width="30" height="20" rx="6" />
-              </svg>
-            </div>
+            <AgentAvatar :role="selected.icon" :status="selected.status" size="lg" />
             <div class="detail-hero-text">
               <div class="detail-name">{{ selected.name }}</div>
               <div class="detail-nick">{{ selected.display_name }}</div>
-              <div class="detail-flavor">“{{ selected.flavor }}”</div>
               <div class="agent-card-status" :class="statusOf(selected).cls">
                 <span class="agent-status-dot" :class="statusOf(selected).dot"></span>{{ statusOf(selected).label }}
                 <span v-if="selected.activity" class="detail-activity">· {{ selected.activity }}</span>
               </div>
             </div>
           </div>
-
-          <div class="detail-block">
-            <div class="detail-label">설명</div>
-            <p class="detail-desc">{{ selected.description }}</p>
-          </div>
+          <div class="detail-flavor">“{{ selected.flavor }}”</div>
+          <p class="detail-desc lead">{{ selected.description }}</p>
 
           <div class="detail-block">
             <div class="detail-label">모델</div>

@@ -4053,33 +4053,14 @@ button {
 .agent-card.working .robot { animation: crew-work 0.9s ease-in-out infinite; }
 @keyframes crew-work { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px) rotate(-0.6deg); } }
 
-.agent-accessory {
-  position: absolute;
-  right: -4px;
-  bottom: -2px;
-  width: 26px;
-  height: 26px;
-  padding: 4px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px solid var(--bg);
-}
-.agent-accessory svg { width: 100%; height: 100%; }
-
 .agent-card-name { font-size: 15px; font-weight: 700; }
 .agent-card-nick { font-size: 12px; color: var(--muted); }
 .agent-card-tier {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 10.5px;
+  font-weight: 500;
   letter-spacing: 0.02em;
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-radius: 6px;
-  padding: 2px 7px;
+  color: var(--muted);
+  margin-top: 5px;
 }
 .agent-card-status {
   display: inline-flex;
@@ -4128,17 +4109,17 @@ button {
 .detail-hero-text { flex: 1; min-width: 0; }
 .detail-name { font-size: 21px; font-weight: 700; }
 .detail-nick { font-size: 13px; color: var(--muted); margin-top: 1px; }
-.detail-flavor { font-size: 13px; font-style: italic; color: var(--accent); margin-top: 6px; }
+.detail-flavor { font-size: 14px; font-style: italic; color: var(--accent); margin: 14px 2px 0; }
 .detail-activity { color: var(--muted); }
 
+/* de-carded — 굵은 박스 반복 대신 divider + section heading으로 계층을 만든다(iOS Settings 탈피). */
 .detail-block {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 14px;
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
 }
-.detail-label { font-size: 12px; font-weight: 600; letter-spacing: 0.03em; color: var(--muted); margin-bottom: 10px; text-transform: uppercase; }
+.detail-label { font-size: 11.5px; font-weight: 600; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 10px; text-transform: uppercase; }
 .detail-desc { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--text); }
+.detail-desc.lead { color: var(--muted); margin: 2px 0 4px; }
 .detail-kv { display: flex; flex-direction: column; gap: 7px; }
 .detail-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
 .detail-key { color: var(--muted); flex-shrink: 0; }
