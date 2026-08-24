@@ -151,6 +151,9 @@ const screenErr = ref('')
 let screenSeq = 0
 const remoteCtrl = ref(false) // 원격제어(마우스/키보드) 활성화
 const remoteErr = ref('')
+function toggleRemote(ev) {
+  remoteCtrl.value = !!ev.target.checked
+}
 let screenImg = null // 현재 표시된 이미지 요소(좌표 스케일링용)
 let screenNatural = { w: 0, h: 0 } // 원본 캡처 해상도
 // 마우스 이동은 ~25Hz로 줄여 보낸다 — 이벤트마다 POST하면 host가 입력 폭주로 밀린다.
