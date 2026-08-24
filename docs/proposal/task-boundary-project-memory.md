@@ -1,6 +1,10 @@
 # Task-Boundary Project Memory Extraction
 
 > 상태: Proposal (2026-08-24)
+> 상태 갱신(2026-08-24): M0 구현 + **evidence-bound hardening 완료**. 자유 서술 적립은
+> 제거됐다 — candidate는 {fact, source, evidence} 구조로만 받고 `memory_guard`가 결정적으로
+> 검증한다. 현재 구현은 `docs/status/work-status.md`의 "Project Memory — Evidence-Bound"가
+> authoritative. M1(승인형)·M2(selective retrieval)는 미착수.
 > 목표: 작업이 끝날 때 **검증된 프로젝트 지식**을 durable memory로 추출해, 다음 세션(특히
 > "새 세션·같은 워크스페이스")이 프로젝트 구조·규약·빌드 방법·반복 문제를 다시 설명받지 않고
 > 이어가게 한다. **long-term project memory ≠ long conversation context** 를 분리한다.

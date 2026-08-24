@@ -19,6 +19,7 @@ from .. import eventlog
 from .. import skills as skills_lib
 from ..db import store
 from .. import metrics as metrics_calc
+from . import memory_guard
 from . import refine
 from . import tool_store
 from ..llm.factory import create_adapter
@@ -275,7 +276,13 @@ def _system_for(role: str, room_memory: str = "", skills: str = "", plan: str = 
     if global_mem:
         parts.append("\n\n## 전역 메모리 (GLOBAL_MEMORY.md)\n" + global_mem)
     if room_memory:
-        parts.append("\n\n## 방 메모리 (ROOM_MEMORY.md)\n" + room_memory)
+        # 메모리는 보조 정보다 — 현재 코드가 최종 권위다. 이 순서를 명시하지 않으면
+        # 과거에 적립된(그리고 그 사이 바뀐) 사실을 현재 구현보다 우선해 판단한다.
+        parts.append(
+            "\n\n## 방 메모리 (ROOM_MEMORY.md)\n"
+            "이것은 검증된 작업에서 축적한 **보조 정보**다. 현재 소스·설정과 충돌하면 "
+            "**반드시 현재 소스를 따른다.** 메모리에 적힌 내용도 작업 전에 실제 파일로 "
+            "확인한다.\n\n" + room_memory)
     if skills:
         parts.append(
             "\n\n## 축적된 Skill (재사용 가능한 해결 절차)\n"
@@ -1834,9 +1841,19 @@ class AgentRuntime:
 
     async def _extract_project_memory(self, session_id: str, ws: str, goal: str,
                                       files_changed: list, send: EventSink) -> None:
-        """검증 통과 완료 시 durable 프로젝트 지식을 ROOM_MEMORY.md에 적립한다(§6).
-        process-owned 사실(목표·통과 gate·검증 명령)만 utility 모델로 1~3줄 distill →
-        dedup·상한으로 append. 다음 세션(fork 포함)이 재설명 없이 잇는다. best-effort."""
+        """검증 통과 완료 시 **evidence에 결박된** durable 사실만 ROOM_MEMORY.md에 적립한다.
+
+        LLM 출력 자체는 evidence가 아니다. utility 모델은 주어진 검증 사실을 압축만 하고,
+        각 fact마다 근거 파일(source)과 gate/검증 명령(evidence)을 함께 내야 한다.
+        그 후 memory_guard가 결정적으로 검증한다 — source가 이번 작업의 변경 파일인지,
+        실제로 존재하는지, fact가 주장하는 토큰이 그 파일에 실제로 있는지.
+
+        실측 오염 사례: 구현은 HTTP POST인데 "WebSocket/WebRTC 채널로 연결"이라고 적혀
+        ROOM_MEMORY에 영속됐다. 이후 모든 세션 context에 실려 작업을 오염시킨다.
+        원칙: 모르는 것 > 틀리게 기억하는 것. 애매하면 저장하지 않는다.
+
+        best-effort — 실패해도 main task를 실패시키지 않는다(memory failure ≠ task failure).
+        """
         if not settings.project_memory or not ws or not session_id or not files_changed:
             return
         try:
@@ -1844,40 +1861,122 @@ class AgentRuntime:
             passed = [g["title"] for g in gates if g.get("status") == "passed"]
             methods = [g.get("verification_method", "") for g in gates
                        if g.get("status") == "passed" and g.get("verification_method")]
-            # process-owned 근거가 없으면 적립하지 않는다. gate가 없을 때 distill 입력은
-            # 목표 문자열 하나뿐이고, 모델은 그 빈자리를 일반론으로 채운다 — 실측에서
-            # 이 워크스페이스에 없는 명령(`python -m pytest`)이 사실로 적립됐다.
-            # 오염된 메모리는 이후 모든 세션 컨텍스트에 실린다(§6 오염 방지).
+            # process-owned 근거가 없으면 적립하지 않는다. gate가 없으면 모델은 빈자리를
+            # 일반론으로 채운다(실측: 이 워크스페이스에 없는 명령이 사실로 적립됐다).
             if not passed or not methods:
                 return
+
+            rel_changed = self._relative_changed(ws, files_changed)
+            if not rel_changed:
+                return
+            evidence_keys = passed + methods
+
             src = (f"목표: {goal[:200]}\n"
-                   f"통과한 요구사항: {', '.join(passed)}\n"
-                   f"검증 명령: {'; '.join(m[:80] for m in methods[:5])}")
+                   f"통과한 요구사항(evidence로 인용 가능): {', '.join(passed)}\n"
+                   f"검증 명령(evidence로 인용 가능): {'; '.join(m[:80] for m in methods[:5])}\n"
+                   f"이번에 변경된 파일(source로 인용 가능): {', '.join(rel_changed[:20])}")
             prompt = [
                 {"role": "system", "content":
-                    "다음 '검증 통과한' 작업 기록에서, 이 프로젝트에서 앞으로 재사용할 durable 지식만 "
-                    "1~3줄로 뽑아라(빌드/테스트 방법, 코딩 규약, 반복 문제, 특수 절차). 이번 작업 특정 "
-                    "세부·대화·추측은 제외한다. 각 줄은 '- '로 시작하는 간결한 한국어 사실. 재사용 가치가 "
-                    "없으면 'NONE'만 출력."},
+                    "너는 새로운 사실을 생각해내지 않는다. 주어진 검증 사실을 압축만 한다.\n"
+                    "이 프로젝트에서 앞으로 재사용할 durable 지식을 최대 3개까지 JSON 배열로 출력하라.\n"
+                    '형식: [{"fact": "...", "source": "변경된 파일 경로 중 하나", "evidence": '
+                    '"통과한 요구사항 또는 검증 명령 중 하나"}]\n'
+                    "규칙:\n"
+                    "- 입력에 명시된 사실만 사용한다. 추론·보간·일반론 금지.\n"
+                    "- source는 위 '변경된 파일' 목록에 있는 경로만 쓴다.\n"
+                    "- fact가 언급하는 함수명·API 경로·기술 이름은 그 source 파일에 실제로 있어야 한다.\n"
+                    "- 확실하지 않으면 그 fact를 빼라. 아무것도 없으면 [] 만 출력.\n"
+                    "- 좋은 예: 빌드/테스트 명령, API 경로, 코딩 규약, 반복되는 프로젝트 특유 절차.\n"
+                    "- 나쁜 예: 이번 한 번의 수정 내용, 일반 프로그래밍 상식, 추측한 아키텍처."},
                 {"role": "user", "content": src},
             ]
             parts: list[str] = []
             async for d in self._adapter_for(self.router.utility_model).stream_chat(prompt):
                 if d.get("content"):
                     parts.append(d["content"])
-            out = "".join(parts).strip()
-            if not out or out.upper().startswith("NONE"):
+            candidates = self._parse_memory_candidates("".join(parts))
+            if not candidates:
                 return
-            facts = [ln for ln in out.splitlines() if ln.strip().startswith("-")]
+
             path = Path(ws) / "ROOM_MEMORY.md"
             existing = path.read_text(encoding="utf-8") if path.exists() else ""
-            merged = self._merge_memory_facts(existing, facts)
+
+            def read_source(rel: str) -> str | None:
+                try:
+                    f = Path(ws) / rel
+                    return f.read_text(encoding="utf-8", errors="replace") if f.is_file() else None
+                except Exception:
+                    return None
+
+            await send("project_memory_candidate", {"count": len(candidates)})
+            accepted: list[str] = []
+            rejected: list[dict] = []
+            merged_existing = existing
+            for cand in candidates:
+                ok, why = memory_guard.validate_candidate(
+                    cand, workspace=ws, changed_files=rel_changed,
+                    evidence_keys=evidence_keys, existing_memory=merged_existing,
+                    read_source=read_source)
+                if not ok:
+                    rejected.append({"fact": str(cand.get("fact", ""))[:120], "reason": why})
+                    continue
+                block = memory_guard.format_fact(cand)
+                accepted.append(block)
+                merged_existing += block  # 같은 배치 안 중복도 막는다
+            if rejected:
+                await send("project_memory_rejected", {"items": rejected})
+            if not accepted:
+                return
+
+            merged = self._merge_memory_facts(existing, accepted)
             if merged is None:
                 return
             path.write_text(merged, encoding="utf-8")
-            await send("project_memory", {"added": [f.strip() for f in facts]})
+            await send("project_memory_saved", {"count": len(accepted)})
         except Exception as err:
             error_log.record("project_memory", str(err), session_id)
+
+    @staticmethod
+    def _relative_changed(ws: str, files_changed: list) -> list[str]:
+        """변경 파일을 워크스페이스 기준 상대 경로로 정규화한다(중복 제거)."""
+        out: list[str] = []
+        for raw in files_changed or []:
+            q = str(raw or "").strip()
+            if not q:
+                continue
+            if os.path.isabs(q):
+                try:
+                    q = os.path.relpath(q, ws)
+                except ValueError:
+                    continue
+            q = os.path.normpath(q)
+            if q.startswith("..") or q in out:
+                continue
+            out.append(q)
+        return out
+
+    @staticmethod
+    def _parse_memory_candidates(text: str) -> list[dict]:
+        """모델 출력에서 candidate JSON 배열만 뽑는다. 형식이 깨지면 빈 목록(저장 안 함)."""
+        t = (text or "").strip()
+        if not t:
+            return []
+        m = re.search(r"\[.*\]", t, re.S)
+        if not m:
+            return []
+        try:
+            data = json.loads(m.group(0))
+        except Exception:
+            return []
+        if not isinstance(data, list):
+            return []
+        out = []
+        for it in data[:3]:
+            if isinstance(it, dict) and it.get("fact"):
+                out.append({"fact": str(it.get("fact", "")),
+                            "source": str(it.get("source", "")),
+                            "evidence": str(it.get("evidence", ""))})
+        return out
 
     def _record_context_breakdown(self, session_id, role, system_msg, projected, skills, room_memory):
         """전송 직전 context를 영역별로 추정해 저장한다(debug view/최적화 근거).

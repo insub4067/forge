@@ -50,6 +50,34 @@ Developer done
 (2026-08-24 해결) pytest exit code 처리는 `PASSED / FAILED / UNAVAILABLE` 3상태로 분리됐다.
 exit 2/3/4/5와 timeout은 `unavailable`로 남아 "검증 못 함"이 "검증 성공"으로 승격되지 않는다.
 
+### Project Memory — Evidence-Bound (2026-08-24)
+
+> **source/evidence로 뒷받침되지 않는 fact는 ROOM_MEMORY에 저장되지 않는다.**
+
+LLM 출력 자체는 evidence가 아니다. utility 모델은 주어진 검증 사실을 압축만 하고,
+각 fact마다 근거 파일(source)과 gate/검증 명령(evidence)을 함께 낸다. 그 후
+`app/runtime/memory_guard.py`가 결정적으로 검증한다.
+
+거절 사유: `empty_fact` / `no_source` / `invalid_source` / `unrelated_source` /
+`no_evidence` / `duplicate` / `unsupported_claim`. 이벤트로 남는다
+(`project_memory_candidate` / `_saved` / `_rejected`).
+
+핵심 검사는 `unsupported_claim`이다 — fact가 언급한 함수명·API 경로·기술 이름이
+인용한 source 파일에 실제로 없으면 거부한다.
+
+**실측 오염 사례(회귀 픽스처로 고정)**: 원격 입력 구현은 `POST /api/mac/input`인데
+"실제 제어는 WebSocket/WebRTC 채널로 별도 연결"이라는 문장이 ROOM_MEMORY에 영속됐다.
+WebSocket은 터미널(PTY) 전용이고 원격 입력과 무관하다. 한 번 들어간 거짓 기억은 이후
+모든 세션 system context에 실린다. `test_memory_guard.py`가 이 사례를 고정한다.
+
+우선순위: **Current Source > Current Config > Process Evidence > Verified Memory**.
+메모리 주입부(system prompt)에도 "충돌하면 현재 소스를 따른다"를 명시한다.
+
+원칙: 잘 기억하는 것 > 많이 기억하는 것. **모르는 것 > 틀리게 기억하는 것.**
+
+미구현(의도적): memory GC/압축, semantic judge, provenance DB 스키마. 현재는 Markdown +
+4000자 cap을 유지한다.
+
 ### Gate Coverage Completion Policy (2026-08-24)
 
 > **Gate가 없는 코드 변경은 완전히 검증된 완료로 취급하지 않는다.**

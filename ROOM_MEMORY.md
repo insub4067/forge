@@ -1,21 +1,27 @@
 
 ## 학습된 프로젝트 지식 (FORGE 자동 적립)
-- 터치 원격제어는 `pointerdown` 이벤트로 처리하며, `toScreenXY()`로 화면 좌표 변환 후 전송한다.
-- 터치 입력이 화면 갱신(렌더링)에 의해 취소되지 않도록 이벤트 핸들러를 컴포넌트 수명주기와 분리 유지한다.
-- 검증은 `cd frontend && node --input-type=module -e "..."` 형태로 유닛 테스트하고, `grep -c "@pointerdown"`으로 이벤트 등록 여부를 확인한다.
-- 칸반 열(컬럼)에 카드가 넘칠 경우 `overflow-y: auto` 또는 `scroll`을 적용해야 하며, 이는 `frontend/src/style.css`에서 확인 가능하다.
-- 카드 수용 문제는 CSS 오버플로우 속성으로 해결하며, 열의 높이 제한과 함께 스크롤 가능하게 설정한다.
-- 검증 시 `grep -E "overflow(-y)?\s*:\s*(auto|hidden|scroll)"` 명령으로 해당 스타일 규칙 존재를 확인한다.
-- 스와이프 삭제는 손가락 이동량(deltaX)을 실시간 반영하고, 종료 시 임계값(예: 50px)을 기준으로 열림/닫힘을 결정한다.
-- 가로 스와이프와 세로 스크롤/풀투리프레시 충돌 방지를 위해, 첫 이동 방향이 가로일 때만 스와이프를 활성화하고 `touch-action: pan-y`를 CSS에 적용한다.
-- 스와이프 종료 시 `transition`을 사용해 부드러운 애니메이션을 적용하고, 열림/닫힘 상태를 상태 변수로 관리해 재사용 가능한 컴포넌트 패턴을 유지한다.
-- PWA 원격제어는 화면 이미지 스트리밍과 입력 이벤트 전송이 분리된 구조로, 토글 활성화만으로는 제어가 동작하지 않음
-- `RoomsPanel.vue`의 `toggleRemote` 함수는 UI 상태만 변경하며, 실제 제어는 WebSocket/WebRTC 채널을 통해 별도로 연결되어야 함
-- 맥 원격제어 실패 시, 입력 이벤트(마우스/키보드) 전송 경로와 권한(화면 기록, 입력 모니터링)을 먼저 확인해야 함
-- 모바일 원격제어에서 라디오 버튼이 터치 영역을 가리지 않도록 CSS z-index와 pointer-events 설정 필요
-- 프레임 끊김 해결을 위해 화면 갱신 주기를 150ms로 단축하고 폴링 방식 사용
-- 터치 좌표 보정 시 레터박스(letterbox) 영역을 고려한 좌표 변환 로직 필요
-- 원격제어 바는 사용자 조작 후 일정 시간이 지나면 자동으로 숨김 처리
-- 드로어/사이드바 로직은 순수 함수로 분리해 `frontend/src/lib/`에 두고, 검증은 `cd frontend && node --input-type=module -e "import ..."`로 실행한다.
-- 스와이프 방향 판정은 가로/세로 의도(horizontalIntent)를 먼저 분리하고, 열림/닫힘은 비율(openRatio, closeRatio) 기반 임계값으로 결정한다.
-- 드로어 너비(drawerWidth)는 상수로 관리해 비율 계산과 임계값 판정에 재사용한다.
+
+> 이것은 검증된 작업에서 축적한 **보조 정보**다. 현재 소스·설정과 충돌하면 반드시
+> 현재 소스를 따른다. 아래 항목도 작업 전에 실제 파일로 확인한다.
+
+- 원격 마우스/키보드 입력은 `POST /api/mac/input`으로 전달된다(터미널의 WebSocket과 무관).
+  - source: `frontend/src/components/RoomsPanel.vue`
+- 원격 화면 좌표 변환은 `toScreenXY()`/`containContentRect()`를 쓴다. `object-fit: contain`
+  레터박스와 portrait의 `rotate(90deg)`를 함께 보정해야 한다.
+  - source: `frontend/src/lib/screenCoord.js`
+- 원격 화면은 단일 프레임 폴링이다(스트리밍 아님). 갱신 주기는 `screenTick`의 setTimeout.
+  - source: `frontend/src/components/RoomsPanel.vue`
+- 원격제어를 켜면 컨트롤 바를 숨겨 터치 영역을 확보한다(`macControls`). 꺼져 있을 때는
+  화면 탭으로 표시/숨김을 토글한다.
+  - source: `frontend/src/components/RoomsPanel.vue`
+- 순수 로직(좌표 변환·드래그·throttle)은 `frontend/src/lib/`에 분리하고
+  `cd frontend && node --test src/lib/<name>.test.js`로 검증한다(의존성 없음).
+  - source: `frontend/src/lib/moveThrottle.test.js`
+- 백엔드 테스트는 `cd backend && ./.venv/bin/python -m pytest -q`로 돌린다(venv 필수 — psycopg).
+  - source: `backend/pytest.ini`
+- `docs/agents/*.md` 역할 프롬프트는 `_load_role`이 매 호출 파일에서 읽으므로 캐시가
+  없다 — 프롬프트만 고쳤으면 백엔드 재시작이 필요 없다(`app/**` 변경은 필요).
+  - source: `backend/app/runtime/agent.py`
+- `pkill`·`kill`·`uvicorn`은 BLOCKED_COMMANDS다 — 에이전트가 백엔드를 재시작할 수 없다
+  (자기 세션 자멸 방지). 재시작이 필요하면 보고에 남긴다.
+  - source: `backend/app/tools/registry.py`
