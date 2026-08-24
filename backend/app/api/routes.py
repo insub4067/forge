@@ -185,6 +185,12 @@ async def chat(req: Request):
     _auto_approve = bool(body.get("auto_approve", False))
     runtime.set_auto_approve(session_id, _auto_approve)
     runtime.set_model_tier(session_id, str(body.get("model_tier", "auto")))
+    # 예산 가드레일 — 사용자가 지정한 작업 비용 상한($). 미지정이면 기본값(settings) 사용.
+    if "budget_usd" in body:
+        try:
+            runtime.set_budget(session_id, float(body.get("budget_usd")) if body.get("budget_usd") not in (None, "") else None)
+        except (TypeError, ValueError):
+            pass
     # 폴링 시작점: 이번 run 이전까지 기록된 마지막 seq. run마다 seq를 새로 세지 않고
     # 세션 단위로 단조 증가시키므로, 이 값부터 새 이벤트를 안전하게 이어 받는다.
     from .. import eventlog

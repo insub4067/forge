@@ -470,6 +470,11 @@ async function loadMessages(isNew = false) {
 const showRoomSettings = ref(false)
 const roomSettingsTitle = ref('')
 const roomSettingsMode = ref('work')
+// 작업 1회 비용 상한($) — 비우면 서버 기본값. runaway 비용 가드레일. 전역 client 설정.
+const budgetUsd = ref(localStorage.getItem('forge_budget') || '')
+function saveBudget() {
+  localStorage.setItem('forge_budget', budgetUsd.value || '')
+}
 function openRoomSettings() {
   const r = currentRoom()
   if (!r) { showRooms.value = true; return }
@@ -1188,7 +1193,7 @@ async function send() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: roomId, message: payloadMsg, image_urls: imageUrls, auto_approve: autoApprove.value, model_tier: modelTier.value }),
+      body: JSON.stringify({ session_id: roomId, message: payloadMsg, image_urls: imageUrls, auto_approve: autoApprove.value, model_tier: modelTier.value, budget_usd: budgetUsd.value === '' ? null : Number(budgetUsd.value) }),
     })
     console.log('[forge] 응답:', res.status, res.headers.get('content-type'))
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
@@ -1866,6 +1871,9 @@ document.addEventListener('visibilitychange', () => {
           <button :class="{ on: roomSettingsMode === 'chat' }" @click="roomSettingsMode = 'chat'">채팅</button>
         </div>
         <p class="sheet-note">자동: 요청마다 작업/채팅 자동 판단 · 작업: 항상 코드 수정·검증·커밋 · 채팅: 읽기전용 대화</p>
+        <input v-model="budgetUsd" @change="saveBudget" class="modal-field" type="number" min="0" step="0.5"
+               inputmode="decimal" placeholder="작업 비용 상한 $ (비우면 기본 $2, 0=무제한)" />
+        <p class="sheet-note">작업 1회 비용이 이 상한을 넘으면 안전하게 중단합니다(runaway 비용 방지).</p>
         <button class="sheet-save" @click="saveRoomSettings">저장</button>
       </div>
     </div>

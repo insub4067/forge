@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     skills_off: bool = False
     # Developer를 항상 pro로(실험용). 기본 False — 평소 flash+think-medium, 실패 시에만 pro 승격.
     developer_pro: bool = False
+    # 작업(run) 1회 비용 상한(USD). 누적 비용이 넘으면 안전하게 중단한다 — 무인/자동승인
+    # 실행의 runaway 비용을 막는 가드레일. 정상 작업(관측상 ~$1 이하)은 안 건드리고 폭주만
+    # 잡도록 넉넉히. 0이면 무제한. 세션별로 UI/set_budget로 재정의 가능.
+    session_budget_usd: float = 2.0
     # 작업 성공 완료 시 하네스가 자동으로 git commit(+push)한다 — 커밋 누락 방지. 기본 True.
     # git 워크스페이스이고 변경이 있을 때만. 끄려면 AUTO_COMMIT=0.
     auto_commit: bool = True

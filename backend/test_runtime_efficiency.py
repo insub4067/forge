@@ -106,6 +106,17 @@ def test_project_shrinks_after_compaction():
     print("OK projection shrinks after compaction (10-11)")
 
 
+def test_over_budget():
+    # 예산 가드레일 판정: 상한이 설정(>0)돼 있고 누적 비용이 넘으면 중단.
+    ob = AgentRuntime._over_budget
+    assert ob(1.01, 1.0) is True       # 초과 → 중단
+    assert ob(0.99, 1.0) is False      # 이하 → 계속
+    assert ob(5.0, 0) is False         # 상한 0 = 무제한
+    assert ob(5.0, 0.0) is False       # 0.0도 무제한
+    assert ob(1.0, 1.0) is False       # 경계(같음) → 아직 안 넘음
+    print("OK 예산 가드레일 판정")
+
+
 def test_drop_orphan_tools():
     # tool 메시지는 직전 assistant tool_calls id와 매칭돼야 전송된다(안 그러면 provider 400).
     drop = AgentRuntime._drop_orphan_tools
@@ -170,6 +181,7 @@ if __name__ == "__main__":
     test_skill_selection()
     test_stable_prefix()
     test_project_shrinks_after_compaction()
+    test_over_budget()
     test_drop_orphan_tools()
     test_browser_check_local_only()
     test_developer_escalation()

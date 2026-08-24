@@ -61,6 +61,7 @@ SKILL_CHAR_BUDGET = 6000
 _STATUS_CODES = {
     "cancelled": "cancelled",
     "context_blocked": "context_blocked",
+    "budget_exceeded": "budget_exceeded",
     "repeated": "repeated_tool_call",
     "max_steps": "max_steps",
 }
@@ -419,6 +420,10 @@ class AgentRuntime:
         # 실행 중인 tool(긴 bash 등)을 즉시 깨우기 위한 취소 이벤트. 플래그는 스텝 경계에서만
         # 폴링돼 실행 중 subprocess를 못 멈췄다 — 이벤트로 tool await를 race해 즉시 중단한다.
         self._cancel_events: dict[str, asyncio.Event] = {}
+        # 작업(run) 1회 누적 비용($) — 예산 가드레일. run 시작 시 0으로 리셋.
+        self._run_cost: dict[str, float] = {}
+        # 세션별 예산 상한($) 재정의(사용자 지정). 없으면 settings.session_budget_usd.
+        self._budget: dict[str, float] = {}
         self._injections: dict[str, list[str]] = {}
         self._running_sessions: set[str] = set()
         # 세션별 마지막 이벤트 seq — run마다 0부터 시작하면 폴링 since가 깨지므로
@@ -502,6 +507,11 @@ class AgentRuntime:
     def _should_compact(measured_input: int, budget: int) -> bool:
         """압축 임계 판단(순수). measured_input은 provider 실측 입력 컨텍스트."""
         return measured_input > budget * CONTEXT_COMPACT_RATIO
+
+    @staticmethod
+    def _over_budget(spent: float, cap: float) -> bool:
+        """예산 판정(순수) — 상한 cap이 설정(>0)돼 있고 누적 비용이 넘으면 True. cap 0이면 무제한."""
+        return bool(cap) and cap > 0 and spent > cap
 
     @staticmethod
     def _should_block(measured_input: int, budget: int, compacted: bool) -> bool:
@@ -779,6 +789,13 @@ class AgentRuntime:
 
     def set_model_tier(self, session_id: str, tier: str) -> None:
         self._model_tier[session_id] = tier if tier in ("auto", "pro", "flash") else "auto"
+
+    def set_budget(self, session_id: str, budget_usd: float | None) -> None:
+        """이 세션의 작업(run) 비용 상한($) 재정의. None/0이면 기본값·무제한 규칙을 따른다."""
+        if budget_usd is None:
+            self._budget.pop(session_id, None)
+        else:
+            self._budget[session_id] = max(0.0, float(budget_usd))
 
     def set_agent_mode(self, session_id: str, mode: str) -> None:
         """에이전트 모드: auto(복잡도 기반 자동 전환) | multi(Planner→Developer→Reviewer) | single(올인원).
@@ -1078,6 +1095,16 @@ class AgentRuntime:
                 )
                 if session_id:
                     await store.update_context_usage(session_id, measured_input)
+                    # 예산 가드레일 — 이 run의 누적 비용이 상한을 넘으면 안전하게 중단한다.
+                    # (무인·자동승인 실행의 runaway 비용 방지. 상한 0이면 무제한.)
+                    incr = metrics_calc.run_cost(
+                        route["model"], hit, miss, usage.get("completion_tokens", 0)) or 0.0
+                    self._run_cost[session_id] = self._run_cost.get(session_id, 0.0) + incr
+                    cap = self._budget.get(session_id) or settings.session_budget_usd
+                    if self._over_budget(self._run_cost[session_id], cap):
+                        await send("budget_exceeded", {
+                            "spent": round(self._run_cost[session_id], 4), "cap": cap})
+                        return "budget_exceeded", total_prompt, total_completion, route
                 # 압축 임계 초과 → 오래된 대화를 요약해 컨텍스트를 줄이고 계속(비파괴)
                 compacted = False
                 if session_id and self._should_compact(measured_input, settings.logical_budget):
@@ -1766,6 +1793,7 @@ class AgentRuntime:
 
         self._cancel_sessions.discard(session_id)
         self._cancel_events.pop(session_id, None)  # 이전 run의 취소 이벤트 잔재 제거
+        self._run_cost[session_id] = 0.0  # 예산 가드레일 — 이 run의 누적 비용 리셋
         self._injections.pop(session_id, None)
         if session_id:
             self._running_sessions.add(session_id)
@@ -2101,6 +2129,8 @@ class AgentRuntime:
             return "사용자가 중단했습니다."
         if status == "context_blocked":
             return f"컨텍스트 한도({int(CONTEXT_BLOCK_RATIO * 100)}%)에 도달해 중단했습니다. 새 세션에서 계속 진행하세요."
+        if status == "budget_exceeded":
+            return "작업 비용이 예산 상한에 도달해 중단했습니다. 예산을 올리거나 새 세션에서 계속하세요."
         if status == "repeated":
             return "동일한 도구 호출이 반복되어 중단했습니다."
         return "최대 실행 단계를 초과했습니다."
