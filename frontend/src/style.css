@@ -2669,8 +2669,11 @@ footer .image-preview-row {
   text-align: left;
 }
 .mac-ico {
-  font-size: 22px;
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--accent);   /* 앱의 monochrome SVG 아이콘 시스템과 통일(컬러 이모지 제거) */
 }
+.mac-ico svg { width: 22px; height: 22px; }
 .mac-toggle {
   cursor: pointer;
 }

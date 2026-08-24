@@ -640,16 +640,16 @@ watch(
         <div class="rooms-scroll">
           <div class="mac-launcher">
             <button class="mac-tile" @click="openMacScreen">
-              <span class="mac-ico">🖥️</span><span>화면 보기</span>
+              <span class="mac-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span><span>화면 보기</span>
             </button>
             <button class="mac-tile" @click="openMacTerminal">
-              <span class="mac-ico">⌨️</span><span>터미널 연결</span>
+              <span class="mac-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M7 8l3 3-3 3M13 15h4"/></svg></span><span>터미널 연결</span>
             </button>
             <button class="mac-tile" @click="openMacCamera">
-              <span class="mac-ico">📷</span><span>카메라 보기</span>
+              <span class="mac-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></span><span>카메라 보기</span>
             </button>
             <div class="mac-tile mac-toggle" @click="toggleCaffeine">
-              <span class="mac-ico">☕</span>
+              <span class="mac-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><path d="M6 1v3M10 1v3M14 1v3"/></svg></span>
               <span class="mac-toggle-label">맥 잠들지 않게 하기</span>
               <span class="mac-switch" :class="{ on: caffeineOn }"><span class="mac-switch-knob"></span></span>
             </div>
