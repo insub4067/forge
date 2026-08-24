@@ -42,8 +42,17 @@ const MODEL_TIERS = [
 ]
 function pickModel(key) {
   modelTier.value = key
+  // localStorage는 '새 세션의 기본값'으로만 쓴다 — 세션별 값은 서버가 소유한다.
   localStorage.setItem('forge_model_tier', key)
   showModelPick.value = false
+  // 고른 즉시 이 세션에 붙인다. 전송 때만 저장하면 고르고 방을 옮겼을 때 선택이 사라진다.
+  if (currentRoomId.value) {
+    fetch(`/api/sessions/${currentRoomId.value}/model-tier`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tier: key }),
+    }).then(() => loadRooms()).catch(() => {})
+  }
 }
 function tierLabel() {
   return (MODEL_TIERS.find((t) => t.key === modelTier.value) || MODEL_TIERS[0]).label
@@ -532,6 +541,9 @@ async function selectRoom(id, isNew = false) {
     autoApprove.value = r.auto_approve
     localStorage.setItem('forge_auto_approve', r.auto_approve ? '1' : '0')
   }
+  // 모델 티어도 세션별 설정이다 — 서버에 저장된 이 방의 값으로 복원한다.
+  // (전역값 하나만 쓰면 다른 방에서 고른 티어가 그대로 보여 실제 동작과 어긋난다.)
+  if (r && r.model_tier) modelTier.value = r.model_tier
   checkRunning()
 }
 
@@ -1417,6 +1429,9 @@ onMounted(async () => {
     currentRoomId.value = rooms.value[0].id
     localStorage.setItem('forge_room', currentRoomId.value)
   }
+  // 첫 랜딩도 방 전환과 같은 규칙으로 세션 설정을 복원한다(selectRoom을 거치지 않는 경로).
+  const landed = currentRoom()
+  if (landed && landed.model_tier) modelTier.value = landed.model_tier
   await loadMessages()
   await loadTasks()
   await loadGates()

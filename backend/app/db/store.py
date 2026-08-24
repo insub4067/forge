@@ -97,6 +97,7 @@ async def get_room(session_id: str) -> dict | None:
             "mode": sess.mode,
             "used_tokens": sess.used_tokens,
             "auto_approve": sess.auto_approve,
+            "model_tier": sess.model_tier or "auto",
         }
 
 
@@ -201,6 +202,9 @@ async def list_rooms() -> list[dict]:
                 "final_status": sess.final_status,
                 "scheduled": sess.id in job_sids,
                 "auto_approve": sess.auto_approve,
+                # 모델 티어는 세션별 설정이다 — 프론트가 방 전환 시 이 값으로 복원한다
+                # (전역 localStorage 하나만 쓰면 다른 세션의 선택이 그대로 보인다).
+                "model_tier": sess.model_tier or "auto",
             }
             for sess, count in result.all()
         ]

@@ -484,12 +484,40 @@ def test_compaction_survives_run_end():
     print("OK 압축 요약 영속화(run 경계 생존)")
 
 
+
+def test_model_tier_is_per_session():
+    """모델 티어는 세션별 설정이다 — 방마다 독립적으로 유지돼야 한다.
+
+    백엔드는 sessions.model_tier에 세션별로 저장하는데 프론트가 localStorage 전역값
+    하나만 쓰고 방 전환 시 다시 읽지 않아, 다른 방에서 고른 티어가 그대로 보였다.
+    실제 동작(서버 값)과 화면 표시가 어긋나는 상태였다.
+    """
+    import inspect
+    from app.db import store
+    from app.api import routes
+
+    # 1) 방 목록·단건 조회가 model_tier를 내려준다(프론트가 복원할 재료)
+    for fn in (store.list_rooms, store.get_room):
+        assert '"model_tier"' in inspect.getsource(fn), f"{fn.__name__}이 model_tier를 안 내려준다"
+
+    # 2) 고른 즉시 세션에 붙이는 엔드포인트가 있다(전송 전에 방을 옮겨도 유지)
+    src = inspect.getsource(routes)
+    assert 'sessions/{session_id}/model-tier' in src, "세션별 티어 저장 엔드포인트가 없다"
+    assert "set_session_model_tier" in src
+
+    # 3) 허용값 밖은 auto로 방어한다
+    tier_src = inspect.getsource(routes.set_model_tier)
+    assert '("auto", "pro", "flash")' in tier_src and 'tier = "auto"' in tier_src
+    print("OK 모델 티어는 세션별")
+
+
 if __name__ == "__main__":
     test_compaction_thresholds()
     test_skill_selection()
     test_stable_prefix()
     test_project_shrinks_after_compaction()
     test_compaction_survives_run_end()
+    test_model_tier_is_per_session()
     test_merge_memory_facts()
     test_completion_summary_formatter()
     test_blocking_reason()

@@ -745,6 +745,22 @@ async def set_auto_approve(session_id: str, req: Request):
     return {"enabled": enabled, "resolved": resolved}
 
 
+@router.post("/sessions/{session_id}/model-tier")
+async def set_model_tier(session_id: str, req: Request):
+    """세션의 모델 티어를 즉시 영속화한다.
+
+    티어는 /api/chat 전송 시에도 저장되지만, 고르기만 하고 메시지를 안 보낸 채 방을
+    옮기면 선택이 사라졌다. 세션별 설정이므로 고른 즉시 그 세션에 붙인다.
+    """
+    body = await req.json()
+    tier = str(body.get("tier", "auto"))
+    if tier not in ("auto", "pro", "flash"):
+        tier = "auto"
+    runtime.set_model_tier(session_id, tier)
+    await store.set_session_model_tier(session_id, tier)
+    return {"tier": tier}
+
+
 @router.post("/sessions/{session_id}/inject")
 async def inject_message(session_id: str, req: Request):
     body = await req.json()
