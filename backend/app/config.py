@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # 앱 레벨 토큰 게이트(defense-in-depth). 설정 시 모든 /api 요청에 토큰 요구.
     # 미설정이면 무동작 — Cloudflare Access + 127.0.0.1 바인딩에만 의존(auth.py 참고).
     auth_token: str = ""
+    # 원격 운영 모드. True면 fail-closed — auth_token이 없으면 서버가 기동을 거부한다.
+    # 기본 False(로컬 개발): 기존 동작 그대로. 외부 노출 배포는 FORGE_REQUIRE_AUTH=1로 켠다.
+    require_auth: bool = False
     # skill 주입 전면 비활성(skill 효과 A/B 실험용). 기본 False.
     skills_off: bool = False
     # Developer를 항상 pro로(실험용). 기본 False — 평소 flash+think-medium, 실패 시에만 pro 승격.

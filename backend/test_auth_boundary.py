@@ -52,3 +52,18 @@ if __name__ == "__main__":
     test_uploads_rejected_without_token()
     test_health_open_without_token()
     print("OK 토큰 경계(/api + /uploads)")
+
+
+def test_remote_mode_fail_closed():
+    """원격 운영 모드(require_auth) fail-closed: 토큰 없으면 기동 거부, 있으면 통과."""
+    import pytest
+    from app.auth import assert_startup_auth
+
+    # require_auth=True + 토큰 없음 → 기동 거부(예외)
+    with pytest.raises(RuntimeError):
+        assert_startup_auth(True, "")
+    # require_auth=True + 토큰 있음 → 통과
+    assert_startup_auth(True, "secret")  # 예외 없어야 함
+    # 로컬 개발 기본(require_auth=False) → 토큰 유무와 무관하게 통과(기존 동작 불변)
+    assert_startup_auth(False, "")
+    assert_startup_auth(False, "secret")

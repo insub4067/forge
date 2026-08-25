@@ -12,6 +12,17 @@ FORGE_AUTH_TOKEN이 설정되면 모든 /api 요청(WebSocket 포함)과 /upload
 from urllib.parse import parse_qs
 
 
+def assert_startup_auth(require_auth: bool, auth_token: str) -> None:
+    """원격 운영 모드 fail-closed 게이트(순수 함수). require_auth인데 토큰이 없으면 예외를
+    던져 기동을 거부한다. 인증 없이 외부에 노출되는 것을 조용히 허용하지 않기 위함."""
+    if require_auth and not auth_token:
+        raise RuntimeError(
+            "원격 운영 모드(FORGE_REQUIRE_AUTH=1)에는 FORGE_AUTH_TOKEN이 필요합니다. "
+            "인증 없이 /api·터미널·화면·host bash가 노출되므로 기동을 거부합니다. "
+            "토큰을 설정하거나, 로컬 개발이면 FORGE_REQUIRE_AUTH를 끄십시오."
+        )
+
+
 def _extract_token(scope) -> str:
     for k, v in scope.get("headers", []):
         if k == b"x-forge-token":
