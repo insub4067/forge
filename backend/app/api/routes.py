@@ -495,8 +495,11 @@ async def tool_usage(session_id: str):
 @router.get("/sessions/{session_id}/context")
 async def session_context(session_id: str):
     """마지막 LLM 호출의 context 영역별 분해(debug view) — 무엇이 컨텍스트를 차지하는지.
-    실제 전송 payload 기준: system_base_role / memory / skills / history_content /
-    tool_results / reasoning_content / tool_call_arguments 추정 토큰 + 총량·예산 대비 %."""
+    전송 형태 기준 추정: system_base_role / memory / skills / history_content / tool_results /
+    reasoning_content / tool_call_arguments / image_inputs. 텍스트 영역은 문자 기반으로
+    정확도가 높고 image_inputs는 이미지당 고정 추정(저정확도, image_raw로 개수·bytes 동반).
+    reasoning은 그 step에 '계획된' effective_thinking 기준(같은 step 첫 400 재시도는 다음
+    step부터 반영). 최종 권위는 provider usage(measured)다."""
     return runtime.get_context_breakdown(session_id)
 
 

@@ -1141,7 +1141,8 @@ class AgentRuntime:
 
             # 전송 전 사전 압축: 한 스텝에서 도구 결과가 대량으로 쌓이면(예: 병렬 read_file
             # 다수) 실측 후 압축은 이미 예산 초과 호출을 한 번 보내버린다(실측 195K 관측).
-            # 실제 전송 payload와 동일한 형태(reasoning·tool arguments 포함)로 추정해 미리 압축한다.
+            # 실제 전송 형태(reasoning·tool arguments·image 처리 포함)로 추정해 미리 압축한다.
+            # 텍스트 영역은 정확도가 높고 이미지는 개수 기반 추정이다(최종 권위는 provider usage).
             projected = await self._precompact(
                 session_id, all_messages, system_msg, skills, room_memory,
                 keep_reasoning, _on_compaction, has_image=has_image)
@@ -2029,7 +2030,7 @@ class AgentRuntime:
 
     async def _precompact(self, session_id, all_messages, system_msg, skills, room_memory,
                           keep_reasoning, on_compaction, has_image=False) -> list[dict]:
-        """전송 전 사전 압축: 실제 전송 payload와 동일한 형태(has_image 포함)로 추정한 total_est가
+        """전송 전 사전 압축: 실제 전송 형태(fold·strip·has_image image 처리 포함)로 추정한 total_est가
         임계를 넘으면 미리 압축해 초과 호출 자체를 막는다. content만 세던 옛 판단은 reasoning·tool
         arguments·이미지를 놓쳐(실측상 히스토리 대부분) 사전 압축이 헛돌던 것을 바로잡는다.
         압축이 일어나면 on_compaction(covered)를 await한다. 최종 projected(변환 전)를 반환."""
