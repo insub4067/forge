@@ -6,7 +6,7 @@
 
 FORGE는 저비용 DeepSeek 계열 모델을 반복 호출하면서 실제 코드베이스를 탐색·수정·검증하는 장시간 실행형 코딩 에이전트를 목표로 한다.
 
-현재 FORGE는 Triage, Planner, Coder, Reviewer, Debugger, Vision, tool calling, 승인 게이트, 실행 중 메시지 주입, cancel, git checkpoint/diff, 모바일 PWA 등을 갖추고 있다.
+현재 FORGE는 Triage, Planner, Coder, Reviewer, Debugger, Vision, tool calling, 승인 게이트, 실행 중 메시지 주입, cancel, git diff, 모바일 PWA 등을 갖추고 있다. (git checkpoint는 legacy/deprecated로, writer/reader가 없고 rollback·durable resume을 제공하지 않는다 — 아래 모듈 분리 설계의 checkpoint는 미래 설계다.)
 
 다음 단계의 핵심은 모델 자체의 성능보다 Harness 품질이다. 장시간 작업에서 중요한 것은 다음과 같다.
 
