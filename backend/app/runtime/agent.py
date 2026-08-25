@@ -777,9 +777,11 @@ class AgentRuntime:
     async def _stream_with_recovery(self, model, messages, tool_schemas, thinking, effort, session_id, counters=None):
         """LLM 스트림을 호출하되 요청 시점 오류를 유형별로 회복한다.
 
-        - reasoning_content 400: thinking을 꺼서 즉시 재시도. 폴백 상태는 counters(=이번
-          run 로컬)에만 담아 이후 스텝에 전파하되, run이 끝나면 counters와 함께 사라진다
-          (세션·미래 run·다른 세션을 오염시키지 않는다).
+        - reasoning_content 400: thinking을 꺼서 즉시 재시도. 폴백 상태는 counters에만 담아
+          이후 스텝에 전파한다. counters는 _run_role() 호출마다 새로 만들어지므로 폴백의 실제
+          범위는 그 role invocation이다 — 같은 _run_role() 안의 후속 step에는 유지되지만,
+          새 _run_role() 호출(Developer Pro 승격·verification repair·planner/reviewer 등)과
+          Auto Resume에는 새 counters라 상태가 누수되지 않는다. 세션 영구 상태를 두지 않는다.
         - 일시적 오류(429/5xx/timeout/connection): 백오프(1·2·4초) 후 최대 3회 재시도
         - terminal(잘못된 요청·인증 등): 전파
         긴 실행이 네트워크 블립이나 일시적 API 장애로 통째로 죽지 않게 한다.
@@ -789,8 +791,8 @@ class AgentRuntime:
         따라서 thinking+tools 호출에서는 유지하고, 그 외(비-thinking·tools 없음·폴백)에서만
         벗겨 토큰을 아낀다. 판단은 adapter의 requires_reasoning_replay capability에 위임한다."""
         adapter = self._adapter_for(model)
-        # counters에 이전 스텝의 폴백 결과가 실려 있으면(이번 run 안에서 이미 400을 겪음)
-        # 이번 스텝도 thinking을 끈 채 시작한다.
+        # counters에 이전 스텝의 폴백 결과가 실려 있으면(이 role invocation 안에서 이미 400을
+        # 겪음) 이번 스텝도 thinking을 끈 채 시작한다.
         no_think = bool(counters and counters.get("reasoning_replay_failed"))
         transient_attempts = 0
         while True:
@@ -819,11 +821,11 @@ class AgentRuntime:
                 if kind == "reasoning" and not no_think:
                     no_think = True
                     if counters is not None:
-                        counters["reasoning_replay_failed"] = True  # run-scope 전파
+                        counters["reasoning_replay_failed"] = True  # role invocation 범위로 전파
                         counters["retries"] = counters.get("retries", 0) + 1
                     error_log.record(
                         "reasoning_replay_fallback",
-                        f"reasoning round-trip 실패 → thinking 끄고 재시도(run 한정): {err}",
+                        f"reasoning round-trip 실패 → thinking 끄고 재시도(role invocation 한정): {err}",
                         session_id,
                     )
                     continue
@@ -1164,7 +1166,7 @@ class AgentRuntime:
             if session_id:
                 self._record_context_breakdown(session_id, role, system_msg, projected, skills, room_memory)
             route["model_calls"] += 1
-            # thinking·reasoning은 그대로 넘긴다. reasoning round-trip 유지와 400 폴백(run 한정)은
+            # thinking·reasoning은 그대로 넘긴다. reasoning round-trip 유지와 400 폴백(role invocation 한정)은
             # _stream_with_recovery가 adapter capability + counters로 관리한다.
             async for delta in self._stream_with_recovery(
                 route["model"],

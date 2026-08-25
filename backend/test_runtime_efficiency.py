@@ -659,11 +659,12 @@ def test_reasoning_stripped_when_no_tools():
     print("OK tools 없는 요청에서는 reasoning 제거(원본 보존)")
 
 
-def test_reasoning_fallback_is_run_scoped():
-    """400 폴백은 현재 run(counters) 범위로만 제한되고 미래 run/다른 세션을 오염시키지 않는다.
+def test_reasoning_fallback_is_role_invocation_scoped():
+    """400 폴백의 범위는 _run_role() 호출(role invocation)이다 — counters가 그 단위로 생성된다.
 
-    첫 호출 400 → thinking 끄고 재시도(같은 run 내). 새 run(새 counters)은 다시 thinking 시작.
-    세션 영구 상태(_strip_reasoning_sessions)는 존재하지 않는다.
+    같은 counters(=같은 _run_role) 안의 후속 step에는 폴백이 유지되지만, 새 _run_role() 호출
+    (Developer Pro 승격·verification repair·planner/reviewer)과 Auto Resume은 새 counters라
+    누수되지 않는다. 세션 영구 상태(_strip_reasoning_sessions)는 존재하지 않는다.
     """
     import asyncio
     from app.runtime.agent import AgentRuntime
@@ -673,40 +674,31 @@ def test_reasoning_fallback_is_run_scoped():
     assert not hasattr(rt, "_strip_reasoning_sessions"), \
         "세션 영구 non-thinking 상태가 아직 존재한다"
 
+    # invocation A — 첫 호출 400 → 폴백. 같은 counters로 이어지는 후속 step은 thinking off 유지.
     fake = _StrictDeepSeekFake(fail_first=True)
     rt._adapter_for = lambda model: fake
-
-    # run A — 첫 호출 400 → 폴백으로 thinking 끄고 재시도
     countersA = {"retries": 0}
 
-    async def driveA():
+    async def step(counters):
         async for _ in rt._stream_with_recovery(
             "deepseek-v4-flash", _tool_loop_history(), TOOL_SCHEMAS, True, "medium",
-            "sess", countersA
+            "sess", counters
         ):
             pass
 
-    asyncio.run(driveA())
+    asyncio.run(step(countersA))          # step1: 400 → 폴백 재시도
     assert len(fake.calls) == 2, "폴백 재시도가 없었다"
-    assert fake.calls[0]["thinking"] is True and fake.calls[1]["thinking"] is False, \
-        "폴백이 thinking을 끄지 않았다"
+    assert fake.calls[0]["thinking"] is True and fake.calls[1]["thinking"] is False
     assert countersA["retries"] == 1
+    asyncio.run(step(countersA))          # step2: 같은 invocation → thinking off 유지
+    assert fake.calls[2]["thinking"] is False, "같은 role invocation 후속 step에서 폴백이 유지 안 됨"
 
-    # run B — 같은 세션이지만 새 counters. thinking이 다시 켜져야 한다(오염 없음).
+    # invocation B — 새 _run_role(=새 counters): Pro 승격/repair/Auto Resume에 해당. thinking 재개.
     fake2 = _StrictDeepSeekFake()
     rt._adapter_for = lambda model: fake2
-    countersB = {"retries": 0}
-
-    async def driveB():
-        async for _ in rt._stream_with_recovery(
-            "deepseek-v4-flash", _tool_loop_history(), TOOL_SCHEMAS, True, "medium",
-            "sess", countersB
-        ):
-            pass
-
-    asyncio.run(driveB())
-    assert fake2.calls[0]["thinking"] is True, "이전 run의 폴백이 새 run을 오염시킴"
-    print("OK reasoning 폴백은 run-scope(미래 run/다른 세션 무오염)")
+    asyncio.run(step({"retries": 0}))
+    assert fake2.calls[0]["thinking"] is True, "이전 invocation의 폴백이 새 invocation을 오염시킴"
+    print("OK reasoning 폴백은 role invocation 범위(후속 step 유지, 새 invocation 무오염)")
 
 
 import hashlib as _hashlib
@@ -869,7 +861,7 @@ def test_reasoning_replay_survives_auto_resume_history():
 
     save/load_history는 메시지를 통째로 직렬화하므로 reasoning_content가 보존된다 →
     복원 후 thinking 호출이 400 없이 통과. 반대로 구 데이터라 reasoning이 없는 assistant
-    tool_call이면 폴백(run-scope)이 thinking을 꺼 완주시킨다.
+    tool_call이면 폴백(role invocation 범위)이 thinking을 꺼 완주시킨다.
     """
     import asyncio, json
     from app.runtime.agent import AgentRuntime
@@ -891,7 +883,7 @@ def test_reasoning_replay_survives_auto_resume_history():
     asyncio.run(drive(restored, {"retries": 0}))
     assert fake.calls[0]["thinking"] is True and len(fake.calls) == 1, "복원 history에서 400/재시도 발생"
 
-    # (b) reasoning 누락된 구 복원 history — 폴백이 run-scope로 완주시킴
+    # (b) reasoning 누락된 구 복원 history — 폴백이 role invocation 범위로 완주시킴
     legacy = [
         {"role": "user", "content": "작업"},
         {"role": "assistant", "content": "",
@@ -906,7 +898,7 @@ def test_reasoning_replay_survives_auto_resume_history():
     assert len(fake2.calls) == 2, "폴백 재시도가 없었다"
     assert fake2.calls[1]["thinking"] is False, "폴백이 thinking을 끄지 않았다"
     assert counters["retries"] == 1
-    print("OK Auto Resume 복원 history 정상(보존 시 유지, 구 데이터는 run-scope 폴백)")
+    print("OK Auto Resume 복원 history 정상(보존 시 유지, 구 데이터는 role invocation 폴백)")
 
 
 def test_fold_duplicate_id_past_failure_not_folded():
