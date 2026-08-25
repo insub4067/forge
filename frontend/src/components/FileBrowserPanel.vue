@@ -19,8 +19,11 @@ const viewingFile = ref('')
 
 async function navigateFiles(path, hidden = props.showHidden) {
   try {
+    // session_id를 붙이면 fs/list가 workspace 밖(예: Desktop)을 못 열고 ws로 snap back,
+    // 이어 fs/raw도 403이 나 '보이는데 못 여는' 버그가 생긴다. 경로는 절대경로라 session
+    // 불필요 — host 전역 탐색으로 일관화(본인 Mac + Cloudflare Access 인증 경계).
     const res = await fetch(
-      `/api/fs/list?path=${encodeURIComponent(path || '')}&show_hidden=${hidden}&session_id=${props.sessionId}`
+      `/api/fs/list?path=${encodeURIComponent(path || '')}&show_hidden=${hidden}`
     )
     if (res.ok) {
       const data = await res.json()
@@ -63,7 +66,7 @@ function onFileClick(e) {
 }
 async function downloadFile(e) {
   fileTouchCancel()
-  const url = `/api/fs/raw?path=${encodeURIComponent(e.path)}&session_id=${props.sessionId}`
+  const url = `/api/fs/raw?path=${encodeURIComponent(e.path)}`
   try {
     const res = await fetch(url)
     if (!res.ok) throw new Error('HTTP ' + res.status)

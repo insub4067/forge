@@ -27,8 +27,11 @@ const content = ref('')
 
 const emit = defineEmits(['image-click']) // 이미지 탭 → 상위 라이트박스
 
+// 파일 브라우저(fs/list)는 session 없이 host 전역을 탐색하는데, 뷰어가 session_id를 붙이면
+// fs/raw가 workspace 밖 파일(예: Desktop PDF)을 403 차단해 '보이는데 못 여는' 버그가 났다.
+// 경로는 절대경로라 session 불필요 — 브라우저와 동일하게 session 없이 요청해 일치시킨다.
 const mediaUrl = computed(
-  () => `/api/fs/raw?path=${encodeURIComponent(props.path)}&session_id=${encodeURIComponent(props.sessionId)}`
+  () => `/api/fs/raw?path=${encodeURIComponent(props.path)}`
 )
 
 watch(
@@ -37,7 +40,7 @@ watch(
     content.value = ''
     if (!p || kind.value !== 'text') return
     try {
-      const res = await fetch(`/api/fs/read?path=${encodeURIComponent(p)}&session_id=${props.sessionId}`)
+      const res = await fetch(`/api/fs/read?path=${encodeURIComponent(p)}`)
       if (res.ok) content.value = (await res.json()).content || ''
     } catch {}
   },

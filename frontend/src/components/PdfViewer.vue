@@ -1,6 +1,6 @@
 <script setup>
 // PDF 뷰어 — pdfjs를 dynamic import로 로드해 메인 번들에서 분리한다.
-import { ref, watch, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({ url: { type: String, required: true } })
 
@@ -9,6 +9,7 @@ const scale = ref(1)
 let _pinchDist = 0
 let _pinchScale = 1
 let _renderSeq = 0 // 렌더 경합 방지: 마지막 요청만 화면에 남긴다
+let _pdfWorker = null // pdfjs 워커 1회 생성 후 재사용
 
 function _touchDist(t) {
   return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
@@ -38,8 +39,12 @@ async function render(url) {
   el.innerHTML = ''
   try {
     const pdfjsLib = await import('pdfjs-dist')
-    const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default
-    pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+    // Vite `?worker` import로 워커를 직접 생성해 workerPort로 넘긴다(1회 생성 후 재사용).
+    if (!_pdfWorker) {
+      const PdfWorker = (await import('pdfjs-dist/build/pdf.worker.min.mjs?worker')).default
+      _pdfWorker = new PdfWorker()
+    }
+    pdfjsLib.GlobalWorkerOptions.workerPort = _pdfWorker
     const pdf = await pdfjsLib.getDocument({ url }).promise
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
     const cssWidth = Math.min(el.clientWidth || 360, 900)
@@ -63,7 +68,10 @@ async function render(url) {
   }
 }
 
-watch(() => props.url, render, { immediate: true })
+// immediate 없이 — immediate watch는 마운트 전에 실행돼 container ref가 null이라 렌더가
+// 조기 반환됐다(빈 화면 버그). 초기 렌더는 container가 준비된 onMounted에서 호출한다.
+watch(() => props.url, render)
+onMounted(() => render(props.url))
 
 onBeforeUnmount(() => { _renderSeq++ }) // 진행 중 렌더 무효화
 </script>
