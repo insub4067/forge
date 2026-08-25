@@ -118,6 +118,10 @@ const questionAnswer = ref('')
 const debug = ref('대기 중')
 
 const rooms = ref([])
+// 서버(/api/rooms)에서 세션방 목록을 실제로 받아왔는지. 이게 true여야 "방 없음"을 진짜
+// 미설정으로 단정할 수 있다 — 로드 실패로 목록이 비어 있는 것과 서버가 0개라고 확인해준
+// 것을 구분해, 로드 실패 시 '워크스페이스 미설정'을 오표시하지 않는다.
+const roomsLoaded = ref(false)
 const currentRoomId = ref(localStorage.getItem('forge_room') || '')
 const loadingMessages = ref(false)
 const showRooms = ref(false)
@@ -142,8 +146,10 @@ const fsEntries = ref([])
 const pickerRoomId = ref(null)
 const homePath = ref('')  // 홈 디렉터리 — 최초 세션이 workspace_path로 저장하는 값. 미설정 판별 기준.
 const needsWorkspace = computed(() => {
+  // 서버에서 세션방 목록을 확인하기 전엔 단정하지 않는다(로드 실패 시 오표시 방지).
+  if (!roomsLoaded.value) return false
   const room = currentRoom()
-  // 방이 아예 없으면(첫 진입·전부 삭제) 워크스페이스 선택부터 유도한다.
+  // 서버 확인 결과 방이 아예 없으면(첫 진입·전부 삭제) 워크스페이스 선택부터 유도한다.
   // 선택하면 chooseWorkspace가 방을 만들어 이 상태를 벗어난다(선택해도 계속 뜨던 무한 반복
   // 은, 없는 방에 PATCH하던 게 원인이었고 chooseWorkspace/ensureRoom 수정으로 해소된다).
   if (!room) return true
@@ -457,7 +463,10 @@ function ctxClass(pct) {
 async function loadRooms() {
   try {
     const res = await fetch('/api/rooms')
-    if (res.ok) rooms.value = await res.json()
+    if (res.ok) {
+      rooms.value = await res.json()
+      roomsLoaded.value = true // 서버가 방 목록을 확인해줬다 — 이후 "방 없음"은 진짜 미설정
+    }
   } catch {}
 }
 
@@ -1590,8 +1599,10 @@ document.addEventListener('visibilitychange', () => {
             <button class="ws-guide-btn" @click="chooseWorkspace()">워크스페이스 선택</button>
           </div>
         </template>
-        <p v-else class="sub">{{ shortPath(currentRoom()?.workspace_path) }}에서 자율로 작업합니다.</p>
-        <div v-if="!needsWorkspace" class="quick-actions">
+        <!-- 방이 실제로 있을 때만 작업 안내·퀵액션. 서버 확인 전/실패(room 없음+미설정 아님)엔
+             빈 경로로 안내 문구가 뜨지 않도록 currentRoom() 존재를 조건으로 둔다. -->
+        <p v-else-if="currentRoom()" class="sub">{{ shortPath(currentRoom()?.workspace_path) }}에서 자율로 작업합니다.</p>
+        <div v-if="!needsWorkspace && currentRoom()" class="quick-actions">
           <button class="quick-action" @click="quickAction('이 프로젝트의 구조와 핵심 동작을 파악해서 요약해줘')">프로젝트 파악</button>
           <button class="quick-action" @click="quickAction('현재 git 변경사항을 리뷰해줘')">변경사항 리뷰</button>
           <button class="quick-action" @click="quickAction('git 상태와 최근 커밋을 확인해서 알려줘')">Git 상태 확인</button>

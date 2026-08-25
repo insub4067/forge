@@ -1251,7 +1251,9 @@ main {
 
 /* 워크스페이스 미설정(빈 세션) 유도 카드 */
 .ws-guide {
-  margin-top: 18px;
+  /* .welcome은 text-align:center지만 flex가 아니라, block인 이 카드(max-width 340)는
+     좌우 auto 마진이 없으면 왼쪽에 붙는다. auto로 중앙 정렬한다. */
+  margin: 18px auto 0;
   padding: 16px 18px;
   border-radius: 14px;
   border: 1px dashed var(--accent);
