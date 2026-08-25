@@ -1040,7 +1040,7 @@ def test_precompaction_triggers_on_reasoning_and_args_alone():
     """content가 작아도 긴 reasoning + 대형 write_file arguments만으로 임계를 넘으면
     사전 compaction이 발동한다(예전엔 content만 세어 이 경우를 놓쳤다)."""
     import asyncio
-    from app.runtime.agent import AgentRuntime, CONTEXT_COMPACT_RATIO
+    from app.runtime.agent import AgentRuntime
     from app.config import settings
     from app.tools.registry import TOOL_SCHEMAS
 
@@ -1087,7 +1087,7 @@ def test_effective_thinking_unifies_fallback_across_estimate_and_send():
     한 곳(_effective_thinking)에서 판단해 사전 compaction·breakdown·전송이 같은 결론을 쓴다.
     """
     import asyncio
-    from app.runtime.agent import AgentRuntime, CONTEXT_COMPACT_RATIO
+    from app.runtime.agent import AgentRuntime
     from app.config import settings
     from app.tools.registry import TOOL_SCHEMAS
 

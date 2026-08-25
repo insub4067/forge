@@ -1,0 +1,12 @@
+# 점진 도입 — 실제 버그류(pyflakes F, 문법 E9)만 강제한다. 스타일 규칙은 넣지 않아
+# 기존 2800줄 코드에 수백 개 오류를 만들지 않는다. 커버리지는 이후 점진 확대.
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E9", "F"]
+
+[lint.per-file-ignores]
+# 테스트는 픽스처·미사용 import 패턴이 흔해 F401/F841을 완화(점진).
+"test_*.py" = ["F401", "F841", "F821", "F811"]
+"conftest.py" = ["F401"]

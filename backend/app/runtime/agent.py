@@ -5,7 +5,6 @@ import json
 import mimetypes
 import os
 import re
-import subprocess
 import time
 import uuid
 

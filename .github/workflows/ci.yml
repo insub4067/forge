@@ -1,0 +1,63 @@
+name: CI
+
+# PR·main push마다 회귀·재현성을 검증한다. LLM 비용이 드는 benchmark는 넣지 않고,
+# 무비용 deterministic self-test만 실행한다(유료 벤치는 수동/야간 별도 워크플로우).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: forge
+          POSTGRES_PASSWORD: forge
+          POSTGRES_DB: forge
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install pinned dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Ruff (static checks — E9,F)
+        working-directory: backend
+        run: python -m ruff check .
+      - name: Benchmark self-test (zero-cost, deterministic)
+        working-directory: backend
+        run: python bench.py --self-test
+      - name: Pytest
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+psycopg://forge:forge@localhost:5432/forge
+        run: python -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+      - name: Test (node --test)
+        working-directory: frontend
+        run: npm test
+      - name: Build (vite)
+        working-directory: frontend
+        run: npm run build

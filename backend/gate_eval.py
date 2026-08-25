@@ -18,7 +18,7 @@ resolve_completion_verification)에 넣어 false PASS / false FAIL을 측정한�
 import asyncio
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from app.runtime import agent as A
 

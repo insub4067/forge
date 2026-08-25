@@ -153,7 +153,7 @@ def _print_report(agg: dict, variant: str):
         print(f"{code:6} {t['category'][:24]:26} {t['success']}/{t['n']:<7} {cps:>11} {t['elapsed_p50']:>6}")
     o = agg["overall"]
     cpv = f"${o['cost_per_verified_task']:.5f}" if o.get("cost_per_verified_task") is not None else "n/a"
-    print(f"\n── 신뢰성 핵심 ──")
+    print("\n── 신뢰성 핵심 ──")
     print(f"verified_success_rate = {o['verified_success_rate']}  "
           f"({o['verified_success']}/{o['total_tasks']})")
     print(f"false_completion_rate = {o['false_completion_rate']}  "

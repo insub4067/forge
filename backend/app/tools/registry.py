@@ -2,7 +2,6 @@ import asyncio
 import re
 from pathlib import Path
 
-from ..config import settings
 
 # write_file 성공 시 반환 접두사(사용자 표시 문자열 겸 내부 성공 marker). 런타임의
 # 히스토리 접기(_fold_old_write_args)가 이 상수를 import해 성공 판정에 쓴다 — 표시 문구를

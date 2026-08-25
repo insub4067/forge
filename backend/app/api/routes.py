@@ -12,7 +12,6 @@ import time
 import uuid
 from pathlib import Path
 
-import httpx
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, Response
 from sse_starlette.sse import EventSourceResponse
@@ -763,8 +762,6 @@ async def mac_input(req: Request):
     x = body.get("x")
     y = body.get("y")
     button = body.get("button", "left")
-    clicks = int(body.get("clicks", 1))
-    dx = body.get("dx", 0)
     dy = body.get("dy", 0)
     key = body.get("key")
     text = body.get("text")
@@ -1090,7 +1087,6 @@ def _apply_refinement_file(row: dict, revert: bool) -> str:
     """승인된 refinement를 실제 skill 파일에 적용(또는 rollback 시 복원)한다.
     대상은 Project/Learned skill(.md)뿐 — Base Prompt는 건드리지 않는다(prompt drift 방지).
     before_text를 보존하므로 rollback이 항상 원상복구한다."""
-    room = None
     scope = row.get("scope") or "project"
     target = row.get("target") or ""
     if not target or row.get("type") != "skill":
