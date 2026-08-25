@@ -23,6 +23,7 @@ from . import memory_guard
 from . import refine
 from . import tool_store
 from . import change_guard
+from . import verification
 from ..security import preflight as security_preflight
 # 완료/게이트 판정 정책(순수 함수)은 completion_policy로 분리 — 여기서 re-export해 기존
 # 호출부와 A.<name> 인터페이스를 그대로 유지한다.
@@ -1653,82 +1654,8 @@ class AgentRuntime:
             else ("unavailable", "검증 실행 불가(모든 check가 unavailable)")
 
     async def _verify_gates(self, ws: str, session_id: str, send: EventSink) -> tuple[str, str]:
-        """Acceptance Gate 검증 — 프로세스가 각 gate의 verification_method를 실제 실행.
-
-        passed는 오직 (exit 0 AND expected_result가 출력에 존재)일 때만 부여한다.
-        모델이 passed라고 주장해도 재실행해 덮어쓴다(self-grading·evidence 위조 방지).
-        상태 집계:
-          failed      — 하나라도 실행 결과가 실패
-          passed      — 전부 passed
-          partial     — 일부 passed + 일부 미검증(unavailable/blocked/abandoned), 실패 0
-          unavailable — 전부 미검증, 실패 0
-          none        — gate 없음(기존 3상태 완료 흐름 그대로)
-        """
-        if not session_id:
-            return "none", ""
-        gates = await store.list_gates(session_id)
-        if not gates:
-            return "none", ""
-
-        # gate 검증은 bash 도구와 '동일한' 안전 경계로 실행한다(P0-1: host /bin/sh 직접 실행 제거).
-        # DockerSandbox.run_verify가 _is_dangerous·sandbox_mode·workspace 한정·timeout·취소 정리를
-        # 적용하고 (exit_code, output)을 반환한다. gate가 bash보다 높은 권한을 갖지 못한다.
-        sandbox = DockerSandbox(workspace=ws)
-
-        async def _sh(command: str, cwd: str = "", timeout: int = 120) -> tuple[int, str]:
-            try:
-                return await sandbox.run_verify(command, timeout=timeout)
-            except asyncio.CancelledError:
-                raise
-            except Exception as err:
-                return -1, f"실행 오류: {err}"
-
-        labels: list[str] = []
-        resolved: list[str] = []
-        for g in gates:
-            status = g.get("status", "pending")
-            # blocked/abandoned는 모델이 사유와 함께 남긴 정직한 미완료 — 프로세스가 강제 실행하지 않는다.
-            if status in ("blocked", "abandoned"):
-                labels.append(f"{g['title']}({status})")
-                resolved.append(status)
-                continue
-            method = (g.get("verification_method") or "").strip()
-            expected = (g.get("expected_result") or "").strip()
-            if not method:
-                # 실행 가능한 검증이 없으면 passed로 만들지 않고 unavailable로 확정(숨기지 않음).
-                await store.save_gate_result(
-                    session_id, g["id"], "unavailable", "{}",
-                    g.get("failure_reason") or "검증 방법 없음 — 실행 가능한 verification_method가 없다")
-                labels.append(f"{g['title']}(unavailable)")
-                resolved.append("unavailable")
-                await send("gates_update", {"gates": await store.list_gates(session_id)})
-                continue
-            rc, out = await _sh(method, ws)
-            evidence = json.dumps({
-                "command": method, "exit_code": rc,
-                "output_tail": out[-1500:], "expected": expected,
-            }, ensure_ascii=False)
-            if rc == 0 and expected and expected in out:
-                verdict, reason = "passed", ""
-            elif rc == 0 and not expected:
-                # exit 0만으로는 기능 충족을 증명하지 못한다 — PASS 오판 금지.
-                verdict, reason = "unavailable", "expected_result 없음 — 통과 증거로 불충분"
-            else:
-                verdict = "failed"
-                reason = f"exit {rc}" + (f", 기대 결과 미발견: {expected[:80]}" if expected else "")
-            await store.save_gate_result(session_id, g["id"], verdict, evidence, reason)
-            labels.append(f"{g['title']}({verdict})")
-            resolved.append(verdict)
-            await send("gates_update", {"gates": await store.list_gates(session_id)})
-
-        report = "요구사항 게이트 검증: " + ", ".join(labels)
-        if "failed" in resolved:
-            return "failed", report
-        if all(s == "passed" for s in resolved):
-            return "passed", report
-        if any(s == "passed" for s in resolved):
-            return "partial", report
-        return "unavailable", report
+        """Acceptance Gate 검증 — verification 모듈로 위임(로직 분리, 인터페이스 유지)."""
+        return await verification.verify_gates(ws, session_id, send)
 
     async def _verify_integration(self, ws: str, session_id: str, send: EventSink) -> tuple[str, str]:
         """Integration 검증 — leaf 작업들이 합쳐진 최종 상태에 대한 회귀 검증.
@@ -1758,38 +1685,8 @@ class AgentRuntime:
         return "passed", report
 
     async def _gates_report(self, session_id: str) -> str:
-        """미완료 gate를 최종 결과에 남긴다 — 조용한 생략(honest failure 위반) 금지."""
-        if not session_id:
-            return ""
-        gates = await store.list_gates(session_id)
-        if not gates:
-            return ""
-        marks = {"passed": "✓", "failed": "✗", "working": "○", "pending": "○",
-                 "unavailable": "!", "blocked": "!", "abandoned": "–"}
-        lines = [f"요구사항 {len(gates)}"]
-        for g in gates:
-            s = g.get("status", "pending")
-            line = f"{marks.get(s, '?')} {g['title']}"
-            if s == "unavailable":
-                line += f" — {g.get('failure_reason') or '검증 방법 없음'}"
-            elif s == "blocked":
-                line += f" — 차단: {g.get('failure_reason') or '이유 없음'}"
-            elif s == "abandoned":
-                line += f" — 포기: {g.get('failure_reason') or '이유 없음'}"
-            elif s == "failed":
-                line += f" — 실패: {g.get('failure_reason') or ''}"
-            elif s in ("working", "pending"):
-                line += " — 검증 중"
-            lines.append(line)
-        for g in gates:
-            if g.get("status") in ("failed", "blocked") and (g.get("failure_reason") or g.get("evidence")):
-                lines.append(f"  Gate: {g['title']}")
-                lines.append(f"  Status: {g.get('status')}")
-                if g.get("failure_reason"):
-                    lines.append(f"  Reason: {g.get('failure_reason')}")
-                if g.get("evidence"):
-                    lines.append(f"  Evidence: {str(g.get('evidence'))[:300]}")
-        return "\n".join(lines)
+        """미완료 gate 최종 보고 — verification 모듈로 위임(로직 분리, 인터페이스 유지)."""
+        return await verification.gates_report(session_id)
 
     @staticmethod
     def _merge_memory_facts(existing: str, facts: list[str], cap: int = 4000) -> str | None:
