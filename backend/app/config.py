@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     allowed_origins: str = ""
     # skill 주입 전면 비활성(skill 효과 A/B 실험용). 기본 False.
     skills_off: bool = False
+    # Task IR 인터프리터(Phase 1) 활성화. 기본 False — off면 완전 스킵(동작·비용 불변). A/B로
+    # 켜서 관찰한다(현재는 관찰 전용: task_ir 이벤트만 발행하고 라우팅 결정을 바꾸지 않는다).
+    task_ir_enabled: bool = False
     # Developer를 항상 pro로(실험용). 기본 False — 평소 flash+think-medium, 실패 시에만 pro 승격.
     developer_pro: bool = False
     # 작업(run) 1회 비용 상한(USD). 누적 비용이 넘으면 안전하게 중단한다 — 무인/자동승인

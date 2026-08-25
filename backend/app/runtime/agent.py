@@ -24,6 +24,7 @@ from . import refine
 from . import tool_store
 from . import change_guard
 from . import verification
+from . import task_ir
 from ..security import preflight as security_preflight
 # 완료/게이트 판정 정책(순수 함수)은 completion_policy로 분리 — 여기서 re-export해 기존
 # 호출부와 A.<name> 인터페이스를 그대로 유지한다.
@@ -928,6 +929,22 @@ class AgentRuntime:
             self.pending_questions.pop(question_id, None)
             self._pending_meta.pop(question_id, None)
             self._status_update(session_id, waiting_for=None, pending=None)
+
+    async def _maybe_interpret(self, full_request: str, send: EventSink):
+        """Task IR 인터프리터(Phase 1) — 기본 off. 켜져 있으면 저비용 flash로 원문을 Task IR로
+        정규화해 task_ir 이벤트로 관찰용 발행한다. 현재는 라우팅 결정을 바꾸지 않는다(관찰 전용).
+        실패/None이면 조용히 넘어간다(기존 경로 그대로). off면 어댑터 호출 자체가 없어 비용 0."""
+        if not settings.task_ir_enabled or not full_request:
+            return None
+        try:
+            ir = await task_ir.interpret(
+                self._adapter_for(self.router.triage_model), full_request)
+        except Exception as err:  # noqa: BLE001 — interpreter 실패가 run을 깨뜨리지 않는다
+            error_log.record("task_ir", str(err), "")
+            return None
+        if ir is not None:
+            await send("task_ir", {"task_ir": ir.to_dict()})
+        return ir
 
     async def _triage(self, all_messages: list[dict]) -> tuple[str, int, int]:
         """단순 대화(chat) vs 코드 작업(code) 라우터 — 최저가 flash 1단어 분류.
@@ -1975,9 +1992,12 @@ class AgentRuntime:
             self._running_sessions.add(session_id)
 
         goal = ""
+        full_request = ""   # Task IR 인터프리터용 원문(이미지 턴은 대상 아님)
         for m in reversed(history):
             if m.get("role") == "user":
-                goal = str(m.get("content", ""))[:200]
+                c = m.get("content", "")
+                goal = str(c)[:200]
+                full_request = c if isinstance(c, str) else ""
                 break
         state: dict[str, Any] = {"goal": goal, "files_changed": [], "errors": []}
         recent_calls: list[str] = []
@@ -1989,6 +2009,7 @@ class AgentRuntime:
             if saved and saved["covered"] <= len(all_messages):
                 self._compaction[session_id] = saved
         room_memory = _load_room_memory(ws)
+        await self._maybe_interpret(full_request, send)  # Task IR(Phase 1) — 기본 off, 관찰 전용
         # Security preflight — 주입 설정 표면/추적 시크릿을 결정적 스캔. 관찰 전용(fail-open):
         # 실행을 막지 않고 findings가 있을 때만 이벤트 한 건 표면화한다. 어떤 예외도 run에
         # 영향을 주지 않는다. HIGH→approval 게이팅은 의도적으로 후속(벤치 재측정 필요).
