@@ -414,8 +414,29 @@ async def get_messages(session_id: str):
 async def resolve_approval(approval_id: str, req: Request):
     body = await req.json()
     decision = str(body.get("decision", "reject"))
-    resolved = runtime.resolve_approval(approval_id, decision)
-    return {"resolved": resolved, "decision": decision}
+    approve = decision in ("approve", "approved")
+    # durable: PG 상태를 먼저 원자·멱등 전이(요청한 세션만, 이미 결정된 것 역전 불가)한 뒤
+    # 메모리 Future를 해소한다. session은 서버가 보관한 pending_meta에서 가져와 격리한다.
+    sid = runtime.pending_session(approval_id)
+    persisted = False
+    if sid:
+        try:
+            persisted = await store.decide_approval(
+                approval_id, sid, "approved" if approve else "rejected")
+        except Exception as err:
+            error_log.record("approval_decide", str(err), sid)
+    resolved = runtime.resolve_approval(approval_id, "approve" if approve else "reject")
+    return {"resolved": resolved, "decision": decision, "persisted": persisted}
+
+
+@router.get("/sessions/{session_id}/pending-approvals")
+async def pending_approvals(session_id: str):
+    """이 세션의 미결(requested) 승인 목록 — 재시작·SSE 재연결 시 승인 카드 복원용.
+    PG가 authoritative store라 메모리가 비어도(재시작) 복원된다."""
+    try:
+        return {"pending": await store.list_pending_approvals(session_id)}
+    except Exception:
+        return {"pending": []}
 
 
 @router.post("/questions/{question_id}")

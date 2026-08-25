@@ -18,6 +18,7 @@ from .. import errors as error_log
 from .. import eventlog
 from .. import skills as skills_lib
 from ..db import store
+from . import approvals
 from .. import metrics as metrics_calc
 from . import memory_guard
 from . import refine
@@ -943,32 +944,69 @@ class AgentRuntime:
                 count += 1
         return count
 
+    @staticmethod
+    def _approval_preview(name: str, args: dict) -> str:
+        """무엇을 승인하는지 보여줄 안전 축약(원문 전체·파일 내용은 담지 않는다)."""
+        try:
+            if name in ("write_file", "edit_file"):
+                return f"{name}: {args.get('path', '')}"
+            if name == "bash":
+                return f"bash: {str(args.get('command', ''))[:200]}"
+            return f"{name}: {json.dumps(args, ensure_ascii=False)[:200]}"
+        except Exception:
+            return name
+
     async def _request_approval(
         self, name: str, args: dict, send: Callable[[str, dict], Awaitable[None]],
-        session_id: str = "",
-    ) -> str:
-        # 자동 승인 모드면 프롬프트 없이 승인
+        session_id: str = "", run_id: str = "",
+    ) -> tuple[str | None, str]:
+        """승인을 요청하고 (approval_id, decision)을 반환한다. auto_approve면 (None, "approve").
+
+        durable: 승인 사실을 PG에 requested로 영속화한다(재시작·SSE 재연결 복원, args 변조
+        검증 근거). 실행 대기·실시간 UX는 기존 Future/SSE 그대로다. 실제 실행은 호출측이
+        consume_approval로 소비할 때만(중복 실행·args 변조·만료 차단)."""
+        # 자동 승인 모드면 프롬프트 없이 승인(무인 위임 — PG에 기록하지 않는다, 기존 동작).
         if session_id in self._auto_approve_sessions:
             await send("approval_auto", {"tool": name})
-            return "approve"
+            return None, "approve"
         approval_id = uuid.uuid4().hex
         detail = {"id": approval_id, "tool": name, "args": args}
+        # SSE·Future를 먼저 세워 실시간 승인 UX를 막지 않는다. PG 기록(consume 근거)은 그 뒤에
+        # 하되, 실패해도 승인 흐름은 SSE/Future로 진행한다(consume 시 not_found면 안전 거부).
         await send("approval_request", detail)
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self.pending_approvals[approval_id] = fut
         self._pending_meta[approval_id] = {"session_id": session_id, "kind": "approval", **detail}
         self._status_update(session_id, waiting_for="approval", pending=detail)
+        if session_id:
+            try:
+                await store.create_approval(
+                    approval_id, session_id, run_id, name,
+                    approvals.args_hash(args), self._approval_preview(name, args))
+            except Exception as err:
+                error_log.record("approval_persist", str(err), session_id)
         try:
             try:
-                return await asyncio.wait_for(fut, self.PENDING_TIMEOUT)
+                decision = await asyncio.wait_for(fut, self.PENDING_TIMEOUT)
+                return approval_id, decision
             except asyncio.TimeoutError:
                 # 무응답이면 무한 매달림 대신 안전하게 거부하고 진행한다.
                 error_log.record("approval_timeout", f"{name} 승인 {self.PENDING_TIMEOUT}s 무응답 → 거부", session_id)
-                return "reject"
+                if session_id:
+                    try:
+                        await store.decide_approval(approval_id, session_id, "rejected", "timeout")
+                    except Exception:
+                        pass
+                return approval_id, "reject"
         finally:
             self.pending_approvals.pop(approval_id, None)
             self._pending_meta.pop(approval_id, None)
             self._status_update(session_id, waiting_for=None, pending=None)
+
+    def pending_session(self, approval_id: str) -> str:
+        """approval_id를 요청한 세션 id(라우트의 session 격리 검증용). 없으면 ""."""
+        meta = self._pending_meta.get(approval_id)
+        return meta.get("session_id", "") if meta else ""
 
     async def _ask_user(
         self, args: dict, send: Callable[[str, dict], Awaitable[None]],
@@ -1382,7 +1420,7 @@ class AgentRuntime:
                     continue
 
                 if name in APPROVAL_REQUIRED:
-                    decision = await self._request_approval(name, args, send, session_id)
+                    approval_id, decision = await self._request_approval(name, args, send, session_id)
                     if decision != "approve":
                         result = "사용자가 실행을 거부했습니다."
                         await send("tool_result", {"name": name, "result": result})
@@ -1390,6 +1428,18 @@ class AgentRuntime:
                             {"role": "tool", "tool_call_id": tc["id"], "content": result}
                         )
                         continue
+                    # durable: 실행 직전 승인을 consume한다 — args 변조·만료·중복 실행을 차단하고
+                    # approved→consumed로 원자 전이한다. auto_approve는 approval_id 없음 → skip.
+                    if approval_id and session_id:
+                        ok, why = await store.consume_approval(
+                            approval_id, session_id, approvals.args_hash(args))
+                        if not ok:
+                            result = f"승인을 사용할 수 없습니다({why}). 다시 시도하세요."
+                            await send("tool_result", {"name": name, "result": result})
+                            all_messages.append(
+                                {"role": "tool", "tool_call_id": tc["id"], "content": result}
+                            )
+                            continue
                     await send("approval_granted", {"name": name})
 
                 diff = ""

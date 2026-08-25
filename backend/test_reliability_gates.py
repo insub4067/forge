@@ -190,7 +190,7 @@ async def main():
     # auto_approve 세션 → 자동 승인 + approval_auto 이벤트
     rt.set_auto_approve("s-aa", True)
     ev = []
-    decision = await rt._request_approval("write_file", {"path": "/tmp/a"}, await _collector(ev), "s-aa")
+    _, decision = await rt._request_approval("write_file", {"path": "/tmp/a"}, await _collector(ev), "s-aa")
     assert decision == "approve", decision
     assert any(t == "approval_auto" for t, _ in ev), ev
     assert not rt.pending_approvals, "자동 승인은 pending에 남지 않아야 함"
@@ -207,7 +207,7 @@ async def main():
     assert any(t == "approval_request" for t, _ in ev), ev
     assert rt.pending_approvals, "수동 세션은 pending에 남아 승인을 기다려야 함"
     rt.resolve_pending_approvals("s-manual")
-    decision = await task
+    _, decision = await task
     assert decision == "approve", decision
     print("승인 경계(수동): OK — approval_request 전송 + pending 등록 후 승인")
 

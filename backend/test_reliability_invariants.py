@@ -289,7 +289,7 @@ async def main():
     await asyncio.sleep(0.05)
     assert any(t == "approval_request" for t, _ in ev), "resume 후에도 수동 세션은 승인 요청해야 함"
     rt2.resolve_pending_approvals("s-resume")
-    assert await task == "approve"
+    assert (await task)[1] == "approve"
     print("resume 후 승인 게이트: OK — 수동 세션은 여전히 approval_request로 pause")
 
     (routes.store.load_history, routes.store.get_session_auto_approve,
