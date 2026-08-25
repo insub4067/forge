@@ -1144,7 +1144,7 @@ class AgentRuntime:
             # 실제 전송 payload와 동일한 형태(reasoning·tool arguments 포함)로 추정해 미리 압축한다.
             projected = await self._precompact(
                 session_id, all_messages, system_msg, skills, room_memory,
-                keep_reasoning, _on_compaction)
+                keep_reasoning, _on_compaction, has_image=has_image)
             # vision 모델(이미지 작업)이면 원본 이미지를 data URI로 실어 보낸다(/uploads 경로는
             # 모델이 못 읽음). non-vision 모델에는 이미지를 보내지 않는다(모델이 image 미지원 → 400).
             # orphan tool 제거·write_file 접기·image 처리를 실제 전송본에 적용한다(원본 불변).
@@ -1158,7 +1158,8 @@ class AgentRuntime:
             if session_id:
                 areas = self._estimate_context_areas(
                     system_msg, send_proj, skills, room_memory, keep_reasoning)
-                self._store_context_breakdown(session_id, role, areas)
+                img_stats = self._image_stats(send_proj) if has_image else None
+                self._store_context_breakdown(session_id, role, areas, img_stats)
             route["model_calls"] += 1
             # thinking·reasoning은 그대로 넘긴다. reasoning round-trip 유지와 400 폴백(role invocation 한정)은
             # _stream_with_recovery가 adapter capability + counters로 관리한다.
@@ -1952,17 +1953,38 @@ class AgentRuntime:
         return str(content or "")
 
     @staticmethod
+    def _image_stats(projected) -> dict:
+        """전송 payload의 이미지 입력 raw 계측(추정 토큰과 혼동 방지용). data URI 원문은 남기지
+        않고 개수와 대략 bytes만 센다(추후 provider usage와 보정). image_url content만 대상."""
+        count = 0
+        approx_bytes = 0
+        for m in projected:
+            c = m.get("content")
+            if not isinstance(c, list):
+                continue
+            for x in c:
+                if isinstance(x, dict) and x.get("type") == "image_url":
+                    count += 1
+                    url = (x.get("image_url") or {}).get("url", "")
+                    if isinstance(url, str) and ";base64," in url:
+                        b64 = url.split(";base64,", 1)[1]
+                        approx_bytes += len(b64) * 3 // 4  # base64 → 원본 bytes 근사(길이만 사용)
+        return {"count": count, "bytes": approx_bytes}
+
+    @staticmethod
     def _estimate_context_areas(system_msg, projected, skills, room_memory, keep_reasoning) -> dict:
         """최종 전송 payload 기준 영역별 토큰 추정(순수). projected는 fold/strip이 적용된
         전송 형태를 받는다. content만 세던 옛 계산이 reasoning_content와 tool_call arguments를
         누락해 실측과 크게 어긋나던 것을 바로잡는다. reasoning은 keep_reasoning일 때만 포함
         (전송본에서 실제로 벗겨지면 0). compaction 판단과 debug breakdown이 이 함수를 공유한다.
-        절대값은 추정이며 실측 총량은 provider usage(measured)가 별도로 남는다."""
+        텍스트 영역은 문자 기반 추정이고, image_inputs는 이미지당 고정 추정(정확도가 낮다 —
+        base64 길이가 아니라 이미지 수 × 추정 토큰). 절대값은 추정이며 실측 총량은 provider
+        usage(measured)가 최종 권위다."""
         system_total = _est_tokens(AgentRuntime._msg_text(system_msg.get("content", "")))
         skills_t = _est_tokens(skills or "")
         memory_t = _est_tokens(room_memory or "") + _est_tokens(_load_global_memory())
         base_role_t = max(0, system_total - skills_t - memory_t)  # base+role = system − memory − skills
-        hist_t = tool_t = reason_t = args_t = 0
+        hist_t = tool_t = reason_t = args_t = img_count = 0
         for m in projected:
             text = AgentRuntime._msg_text(m.get("content", ""))
             if m.get("role") == "tool":
@@ -1973,7 +1995,13 @@ class AgentRuntime:
                 reason_t += _est_tokens(m["reasoning_content"])
             for tc in (m.get("tool_calls") or []):
                 args_t += _est_tokens((tc.get("function") or {}).get("arguments", "") or "")
-        total = base_role_t + skills_t + memory_t + hist_t + tool_t + reason_t + args_t
+            c = m.get("content")
+            if isinstance(c, list):
+                img_count += sum(1 for x in c
+                                 if isinstance(x, dict) and x.get("type") == "image_url")
+        # 이미지는 base64 길이가 아니라 이미지당 고정 추정(DeepSeek vision 상한). estimated.
+        image_t = img_count * settings.image_input_token_estimate
+        total = base_role_t + skills_t + memory_t + hist_t + tool_t + reason_t + args_t + image_t
         return {
             "system_base_role": base_role_t,
             "memory": memory_t,
@@ -1982,6 +2010,7 @@ class AgentRuntime:
             "tool_results": tool_t,
             "reasoning_content": reason_t,
             "tool_call_arguments": args_t,
+            "image_inputs": image_t,
             "total_est": total,
         }
 
@@ -1999,16 +2028,16 @@ class AgentRuntime:
         return self._strip_images(p)
 
     async def _precompact(self, session_id, all_messages, system_msg, skills, room_memory,
-                          keep_reasoning, on_compaction) -> list[dict]:
-        """전송 전 사전 압축: 실제 전송 payload와 동일한 형태로 추정한 total_est가 임계를
-        넘으면 미리 압축해 초과 호출 자체를 막는다. content만 세던 옛 판단은 reasoning·tool
-        arguments를 놓쳐(실측상 히스토리 대부분) 사전 압축이 헛돌던 것을 바로잡는다.
+                          keep_reasoning, on_compaction, has_image=False) -> list[dict]:
+        """전송 전 사전 압축: 실제 전송 payload와 동일한 형태(has_image 포함)로 추정한 total_est가
+        임계를 넘으면 미리 압축해 초과 호출 자체를 막는다. content만 세던 옛 판단은 reasoning·tool
+        arguments·이미지를 놓쳐(실측상 히스토리 대부분) 사전 압축이 헛돌던 것을 바로잡는다.
         압축이 일어나면 on_compaction(covered)를 await한다. 최종 projected(변환 전)를 반환."""
         projected = self._project(all_messages, session_id)
         if not session_id:
             return projected
         for _ in range(3):
-            payload = self._to_send_projection(projected, has_image=False)
+            payload = self._to_send_projection(projected, has_image)
             areas = self._estimate_context_areas(system_msg, payload, skills, room_memory, keep_reasoning)
             if areas["total_est"] <= settings.logical_budget * CONTEXT_COMPACT_RATIO:
                 break
@@ -2018,18 +2047,27 @@ class AgentRuntime:
             projected = self._project(all_messages, session_id)
         return projected
 
-    def _store_context_breakdown(self, session_id, role, areas: dict):
-        """이미 계산된 areas(전송 payload 기준)를 debug view용으로 저장한다."""
+    def _store_context_breakdown(self, session_id, role, areas: dict, image_stats: dict | None = None):
+        """이미 계산된 areas(전송 payload 기준)를 debug view용으로 저장한다. 이미지 raw 계측
+        (개수·bytes)은 추정 토큰과 구분해 image_raw로 남긴다 — data URI 원문은 저장하지 않는다."""
         try:
             budget = settings.logical_budget
             total = areas.get("total_est", 0)
-            self._last_context[session_id] = {
+            entry = {
                 "role": role,
                 "areas": {k: v for k, v in areas.items() if k != "total_est"},
                 "total_est": total,
                 "budget": budget,
                 "pct_est": round(total / budget * 100, 1) if budget else 0,
             }
+            if image_stats and image_stats.get("count"):
+                entry["image_raw"] = {
+                    "count": image_stats.get("count", 0),
+                    "bytes": image_stats.get("bytes", 0),
+                    "est_per_image": settings.image_input_token_estimate,
+                    "estimated": True,
+                }
+            self._last_context[session_id] = entry
         except Exception as err:
             error_log.record("context_breakdown", str(err), session_id)
 

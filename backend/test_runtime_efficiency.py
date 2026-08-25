@@ -1139,3 +1139,93 @@ def test_effective_thinking_unifies_fallback_across_estimate_and_send():
     asyncio.run(rt._precompact("sid", ["x"], sys_msg, "", "", keep_reasoning=False, on_compaction=noop))
     assert not calls, "keep=False인데 reasoning 때문에 불필요한 compaction이 발생했다"
     print("OK effective_thinking 통일: 폴백 후 추정=전송 일치, 불필요 compaction 없음")
+
+
+def test_vision_context_not_undercounted():
+    """vision 이미지 입력이 context 추정에서 0으로 사라지지 않고 image_inputs 영역으로 잡힌다.
+    base64 길이를 그대로 토큰으로 계산하지 않고 이미지당 추정치를 쓰며, raw(개수·bytes)는 별도.
+    이미지 없는 요청의 기존 계산은 바뀌지 않는다."""
+    import copy
+    from app.runtime.agent import AgentRuntime
+    from app.config import settings
+
+    data_uri = "data:image/png;base64," + "A" * 4000
+    projected = [
+        {"role": "user", "content": [
+            {"type": "text", "text": "이 이미지 분석해줘"},
+            {"type": "image_url", "image_url": {"url": data_uri}},
+        ]},
+    ]
+    original = copy.deepcopy(projected)
+    sys_msg = {"role": "system", "content": "sys"}
+
+    areas = AgentRuntime._estimate_context_areas(sys_msg, projected, "", "", True)
+    stats = AgentRuntime._image_stats(projected)
+    assert areas["image_inputs"] > 0, "이미지가 context 추정에서 0으로 사라짐"
+    assert stats["count"] == 1 and stats["bytes"] > 0, stats
+    assert areas["image_inputs"] == stats["count"] * settings.image_input_token_estimate
+    # base64 길이를 그대로 토큰으로 쓰지 않는다(고정 추정 << data URI 길이)
+    assert areas["image_inputs"] < len(data_uri)
+    # total은 image_inputs를 포함
+    parts = sum(v for k, v in areas.items() if k != "total_est")
+    assert areas["total_est"] == parts
+    # 원본 image message 불변
+    assert projected == original, "원본 image message가 변형됨"
+
+    # 이미지 없는 요청: image_inputs == 0, 기존 계산 유지
+    text_only = [{"role": "user", "content": "그냥 텍스트"}]
+    a2 = AgentRuntime._estimate_context_areas(sys_msg, text_only, "", "", True)
+    assert a2["image_inputs"] == 0
+    assert AgentRuntime._image_stats(text_only) == {"count": 0, "bytes": 0}
+    print("OK vision 이미지가 image_inputs로 집계(base64 길이≠토큰, raw 별도, 원본 불변)")
+
+
+def test_precompact_uses_image_projection_and_hides_data_uri():
+    """vision 요청에서 _precompact가 has_image=True projection을 쓰고, 이미지만으로 임계를
+    넘으면 사전 compaction이 발동한다. data URI는 breakdown 저장물/로그에 노출되지 않는다."""
+    import asyncio, json
+    from app.runtime.agent import AgentRuntime
+    from app.config import settings
+
+    rt = AgentRuntime()
+    per = settings.image_input_token_estimate
+    n_images = int(settings.logical_budget * 0.75 // per) + 2  # 이미지만으로 임계 초과
+    data_uri = "data:image/png;base64," + "Z" * 200
+    projected = [
+        {"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": data_uri}}]}
+        for _ in range(n_images)
+    ]
+    sys_msg = {"role": "system", "content": "sys"}
+
+    seen_has_image = []
+    orig_to_send = rt._to_send_projection
+
+    def spy_to_send(proj, has_image):
+        seen_has_image.append(has_image)
+        return orig_to_send(proj, has_image)
+
+    calls = []
+
+    async def fake_compact(all_messages, session_id):
+        calls.append(1); return False
+
+    async def noop(covered):
+        pass
+
+    rt._to_send_projection = spy_to_send
+    rt._compact = fake_compact
+    rt._project = lambda all_messages, sid: projected
+    asyncio.run(rt._precompact("sid", ["x"], sys_msg, "", "",
+                               keep_reasoning=False, on_compaction=noop, has_image=True))
+    assert True in seen_has_image, "_precompact가 has_image=True projection을 쓰지 않음"
+    assert calls, "이미지만으로 임계를 넘겼는데 사전 compaction이 발동하지 않음"
+
+    # breakdown 저장물에 data URI가 노출되지 않는다
+    areas = AgentRuntime._estimate_context_areas(sys_msg, projected, "", "", False)
+    stats = AgentRuntime._image_stats(projected)
+    rt._store_context_breakdown("sid", "developer", areas, stats)
+    dump = json.dumps(rt.get_context_breakdown("sid"), ensure_ascii=False)
+    assert "data:image" not in dump and "base64" not in dump, "breakdown에 data URI 노출"
+    assert "image_inputs" in dump
+    print("OK vision precompact가 has_image projection 사용·임계 발동·data URI 미노출")

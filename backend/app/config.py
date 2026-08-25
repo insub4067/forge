@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     allowed_origins: str = Field("", validation_alias=AliasChoices("FORGE_ALLOWED_ORIGINS", "ALLOWED_ORIGINS"))
     # skill 주입 전면 비활성(skill 효과 A/B 실험용). 기본 False.
     skills_off: bool = False
+    # 이미지 입력 1장당 context 추정 토큰(estimated). DeepSeek vision(deepseek-v4-flash-vision-exp)은
+    # resize 후 이미지당 최대 384 토큰이라, 상한을 보수적 기본값으로 쓴다(정확한 공식은 비공개 —
+    # 계산기 안내). 실제 provider usage(measured)가 최종 권위이며, breakdown엔 이미지 개수·bytes
+    # 같은 raw 값도 함께 남겨 추후 usage와 보정한다. 다른 vision 모델을 쓰면 이 값을 조정한다.
+    image_input_token_estimate: int = 384
     # Task IR 인터프리터(Phase 1) 활성화. 기본 False — off면 완전 스킵(동작·비용 불변). A/B로
     # 켜서 관찰한다(현재는 관찰 전용: task_ir 이벤트만 발행하고 라우팅 결정을 바꾸지 않는다).
     task_ir_enabled: bool = False
