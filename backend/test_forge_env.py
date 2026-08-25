@@ -51,29 +51,67 @@ def test_legacy_unprefixed_still_work():
     print("OK 기존 접두사 없는 변수도 계속 동작")
 
 
-def test_forge_takes_priority_over_legacy():
-    out = _load({"FORGE_AUTH_TOKEN": "new", "AUTH_TOKEN": "old"})
+def test_forge_takes_priority_over_legacy_all_three_fields():
+    """세 보안 필드 모두 FORGE_*가 legacy 이름보다 우선한다."""
+    out = _load({
+        "FORGE_AUTH_TOKEN": "new", "AUTH_TOKEN": "old",
+        "FORGE_REQUIRE_AUTH": "1", "REQUIRE_AUTH": "0",
+        "FORGE_ALLOWED_ORIGINS": "https://new.example", "ALLOWED_ORIGINS": "https://old.example",
+    })
     assert out["auth_token"] == "new", out
-    print("OK FORGE_* 우선순위 > 접두사 없는 이름")
+    assert out["require_auth"] is True, out
+    assert out["allowed_origins"] == "https://new.example", out
+    print("OK 세 필드 모두 FORGE_* 우선")
 
 
-def test_lifespan_fail_closed_with_forge_require_auth():
-    """FORGE_REQUIRE_AUTH=1인데 토큰이 없으면 기동 게이트가 거부한다."""
-    code = ("from app.config import Settings;from app.auth import assert_startup_auth;"
-            "s=Settings();assert_startup_auth(s.require_auth, s.auth_token);print('OK')")
-    # 토큰 없음 → 거부
+def test_forge_require_auth_boolean_parsing():
+    """FORGE_REQUIRE_AUTH의 boolean 파싱 — 참/거짓 표현을 올바로 해석한다."""
+    for truthy in ("1", "true", "True", "yes", "on"):
+        assert _load({"FORGE_REQUIRE_AUTH": truthy})["require_auth"] is True, truthy
+    for falsy in ("0", "false", "False", "no", "off"):
+        assert _load({"FORGE_REQUIRE_AUTH": falsy})["require_auth"] is False, falsy
+    print("OK FORGE_REQUIRE_AUTH boolean 파싱")
+
+
+def test_forge_allowed_origins_priority():
+    """FORGE_ALLOWED_ORIGINS가 ALLOWED_ORIGINS보다 우선한다(콤마 문자열 그대로)."""
+    out = _load({"FORGE_ALLOWED_ORIGINS": "https://a.example,https://b.example",
+                 "ALLOWED_ORIGINS": "https://legacy.example"})
+    assert out["allowed_origins"] == "https://a.example,https://b.example", out
+    print("OK FORGE_ALLOWED_ORIGINS 우선순위")
+
+
+def test_real_lifespan_refuses_startup_without_token():
+    """실제 FastAPI lifespan을 태워 검증한다 — FORGE_REQUIRE_AUTH=1 + 토큰 없음이면 기동 거부.
+
+    assert_startup_auth 단위 호출이 아니라 TestClient로 app lifespan startup을 실제로 실행한다.
+    """
+    code = (
+        "from fastapi.testclient import TestClient\n"
+        "from app.main import app\n"
+        "import sys\n"
+        "try:\n"
+        "    with TestClient(app):\n"
+        "        pass\n"
+        "    print('STARTED')\n"
+        "except Exception as e:\n"
+        "    print('REFUSED:' + type(e).__name__ + ':' + str(e)[:120]); sys.exit(3)\n"
+    )
+    # 토큰 없이 require_auth → lifespan startup에서 거부
     r = _run(code, {"FORGE_REQUIRE_AUTH": "1"})
-    assert r.returncode != 0, "토큰 없이 fail-closed가 통과했다"
-    assert "AUTH_TOKEN" in (r.stderr + r.stdout)
-    # 토큰 있음 → 통과
+    assert r.returncode == 3, f"기동이 거부되지 않음: {r.stdout} / {r.stderr}"
+    assert "REFUSED" in r.stdout and "AUTH_TOKEN" in r.stdout, r.stdout
+    # 토큰 있으면 lifespan 통과(STARTED). DB 등 다른 startup은 로컬 환경에 의존.
     r2 = _run(code, {"FORGE_REQUIRE_AUTH": "1", "FORGE_AUTH_TOKEN": "tok"})
-    assert r2.returncode == 0, r2.stderr
-    print("OK lifespan fail-closed가 FORGE_REQUIRE_AUTH/FORGE_AUTH_TOKEN으로 동작")
+    assert "STARTED" in r2.stdout, f"토큰 있는데 기동 실패: {r2.stdout} / {r2.stderr}"
+    print("OK 실제 lifespan이 토큰 없는 FORGE_REQUIRE_AUTH=1을 거부")
 
 
 if __name__ == "__main__":
     test_forge_prefixed_vars_apply()
     test_legacy_unprefixed_still_work()
-    test_forge_takes_priority_over_legacy()
-    test_lifespan_fail_closed_with_forge_require_auth()
+    test_forge_takes_priority_over_legacy_all_three_fields()
+    test_forge_require_auth_boolean_parsing()
+    test_forge_allowed_origins_priority()
+    test_real_lifespan_refuses_startup_without_token()
     print("\n전체 통과")
