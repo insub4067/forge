@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from .api.routes import router
-from .auth import TokenAuthMiddleware
+from .auth import TokenAuthMiddleware, parse_allowed_origins
 from .config import settings
 from .db import store
 from .db.models import Base
@@ -119,7 +119,8 @@ if settings.auth_token:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # 화이트리스트 설정 시 그 origin만, 미설정이면 '*'(로컬 개발). 원격은 실제 도메인 나열 권장.
+    allow_origins=parse_allowed_origins(settings.allowed_origins),
     allow_methods=["*"],
     allow_headers=["*"],
 )

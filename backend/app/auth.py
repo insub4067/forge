@@ -12,6 +12,12 @@ FORGE_AUTH_TOKEN이 설정되면 모든 /api 요청(WebSocket 포함)과 /upload
 from urllib.parse import parse_qs
 
 
+def parse_allowed_origins(csv: str) -> list:
+    """CORS 허용 origin CSV → 리스트. 비어 있으면 ['*'](로컬 개발 기본)."""
+    origins = [o.strip() for o in (csv or "").split(",") if o.strip()]
+    return origins or ["*"]
+
+
 def assert_startup_auth(require_auth: bool, auth_token: str) -> None:
     """원격 운영 모드 fail-closed 게이트(순수 함수). require_auth인데 토큰이 없으면 예외를
     던져 기동을 거부한다. 인증 없이 외부에 노출되는 것을 조용히 허용하지 않기 위함."""

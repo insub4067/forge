@@ -67,3 +67,12 @@ def test_remote_mode_fail_closed():
     # 로컬 개발 기본(require_auth=False) → 토큰 유무와 무관하게 통과(기존 동작 불변)
     assert_startup_auth(False, "")
     assert_startup_auth(False, "secret")
+
+
+def test_parse_allowed_origins():
+    """CORS 화이트리스트 파싱: 미설정 '*', 설정 시 그 origin만, 공백/빈 항목 정리."""
+    from app.auth import parse_allowed_origins
+    assert parse_allowed_origins("") == ["*"]
+    assert parse_allowed_origins("   ") == ["*"]
+    assert parse_allowed_origins("https://a.com") == ["https://a.com"]
+    assert parse_allowed_origins("https://a.com, https://b.com ,") == ["https://a.com", "https://b.com"]

@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # 원격 운영 모드. True면 fail-closed — auth_token이 없으면 서버가 기동을 거부한다.
     # 기본 False(로컬 개발): 기존 동작 그대로. 외부 노출 배포는 FORGE_REQUIRE_AUTH=1로 켠다.
     require_auth: bool = False
+    # 허용 CORS origin(콤마 구분). 설정 시 화이트리스트, 미설정이면 '*'(로컬 개발 기본).
+    # 외부 노출 배포는 실제 도메인만 나열해 cross-origin 접근을 좁힌다.
+    allowed_origins: str = ""
     # skill 주입 전면 비활성(skill 효과 A/B 실험용). 기본 False.
     skills_off: bool = False
     # Developer를 항상 pro로(실험용). 기본 False — 평소 flash+think-medium, 실패 시에만 pro 승격.
