@@ -110,14 +110,19 @@ cd backend && .venv/bin/python gate_eval.py      → Gate 판정 정확도 100%(
 - 스케줄러 다중 인스턴스 exactly-once는 여전히 미보장(설계 단일 인스턴스). 크래시 복구는 기동
   시점 전량 리셋 방식 — 실행 중 인스턴스가 있는 다중 배포에는 heartbeat 기반이 필요.
 
-**다음 작업 우선순위**
-1. Gate 강화: F7 감지 완료(비차단 표면화, `d10b3f7`). 남은 F6(무관 파일 범위 대조) 추가 — gate_eval로 회귀 고정. (선택) test_weakening을 verdict 차단으로 승격할지 정책 결정.
-2. 대형 파일 2차 분리 순서(책임 기준):
-   - agent.py: **verification 계층**(`_verify`/`_verify_gates`/`_verify_integration`/`_gates_report`)을
-     `runtime/verification.py`로(다음 후보 — 정책은 이미 분리됨, 검증 실행은 sandbox 의존이라 주입 필요).
+**진행 완료(2026-08-25 후속)**
+- F7 테스트 약화 감지·표면화(`d10b3f7`), F6 민감 파일 변경 감지·표면화(`dc287c3`, 부분 완화).
+- 원격 모드 CORS 화이트리스트(`e72ecae`).
+- agent.py 2차 분리: Acceptance Gate 실행·보고 → `verification.py`(`9e22cdd`, 2549→2473줄).
+- 스케줄러 crash-stuck 복구(`d717095`).
+
+**남은 작업 우선순위**
+1. Gate 강화(선택): F6 verdict에 '변경 파일 범위 화이트리스트 대조' 추가(현재는 표면화만). test_weakening/
+   sensitive_change를 verdict 차단으로 승격할지 정책 결정(false-block 위험 검토).
+2. 대형 파일 분리 계속:
+   - agent.py: `_verify`/`_verify_integration`은 `self._runtime_smoke` 결합 → smoke 추출/주입 후 verification.py로.
      그다음 **context/prompt 빌더**(`_system_for`/`_select_skills`/`_compact`/`_project`),
      **memory 추출**(`_extract_project_memory`/`_parse_memory_candidates`).
-   - routes.py(1133)·store.py(1086)는 도메인별 라우터/리포지토리 분할, App.vue(2017)·style.css(4318)는
-     패널별 컴포넌트/CSS 모듈 분할 — 각각 회귀 스냅샷 확보 후.
-3. 원격 모드 CORS 화이트리스트 + 보안 preflight를 기동 게이트와 연동.
-4. 스케줄러 job heartbeat로 crash-stuck 복구(위 마이그레이션 1단계).
+   - routes.py(1133)·store.py(1086) 도메인별 분할, App.vue(2017)·style.css(4318) 패널별 분할 — 회귀 스냅샷 후.
+3. 스케줄러 다중 인스턴스 exactly-once: job heartbeat/claimed_at 기반(현 crash 복구는 단일 인스턴스 기동 리셋).
+   durable worker 전환은 여전히 별도 대형 작업.
