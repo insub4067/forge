@@ -73,3 +73,40 @@ def test_detect_sensitive_changes():
     assert ".env" in got and "server.pem" in got and "ci.yml" in got and "pnpm-lock.yaml" in got and "id_ed25519" in got, w
     assert "agent.py" not in got and ".env.example" not in got, w
     assert len(w) == 5, w
+
+
+def test_detect_skipped_tests_in_diff():
+    """실패하던 테스트를 삭제 대신 skip/xfail로 우회하는 것을 diff에서 감지(numstat로는 못 잡음)."""
+    from app.runtime.change_guard import detect_skipped_tests
+    diff = (
+        "diff --git a/test_login.py b/test_login.py\n"
+        "--- a/test_login.py\n"
+        "+++ b/test_login.py\n"
+        "@@ -1,3 +1,4 @@\n"
+        " def test_login():\n"
+        "+    import pytest; pytest.skip('flaky')\n"
+        "     assert login()\n"
+    )
+    w = detect_skipped_tests(diff)
+    assert w and "test_login.py" in w[0], w
+
+    # 데코레이터 마커도 감지
+    dec = ("+++ b/tests/test_api.py\n"
+           "+@pytest.mark.xfail(reason='TODO')\n")
+    assert detect_skipped_tests(dec), dec
+
+    # JS .skip/.only
+    js = ("+++ b/src/foo.test.js\n"
+          "+  it.only('x', () => {})\n")
+    assert detect_skipped_tests(js), js
+
+    # 비테스트 파일의 .skip은 무시(테스트 파일 한정)
+    non = ("+++ b/app/util.py\n"
+           "+    queue.skip(3)\n")
+    assert detect_skipped_tests(non) == [], non
+
+    # skip을 제거(-)하는 변경은 경고 아님(오히려 복원)
+    removed = ("+++ b/test_x.py\n"
+               "-    pytest.skip('x')\n")
+    assert detect_skipped_tests(removed) == [], removed
+    print("OK skip/xfail/only 추가 감지(테스트 파일 한정, 추가 라인만)")

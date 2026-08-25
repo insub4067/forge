@@ -80,6 +80,39 @@ def detect_sensitive_changes(paths) -> list[str]:
     return out
 
 
+# 실패하던 테스트를 삭제하지 않고 조용히 건너뛰는 우회 마커(numstat 라인 수로는 안 잡힌다).
+# 테스트 파일 + 추가(+) 라인으로 한정해 광범위 오탐을 줄인다.
+_SKIP_SUBSTR = (
+    "@pytest.mark.skip", "@pytest.mark.xfail", "pytest.skip(", "@unittest.skip",
+    "unittest.skip(", ".skip(", ".only(", "xit(", "xdescribe(", "test.only(", "it.only(",
+    "describe.only(", "@pytest.mark.skipif",
+)
+
+
+def detect_skipped_tests(diff_text: str) -> list[str]:
+    """`git diff HEAD`(내용)에서 테스트 파일에 **새로 추가된** skip/xfail/only 마커를 감지한다.
+
+    테스트를 삭제(numstat가 잡음)하는 대신 skip/xfail로 우회하거나 .only로 나머지를 건너뛰는
+    약화를 잡는다. 테스트 파일 + 추가(+) 라인으로 한정해 오탐을 줄인다. 비차단 — 사실만 표면화.
+    """
+    warnings: list[str] = []
+    cur_path = ""
+    in_test = False
+    for line in (diff_text or "").splitlines():
+        if line.startswith("+++ b/"):
+            cur_path = line[6:]
+            in_test = is_test_path(cur_path)
+        elif line.startswith("+++") or line.startswith("---"):
+            continue
+        elif in_test and line.startswith("+"):
+            body = line[1:]
+            for m in _SKIP_SUBSTR:
+                if m in body:
+                    warnings.append(f"테스트 skip/xfail/only 추가({m.strip()}): {cur_path}")
+                    break
+    return warnings
+
+
 def detect_test_weakening(numstat: str) -> list[str]:
     """`git diff --numstat HEAD` 출력에서 테스트 약화 신호를 뽑는다.
 

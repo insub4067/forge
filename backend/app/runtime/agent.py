@@ -1564,6 +1564,16 @@ class AgentRuntime:
             )
             out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
             weak = change_guard.detect_test_weakening(out.decode("utf-8", "replace"))
+            # 삭제/라인 순감소(numstat)로 안 잡히는 skip/xfail/only 우회를 diff 내용으로 추가 감지.
+            try:
+                dproc = await asyncio.create_subprocess_exec(
+                    "git", "-C", ws, "diff", "--unified=0", "HEAD",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                )
+                dout, _ = await asyncio.wait_for(dproc.communicate(), timeout=10)
+                weak += change_guard.detect_skipped_tests(dout.decode("utf-8", "replace"))
+            except Exception:
+                pass
             if weak:
                 await send("test_weakening", {"warnings": weak})
         except Exception as err:  # noqa: BLE001 — 감지 실패가 run을 깨뜨리지 않는다
