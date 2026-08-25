@@ -1,7 +1,7 @@
 <script setup>
 // 세션 상세 패널 — 컨텍스트·토큰·비용·에이전트/모델별 사용량·실행 이력.
 // App.vue의 showSessionDetail 관련 상태·함수·마크업을 이 컴포넌트로 이관.
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, nextTick, onMounted, computed } from 'vue'
 import html2canvas from 'html2canvas'
 import { balance as adminBalance, loadBalance } from '../store'
 
@@ -24,6 +24,19 @@ const sessionMetrics = ref(null)
 const ctxBreakdown = ref(null)  // 마지막 LLM 호출의 context 영역 분해(debug view)
 const toolUsage = ref([])  // 도구별 호출 횟수(어떤 툴 몇 번)
 const CTX_LABELS = { system_base_role: 'System·규칙', memory: '메모리', skills: 'Skills', history_content: '대화', tool_results: '도구 결과', reasoning_content: '추론', tool_call_arguments: '도구 인자', image_inputs: '이미지(추정)' }
+// 계층형 Context Explorer의 카테고리 라벨(build_context_tree category와 대응).
+const TREE_LABELS = { system: 'System', rules: '역할 규칙', memory: '메모리', skills: 'Skills', plan: '계획', task_ir: 'Task IR', summary: '요약', conversation: '대화', reasoning: '추론', tool_calls: '도구 호출', tool_results: '도구 결과', images: '이미지', reserved_output: '예약 출력' }
+// tree를 큰 소비 항목 우선으로 정렬하되 reserved_output은 맨 뒤로(입력 아님).
+const sortedTree = computed(() => {
+  const t = (ctxBreakdown.value && ctxBreakdown.value.tree) || []
+  return [...t].sort((a, b) => {
+    if (a.category === 'reserved_output') return 1
+    if (b.category === 'reserved_output') return -1
+    return (b.estimated_tokens || 0) - (a.estimated_tokens || 0)
+  })
+})
+const ctxTopTokens = computed(() => sortedTree.value.filter(n => n.category !== 'reserved_output').reduce((m, n) => Math.max(m, n.estimated_tokens || 0), 0))
+function ctxNodePct(tok) { const t = ctxBreakdown.value && ctxBreakdown.value.total_est; return t ? Math.round((tok || 0) / t * 100) : 0 }
 const showRunHistory = ref(false)
 const capturing = ref(false)
 const panelEl = ref(null)   // 캡처 대상: 패널 프레임(헤더+본문)
@@ -223,6 +236,25 @@ onMounted(async () => {
           <div class="ctx-bar"><div class="ctx-fill" :style="{ width: (ctxBreakdown.total_est ? Math.round(tok / ctxBreakdown.total_est * 100) : 0) + '%' }"></div></div>
           <span class="ctx-tok mono">{{ tok.toLocaleString() }}</span>
         </div>
+
+        <details v-if="sortedTree.length" class="ctx-explorer">
+          <summary>Context Explorer <span class="ctx-est-tag">추정{{ ctxBreakdown.measured_total ? '·실측' : '' }}</span></summary>
+          <div v-for="n in sortedTree" :key="n.id" class="ctx-node" :class="{ 'ctx-top': n.estimated_tokens === ctxTopTokens && n.category !== 'reserved_output' }">
+            <div class="ctx-row">
+              <span class="ctx-label">{{ TREE_LABELS[n.category] || n.category }}</span>
+              <div class="ctx-bar"><div class="ctx-fill" :style="{ width: ctxNodePct(n.estimated_tokens) + '%' }"></div></div>
+              <span class="ctx-tok mono">{{ (n.estimated_tokens || 0).toLocaleString() }}</span>
+            </div>
+            <details v-if="n.children && n.children.length" class="ctx-children">
+              <summary>{{ n.children.length }}개 항목</summary>
+              <div v-for="c in n.children" :key="c.id" class="ctx-child">
+                <span class="ctx-child-label">{{ c.label }}</span>
+                <span v-if="c.content_ref" class="ctx-ref" :title="c.content_ref">저장됨</span>
+                <span class="ctx-tok mono">{{ (c.estimated_tokens || 0).toLocaleString() }}</span>
+              </div>
+            </details>
+          </div>
+        </details>
       </div>
 
       <div v-if="toolUsage.length" class="admin-section">
