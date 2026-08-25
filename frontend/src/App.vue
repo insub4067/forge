@@ -253,10 +253,26 @@ async function fetchStatus(id) {
   // 승인도 동일하게 복구 — 리로드로 스트림이 끊기면 인라인 승인 버튼이 사라져 막힌다
   if (st.waiting_for === 'approval' && st.pending) {
     if (!activeApproval.value) activeApproval.value = st.pending // {id, tool, args}
-  } else {
+  } else if (st.waiting_for !== 'approval') {
     activeApproval.value = null
   }
   return st
+}
+
+// PG authoritative store에서 미결(requested) 승인을 복원한다. 메모리 status는 재시작 시
+// 초기화되므로, 서버가 재시작됐거나 SSE가 끊긴 사이에도 승인 카드를 다시 띄운다.
+async function restorePendingApproval(id) {
+  if (!id || activeApproval.value) return
+  try {
+    const res = await fetch(`/api/sessions/${id}/pending-approvals`)
+    if (!res.ok) return
+    const { pending } = await res.json()
+    if (pending && pending.length) {
+      const p = pending[0]
+      // PG엔 원문 args를 두지 않으므로 안전 preview로 표시한다(민감정보 비노출).
+      activeApproval.value = { id: p.id, tool: p.tool_name, args: {}, preview: p.preview }
+    }
+  } catch {}
 }
 
 let wasRunning = false
@@ -547,6 +563,8 @@ async function loadMessages(isNew = false) {
   } finally {
     loadingMessages.value = false
   }
+  // 세션 진입 시 PG에서 미결 승인 복원(재시작·SSE 재연결로 인라인 카드가 사라진 경우).
+  restorePendingApproval(id)
 }
 
 // 타이틀 탭 → 방 설정 시트(이름·모드 변경). 방이 없으면 방 목록을 연다.
