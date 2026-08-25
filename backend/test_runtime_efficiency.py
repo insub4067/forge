@@ -554,28 +554,34 @@ def test_runtime_smoke_fails_on_dead_backend():
     print("OK 런타임 스모크가 서버 생존을 검증(축 A)")
 
 
+def _model_assistant(**kw):
+    """모델(fake)이 thinking 과정에서 생성한 assistant를 나타내는 헬퍼.
+    _fake_produced 마커로 표시하며, fake는 이 마커가 붙은 assistant에만 reasoning replay를
+    요구한다(deterministic 완료 보고·수동 삽입·legacy·합성 assistant는 면제)."""
+    return {"role": "assistant", "_fake_produced": True, **kw}
+
+
 class _StrictDeepSeekFake:
-    """DeepSeek V4 thinking mode 계약을 강제하는 fake adapter.
+    """DeepSeek V4 thinking mode 계약을 강제하는 fake adapter(모델 산출물만 추적).
 
-    실제 계약(codex #24500, opencode #24190, qwen-code #3658에서 확인): thinking=True +
-    실제 요청에 tools가 실리면, 히스토리의 **모든** assistant 산출물(tool_calls 또는 content
-    보유)에 reasoning_content가 있어야 한다. 가장 최근 하나만 정상이고 과거·중간 assistant의
-    reasoning이 누락되면 400. tool call이 없었던 중간 assistant의 reasoning도 보존돼야 한다.
-    (이전 fake는 역순으로 가장 최근 tool_calls assistant 하나만 검사해 계약보다 약했다.)
+    실제 계약(codex #24500, opencode #24190, qwen-code #3658에서 확인): thinking mode에서
+    모델이 생성한 reasoning_content를 후속 요청에 되돌려줘야 한다(누락 시 400). 임의의 모든
+    assistant에게 reasoning 존재를 요구하는 것은 계약보다 강하다 — deterministic 완료 보고,
+    수동 삽입 메시지, 과거 non-thinking 응답, legacy/import history, 합성 메시지에는 애초에
+    reasoning이 없었을 수 있다.
 
-    tools가 없거나 thinking이 꺼진 요청에서는 reasoning이 없어도 된다.
+    그래서 fake는 '이 assistant를 모델이 생성했다'고 명시 표시된 것(_fake_produced 마커,
+    _model_assistant() 헬퍼로 생성)에만 reasoning replay를 요구한다. thinking+tools 요청에서
+    표시된 assistant의 reasoning_content가 누락되면 400. 표시 없는 assistant는 검사하지 않는다.
+    legacy 400은 추측이 아니라 fail_first로 명시적으로 발생시킨다.
+
+    tools가 없거나 thinking이 꺼진 요청에서는 replay를 요구하지 않는다.
     """
     requires_reasoning_replay = True
 
     def __init__(self, fail_first: bool = False):
         self.calls: list[dict] = []
-        self._fail_first = fail_first  # 첫 호출만 강제 400(폴백 경로 검증용)
-
-    @staticmethod
-    def _is_reasoning_bearing(m: dict) -> bool:
-        # thinking 산출물로 취급하는 assistant: tool_calls를 냈거나 실제 답변 content가 있는 것.
-        # 요약 checkpoint 같은 빈/보조 assistant는 대상이 아니다.
-        return m.get("role") == "assistant" and bool(m.get("tool_calls") or m.get("content"))
+        self._fail_first = fail_first  # 첫 호출만 강제 400(명시적 legacy 폴백 검증용)
 
     async def stream_chat(self, messages, tools=None, thinking=False, reasoning_effort=None):
         self.calls.append({"thinking": thinking, "has_tools": bool(tools),
@@ -586,7 +592,9 @@ class _StrictDeepSeekFake:
                 "must be passed back to the API")
         if thinking and tools:
             for m in messages:
-                if self._is_reasoning_bearing(m) and "reasoning_content" not in m:
+                # 모델이 생성했다고 표시된 assistant만 reasoning replay를 요구한다.
+                if (m.get("role") == "assistant" and m.get("_fake_produced")
+                        and "reasoning_content" not in m):
                     raise RuntimeError(
                         "DeepSeek API 오류 400: The reasoning_content in the "
                         "thinking mode must be passed back to the API")
@@ -594,13 +602,13 @@ class _StrictDeepSeekFake:
 
 
 def _tool_loop_history():
-    """reasoning + tool_call → tool result 를 포함한 발전된 tool-loop 히스토리."""
+    """reasoning + tool_call → tool result 를 포함한 발전된 tool-loop 히스토리.
+    assistant는 모델 산출물(_fake_produced)로 표시한다."""
     return [
         {"role": "user", "content": "작업"},
-        {"role": "assistant", "content": "",
-         "reasoning_content": "단계별 사고" * 50,
-         "tool_calls": [{"id": "c1", "type": "function",
-                         "function": {"name": "read_file", "arguments": "{}"}}]},
+        _model_assistant(content="", reasoning_content="단계별 사고" * 50,
+                         tool_calls=[{"id": "c1", "type": "function",
+                                      "function": {"name": "read_file", "arguments": "{}"}}]),
         {"role": "tool", "tool_call_id": "c1", "content": "파일 내용"},
     ]
 
@@ -849,12 +857,11 @@ def test_reasoning_thinking_persists_across_multiple_steps():
     async def run_steps():
         for n in range(3):
             await one_step()  # 400이면 예외
-            # 다음 스텝 히스토리 성장: reasoning+tool_call → tool result
-            history.append({
-                "role": "assistant", "content": "",
-                "reasoning_content": f"사고{n}" * 20,
-                "tool_calls": [{"id": f"s{n}", "type": "function",
-                                "function": {"name": "read_file", "arguments": "{}"}}]})
+            # 다음 스텝 히스토리 성장: 모델 산출 assistant(reasoning+tool_call) → tool result
+            history.append(_model_assistant(
+                content="", reasoning_content=f"사고{n}" * 20,
+                tool_calls=[{"id": f"s{n}", "type": "function",
+                             "function": {"name": "read_file", "arguments": "{}"}}]))
             history.append({"role": "tool", "tool_call_id": f"s{n}", "content": "결과"})
 
     asyncio.run(run_steps())
@@ -891,22 +898,23 @@ def test_reasoning_replay_survives_auto_resume_history():
     asyncio.run(drive(restored, {"retries": 0}))
     assert fake.calls[0]["thinking"] is True and len(fake.calls) == 1, "복원 history에서 400/재시도 발생"
 
-    # (b) reasoning 누락된 구 복원 history — 폴백이 role invocation 범위로 완주시킴
+    # (b) legacy/구 데이터: reasoning이 원래 없는 assistant는 fake의 추측이 아니라 provider가
+    #     명시적으로 400을 내는 경우에만 폴백해야 한다. fail_first로 그 400을 명시적으로 발생시킨다.
     legacy = [
         {"role": "user", "content": "작업"},
-        {"role": "assistant", "content": "",
+        {"role": "assistant", "content": "",  # legacy — _fake_produced 표시 없음(reasoning 원래 없음)
          "tool_calls": [{"id": "c1", "type": "function",
-                         "function": {"name": "read_file", "arguments": "{}"}}]},  # reasoning 없음
+                         "function": {"name": "read_file", "arguments": "{}"}}]},
         {"role": "tool", "tool_call_id": "c1", "content": "내용"},
     ]
-    fake2 = _StrictDeepSeekFake()
+    fake2 = _StrictDeepSeekFake(fail_first=True)  # 명시적 provider 400
     rt._adapter_for = lambda model: fake2
     counters = {"retries": 0}
     asyncio.run(drive(legacy, counters))
-    assert len(fake2.calls) == 2, "폴백 재시도가 없었다"
+    assert len(fake2.calls) == 2, "명시적 400 후 폴백 재시도가 없었다"
     assert fake2.calls[1]["thinking"] is False, "폴백이 thinking을 끄지 않았다"
     assert counters["retries"] == 1
-    print("OK Auto Resume 복원 history 정상(보존 시 유지, 구 데이터는 role invocation 폴백)")
+    print("OK Auto Resume 복원 history 정상(보존 시 유지, legacy는 명시적 400에서만 폴백)")
 
 
 def test_fold_duplicate_id_past_failure_not_folded():
@@ -932,81 +940,72 @@ def test_fold_duplicate_id_past_failure_not_folded():
     print("OK 중복 id에서 과거 실패는 보존, 이후 성공만 접힘(protocol 매칭)")
 
 
-def test_strict_fake_and_replay_over_full_history():
-    """강화된 계약: thinking+tools에서 모든 관련 assistant reasoning이 보존돼야 한다.
-
-    (a) 운영 코드는 keep_reasoning일 때 히스토리 전체를 유지하므로, tool_call 없는 중간
-        assistant를 포함한 다턴 히스토리도 400 없이 통과한다.
-    (b) 과거/중간 assistant의 reasoning이 하나라도 누락되면 강화된 fake가 400을 잡는다
-        (가장 최근만 보던 약한 검사로는 못 잡던 경우).
-    (c) compaction 경계(요약 checkpoint + tail)에서도 tail assistant의 reasoning이 유지돼 통과.
+def test_strict_fake_tracks_only_model_produced_assistants():
+    """strict fake는 모델 산출로 표시된 assistant(_fake_produced)만 reasoning replay를 요구하고,
+    deterministic 완료 보고·legacy·합성 assistant에는 존재하지 않던 reasoning을 강요하지 않는다.
     """
     import asyncio, copy
     from app.runtime.agent import AgentRuntime
     from app.tools.registry import TOOL_SCHEMAS
 
-    rt = AgentRuntime()
-
-    # tool_call 없는 중간 assistant를 포함한 다턴 히스토리(전부 reasoning 보유)
-    full = [
-        {"role": "user", "content": "작업"},
-        {"role": "assistant", "content": "", "reasoning_content": "R1",
-         "tool_calls": [{"id": "c1", "type": "function",
-                         "function": {"name": "read_file", "arguments": "{}"}}]},
-        {"role": "tool", "tool_call_id": "c1", "content": "파일"},
-        {"role": "assistant", "content": "중간 생각만", "reasoning_content": "R2"},  # tool call 없음
-        {"role": "user", "content": "계속"},
-        {"role": "assistant", "content": "", "reasoning_content": "R3",
-         "tool_calls": [{"id": "c2", "type": "function",
-                         "function": {"name": "grep", "arguments": "{}"}}]},
-        {"role": "tool", "tool_call_id": "c2", "content": "결과"},
-    ]
-    fake = _StrictDeepSeekFake()
-    rt._adapter_for = lambda model: fake
-    original = copy.deepcopy(full)
-
-    async def drive(hist):
-        async for _ in rt._stream_with_recovery(
-            "deepseek-v4-flash", hist, TOOL_SCHEMAS, True, "medium", "s-full", {"retries": 0}
-        ):
-            pass
-
-    asyncio.run(drive(full))  # (a) 400이면 예외
-    assert len(fake.calls) == 1, "약하지 않은 계약에서 재시도 발생"
-    assert full == original, "원본 history 변형(deep equality 실패)"
-
-    # (b) 중간 assistant reasoning 누락 → 강화 fake가 직접 잡는지(가장 최근은 정상)
-    async def call_fake_direct(msgs):
+    async def call_direct(msgs, tools=TOOL_SCHEMAS, thinking=True):
         f = _StrictDeepSeekFake()
         raised = False
         try:
-            async for _ in f.stream_chat(msgs, TOOL_SCHEMAS, thinking=True):
+            async for _ in f.stream_chat(msgs, tools, thinking=thinking):
                 pass
         except RuntimeError:
             raised = True
         return raised
 
-    missing_mid = copy.deepcopy(full)
-    del missing_mid[3]["reasoning_content"]  # tool call 없는 중간 assistant reasoning 제거
-    assert asyncio.run(call_fake_direct(missing_mid)), "중간 assistant reasoning 누락을 못 잡음"
-
-    missing_past = copy.deepcopy(full)
-    del missing_past[1]["reasoning_content"]  # 과거 tool_call assistant reasoning 제거(최근은 정상)
-    assert asyncio.run(call_fake_direct(missing_past)), "과거 assistant reasoning 누락을 못 잡음"
-
-    # (c) compaction 경계: 요약 checkpoint(user) + tail. tail assistant reasoning 유지 → 통과
-    compacted = [
-        {"role": "user", "content": "[이전 작업 요약 — 컨텍스트 압축됨]\n...요약..."},
-        {"role": "assistant", "content": "", "reasoning_content": "R9",
-         "tool_calls": [{"id": "c9", "type": "function",
-                         "function": {"name": "read_file", "arguments": "{}"}}]},
-        {"role": "tool", "tool_call_id": "c9", "content": "tail"},
+    # 모델 산출 다중 assistant(tool_call 있는 것 + tool_call 없는 중간 사고) — 전부 reasoning 보유
+    full = [
+        {"role": "user", "content": "작업"},
+        _model_assistant(content="", reasoning_content="R1",
+                         tool_calls=[{"id": "c1", "type": "function",
+                                      "function": {"name": "read_file", "arguments": "{}"}}]),
+        {"role": "tool", "tool_call_id": "c1", "content": "파일"},
+        _model_assistant(content="중간 생각만", reasoning_content="R2"),  # tool call 없는 모델 산출
+        {"role": "user", "content": "계속"},
+        _model_assistant(content="", reasoning_content="R3",
+                         tool_calls=[{"id": "c2", "type": "function",
+                                      "function": {"name": "grep", "arguments": "{}"}}]),
+        {"role": "tool", "tool_call_id": "c2", "content": "결과"},
     ]
-    fake2 = _StrictDeepSeekFake()
-    rt._adapter_for = lambda model: fake2
-    asyncio.run(drive(compacted))
-    assert len(fake2.calls) == 1, "compaction 경계에서 400/재시도 발생"
-    print("OK 강화 계약: 전체 assistant reasoning 보존·중간 누락 검출·compaction 경계 통과")
+    original = copy.deepcopy(full)
+
+    # 1. 모델 산출 assistant 전체 reasoning replay → 통과
+    assert not asyncio.run(call_direct(full)), "전체 reasoning 보존인데 400"
+    assert full == original, "원본 history 변형"
+
+    # 2. 과거 tool_call assistant reasoning 하나 누락(최신은 정상) → 400
+    mp = copy.deepcopy(full); del mp[1]["reasoning_content"]
+    assert asyncio.run(call_direct(mp)), "과거 reasoning 누락을 못 잡음"
+
+    # 3. tool call 없는 모델 산출 중간 assistant reasoning 누락 → 400
+    mm = copy.deepcopy(full); del mm[3]["reasoning_content"]
+    assert asyncio.run(call_direct(mm)), "중간(tool 없음) reasoning 누락을 못 잡음"
+
+    # 4. deterministic 완료 보고(모델 산출 아님, reasoning 없음) → 그것만으로는 400 아님
+    with_report = copy.deepcopy(full)
+    with_report.append({"role": "assistant", "content": "완료했습니다. ✓ 로그인"})  # _fake_produced 없음
+    assert not asyncio.run(call_direct(with_report)), "완료 보고에 reasoning 강요(과잉 계약)"
+
+    # 5. legacy/합성 history(모델 산출 표시 없음, reasoning 없음) → 그것만으로는 400 아님
+    legacy = [
+        {"role": "user", "content": "작업"},
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"id": "x", "type": "function",
+                         "function": {"name": "read_file", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "x", "content": "내용"},
+    ]
+    assert not asyncio.run(call_direct(legacy)), "legacy assistant에 reasoning 강요(과잉 계약)"
+
+    # 6. tools 없음 / thinking off → replay 요구 안 함
+    assert not asyncio.run(call_direct(mp, tools=None, thinking=True)), "tools 없는데 replay 요구"
+    assert not asyncio.run(call_direct(mp, tools=TOOL_SCHEMAS, thinking=False)), "thinking off인데 replay 요구"
+
+    print("OK strict fake는 모델 산출물만 추적(완료 보고·legacy·합성 면제, tools/thinking off 면제)")
 
 
 def test_estimate_context_areas_counts_all_regions():
