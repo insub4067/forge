@@ -15,7 +15,7 @@ def make_runtime(role_status="done", route_kind="code"):
     async def fake_run_role(role, all_messages, send, session_id, ws, state,
                             recent_calls, step_base, room_memory="", retry_count=0,
                             tools=None, skills="", complexity="normal", escalate=False, has_image=False,
-                            plan=""):
+                            plan="", requirements=""):
         calls.append((role, escalate))
         if role == "developer":
             state["files_changed"].append("app.py")  # 정상 구현 run(변경 있음)

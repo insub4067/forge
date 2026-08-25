@@ -139,7 +139,7 @@ def _make_run_rt(gates, verify_states, recovery_gates=None, recovery_raises=Fals
     async def fake_run_role(role, all_messages, send, session_id, ws, state,
                             recent_calls, step_base, room_memory="", retry_count=0,
                             tools=None, skills="", complexity="normal", escalate=False,
-                            has_image=False, plan="", persist=True):
+                            has_image=False, plan="", requirements="", persist=True):
         role_calls.append(role)
         if role == "gate_recovery":
             recovery_ctx.append(all_messages)
@@ -393,6 +393,9 @@ def test_resolve_completion_verification_invariant():
     assert r("unavailable", "passed") == "completed_unverified"
     # gate 없음은 실패가 아니다
     assert "failed" not in r("none", "passed")
+    # Task IR requirement 미검증(traceability gap)이면 gate/verify가 다 통과해도 completed 아님.
+    assert r("passed", "passed", True) == "completed_unverified"
+    assert r("passed", "passed", False) == "completed"   # 기본값은 기존 동작
 
 
 def test_needs_gate_recovery_scope():
@@ -413,6 +416,59 @@ def test_coverage_kind_categories():
     assert k(2, ["a.py"], True, True) == "recovered_gated"
 
 
+async def test_run_requirement_gap_downgrades():
+    """Task IR requirement가 gate로 검증되지 않으면 completed로 나가지 않는다(강등).
+
+    gate 자체는 통과했지만 그 gate가 어떤 requirement에도 연결되지 않은 상황 —
+    "빌드·테스트는 통과했는데 사용자가 요구한 것은 확인 안 됨"이 false_completion이다.
+    """
+    gates = [_gate(1, "로그인", "echo ok", "ok")]          # requirement_id 없음
+    rt, commits, _ = _make_run_rt(gates, verify_states=[("passed", "v1"), ("passed", "v2")])
+    rt._task_ir_reqs["s1"] = [{"id": "R1", "text": "다크모드 토글"}]
+    data = await _run_rt(rt)
+    assert data.get("status") == "completed_unverified", data
+    assert commits != [], commits                          # 강등이지 차단이 아니다(로컬 커밋은 함)
+    assert commits[0]["push"] is False, "미검증 요구사항은 push 금지"
+    # 무엇이 미검증인지 보고에 드러난다(사유만 말하고 대상을 숨기지 않는다).
+    assert "다크모드 토글" in data.get("content", ""), data
+    print("run(requirement gap): OK — 강등 + NO push + 미검증 요구사항 명시")
+
+
+async def test_run_requirement_traced_stays_completed():
+    """requirement가 passed gate로 이어지면 강등하지 않는다(false-block 방지)."""
+    g = _gate(1, "다크모드", "echo ok", "ok")
+    g["requirement_id"] = "R1"
+    rt, commits, _ = _make_run_rt([g], verify_states=[("passed", "v1"), ("passed", "v2")])
+    rt._task_ir_reqs["s1"] = [{"id": "R1", "text": "다크모드 토글"}]
+    data = await _run_rt(rt)
+    assert data.get("status") == "completed", data
+    assert commits[0]["push"] is True, "검증된 완료는 기존대로 push"
+    assert "미검증" not in data.get("content", ""), data
+    print("run(requirement traced): OK — 강등 없음 + push")
+
+
+def test_requirements_block_gives_ids_to_model():
+    """requirement id를 프롬프트에 실제로 넣어야 gate가 연결될 수 있다(빈 입력은 무동작)."""
+    block = A._requirements_block([{"id": "R1", "text": "다크모드 토글"},
+                                   {"id": "R2", "text": ""},        # 빈 텍스트는 제외
+                                   {"text": "id 없음"}])            # id 없으면 제외
+    assert block == "- R1: 다크모드 토글", block
+    assert A._requirements_block(None) == ""
+    assert A._requirements_block([]) == ""
+    # Task IR off(빈 블록)면 system 프롬프트가 바뀌지 않는다.
+    assert A._system_for("developer") == A._system_for("developer", requirements="")
+    assert "R1" in A._system_for("developer", requirements=block)
+    print("requirements_block: OK — id 주입, off면 프롬프트 불변")
+
+
+def test_untraced_requirements_maps_ids_to_text():
+    u = A._untraced_requirements([{"id": "R1", "text": "다크모드"}],
+                                 {"unverified_ids": ["R1", "R9"]})
+    assert u == [{"id": "R1", "text": "다크모드"}, {"id": "R9", "text": ""}], u
+    assert A._untraced_requirements([], None) == []
+    assert A._untraced_requirements([], {"unverified_ids": []}) == []
+
+
 async def main():
     test_clamp_gate_status()
     await test_case_a_gated_all_pass_completed()
@@ -430,6 +486,10 @@ async def main():
     await test_run_partial_gate_honest()
     await test_run_integration_fail_blocks()
     await test_run_gate_all_passed_completed()
+    await test_run_requirement_gap_downgrades()
+    await test_run_requirement_traced_stays_completed()
+    test_requirements_block_gives_ids_to_model()
+    test_untraced_requirements_maps_ids_to_text()
     print("\n모든 케이스 통과 ✓")
 
 

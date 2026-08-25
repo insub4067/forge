@@ -293,7 +293,8 @@ def _stable_prefix_hash(role: str) -> str:
     return hashlib.sha256(_stable_prefix(role).encode("utf-8")).hexdigest()[:12]
 
 
-def _system_for(role: str, room_memory: str = "", skills: str = "", plan: str = "") -> str:
+def _system_for(role: str, room_memory: str = "", skills: str = "", plan: str = "",
+                requirements: str = "") -> str:
     # 안정 프리픽스(BASE+role)를 먼저, 동적 tail(memory→skills→plan)을 뒤에 둔다.
     parts = [_stable_prefix(role)]
     global_mem = _load_global_memory()
@@ -315,6 +316,13 @@ def _system_for(role: str, room_memory: str = "", skills: str = "", plan: str = 
     if plan:
         parts.append(
             "\n\n## 외부 계획 (Planner가 수립 — 순서와 완료 조건을 따른다)\n" + plan
+        )
+    if requirements:
+        parts.append(
+            "\n\n## 사용자 요구사항 (id는 acceptance gate 연결용)\n"
+            "update_gates로 gate를 등록할 때 각 gate의 requirement_id에 해당 id를 넣어라. "
+            "통과한 gate가 연결되지 않은 요구사항은 미검증으로 남아 완료가 강등된다.\n"
+            + requirements
         )
     return "".join(parts)
 
@@ -381,6 +389,33 @@ def build_gate_recovery_context(goal: str, files_changed: list, tasks: list) -> 
     lines.append("\n구현은 끝났다. 위 사용자 요청을 검증할 acceptance gate를 "
                  "update_gates로 등록하라. 코드는 고치지 않는다.")
     return [{"role": "user", "content": "\n".join(lines)}]
+
+
+def _requirements_block(requirements) -> str:
+    """Task IR requirement를 gate 연결용 짧은 블록으로 만든다(순수 함수).
+
+    모델은 requirement id(R1..)를 알 방법이 없다 — Task IR은 이벤트로만 나가고 프롬프트에는
+    없었다. id를 안 주면 gate의 requirement_id가 영원히 비고, traceability는 모든 요구사항을
+    미검증으로 봐 완료가 매번 강등된다(지표가 노이즈가 된다). 그래서 id를 명시적으로 준다.
+    reqs가 없으면 빈 문자열 — 호출측이 그대로 넘겨도 프롬프트가 바뀌지 않는다(Task IR off).
+    """
+    lines = [f"- {r['id']}: {str(r.get('text', '')).strip()[:200]}"
+             for r in (requirements or [])
+             if isinstance(r, dict) and r.get("id") and str(r.get("text", "")).strip()]
+    return "\n".join(lines)
+
+
+def _untraced_requirements(requirements, trace) -> list[dict]:
+    """traceability가 미검증으로 표시한 requirement id를 보고용 {id,text}로 되돌린다.
+
+    "일부 요구사항 미검증"만 말하고 무엇이 빠졌는지 안 알려주면 사용자가 확인할 방법이 없다.
+    """
+    ids = (trace or {}).get("unverified_ids") or []
+    if not ids:
+        return []
+    text = {str(r["id"]): str(r.get("text", "")).strip()
+            for r in (requirements or []) if isinstance(r, dict) and r.get("id")}
+    return [{"id": str(i), "text": text.get(str(i), "")} for i in ids]
 
 
 def _last_assistant_text(messages: list[dict]) -> str:
@@ -1122,6 +1157,7 @@ class AgentRuntime:
         escalate: bool = False,
         has_image: bool = False,
         plan: str = "",
+        requirements: str = "",
         persist: bool = True,
     ) -> tuple:
         route = self.router.select_model(role, retry_count, complexity, escalate=escalate,
@@ -1135,7 +1171,8 @@ class AgentRuntime:
             "role": role, "model": route["model"], "thinking": route["thinking"],
             "prefix_hash": _stable_prefix_hash(role),
         })
-        system_msg = {"role": "system", "content": _system_for(role, room_memory, skills, plan)}
+        system_msg = {"role": "system",
+                      "content": _system_for(role, room_memory, skills, plan, requirements)}
 
         total_prompt = 0
         total_completion = 0
@@ -2403,6 +2440,9 @@ class AgentRuntime:
                 self._compaction[session_id] = saved
         room_memory = _load_room_memory(ws)
         await self._maybe_interpret(full_request, send, session_id)  # Task IR(Phase 1) — 기본 off, 관찰 전용
+        # requirement id를 gate 작성 role에 알려 준다(Task IR on일 때만 — off면 빈 문자열).
+        req_block = _requirements_block(
+            self._task_ir_reqs.get(session_id) if session_id else None)
         # Security preflight — 주입 설정 표면/추적 시크릿을 결정적 스캔. 관찰 전용(fail-open):
         # 실행을 막지 않고 findings가 있을 때만 이벤트 한 건 표면화한다. 어떤 예외도 run에
         # 영향을 주지 않는다. HIGH→approval 게이팅은 의도적으로 후속(벤치 재측정 필요).
@@ -2622,7 +2662,7 @@ class AgentRuntime:
             status, p, c, route = await self._run_role(
                 "developer", all_messages, send, session_id, ws, state, recent_calls,
                 step_base, room_memory, skills=skills, escalate=always_pro,
-                has_image=has_image, plan=plan,
+                has_image=has_image, plan=plan, requirements=req_block,
             )
             await record("developer", p, c, route)
             escalations = 0
@@ -2633,7 +2673,7 @@ class AgentRuntime:
                 status, p, c, route = await self._run_role(
                     "developer", all_messages, send, session_id, ws, state, recent_calls,
                     step_base, room_memory, skills=skills, escalate=True,
-                    has_image=has_image, plan=plan,
+                    has_image=has_image, plan=plan, requirements=req_block,
                 )
                 await record("developer", p, c, route)
             return status
@@ -2726,7 +2766,7 @@ class AgentRuntime:
                     "gate_recovery", build_gate_recovery_context(
                         goal, state["files_changed"], await store.list_tasks(session_id)),
                     send, session_id, ws, state, recent_calls, step_base, room_memory,
-                    tools=GATE_RECOVERY_TOOL_SCHEMAS, persist=False,
+                    tools=GATE_RECOVERY_TOOL_SCHEMAS, requirements=req_block, persist=False,
                 )
             except Exception as err:
                 # 복구 실패가 run을 깨뜨리면 안 된다 — gate 없이 정직하게 마감하면 된다.
@@ -2788,16 +2828,25 @@ class AgentRuntime:
             return all_messages
 
         # 완료 정책 — gate 없는 코드 변경은 completed가 되지 않는다(핵심 invariant).
-        final = resolve_completion_verification(gstate, vstate)
+        # Task IR requirement가 passed gate로 이어지지 않으면 completed로 두지 않는다
+        # (traceability를 관측 지표에서 완료 판정으로 승격 — 차단이 아니라 강등).
+        # Task IR off(=reqs 없음)면 gap=False라 기존 동작 그대로다.
+        _reqs = self._task_ir_reqs.get(session_id) if session_id else None
+        _trace = (traceability.compute_traceability(_reqs, await store.list_gates(session_id))
+                  if _reqs else None)
+        final = resolve_completion_verification(
+            gstate, vstate, bool(_trace and _trace["false_completion_candidate"]))
         if gstate == "none" and vstate != "passed":
             await send("verify_unavailable", {"report": report[:400]})
         summary = await self._completion_summary(
-            session_id, final, gstate, vstate, istate, len(state["files_changed"]))
+            session_id, final, gstate, vstate, istate, len(state["files_changed"]),
+            _untraced_requirements(_reqs, _trace))
         await finish(final, summary=summary)
         return all_messages
 
     async def _completion_summary(self, session_id: str, status: str, gstate: str,
-                                  vstate: str, istate: str, n_files: int) -> dict:
+                                  vstate: str, istate: str, n_files: int,
+                                  untraced: list | None = None) -> dict:
         """최종 보고의 재료를 process-owned 사실만으로 모은다(모델 self-report 아님).
 
         모델이 "모두 완료했습니다"라고 썼는지는 근거로 쓰지 않는다. 여기 담기는 것은
@@ -2822,6 +2871,8 @@ class AgentRuntime:
             "integration_verification": istate,
             "gate_state": gstate,
             "files_changed_count": n_files,
+            # gate로 이어지지 않은 Task IR 요구사항(무엇이 미검증인지 — 강등 사유의 구체값).
+            "untraced_requirements": untraced or [],
             "commit_status": None,   # finish가 실제 결과로 채운다
             "push_status": None,
             # 완전 검증이 아니라면 그 이유를 기계가 읽을 수 있게 남긴다(UI·telemetry).
@@ -2853,6 +2904,9 @@ class AgentRuntime:
             label = {"unavailable": "검증 방법 없음", "blocked": "차단",
                      "abandoned": "포기"}.get(r.get("status"), "미검증")
             lines.append(f"! {r['title']} — {r.get('reason') or label}")
+
+        for r in s.get("untraced_requirements") or []:
+            lines.append(f"! {r.get('text') or r.get('id')} — 검증한 gate가 없습니다(미검증)")
 
         if vstate == "passed":
             lines.append("✓ 기존 테스트·빌드 통과")

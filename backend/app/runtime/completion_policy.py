@@ -50,7 +50,8 @@ def _blocking_reason(status: str, gstate: str, vstate: str) -> str:
     return "일부 요구사항 미검증"
 
 
-def resolve_completion_verification(gstate: str, vstate: str) -> str:
+def resolve_completion_verification(gstate: str, vstate: str,
+                                    requirement_gap: bool = False) -> str:
     """최종 완료 상태를 결정한다(순수 함수 — 이 프로젝트의 핵심 invariant).
 
     **gate가 없는 코드 변경은 완전히 검증된 완료가 아니다.** generic verification은
@@ -61,7 +62,15 @@ def resolve_completion_verification(gstate: str, vstate: str) -> str:
     gate 없음 ≠ verification_failed (실패한 게 아니다)
     gate 없음 ≠ completed        (완전히 검증된 것도 아니다)
     gate 없음 = completed_unverified
+
+    requirement_gap=True는 Task IR requirement 중 passed gate로 이어지지 않은 것이 있다는
+    뜻이다(traceability.false_completion_candidate). gate 자체는 통과했어도 요구사항 하나가
+    검증되지 않은 채 완료로 나가는 것이 false_completion이므로 completed를 주지 않는다.
+    **차단이 아니라 강등이다** — 완료는 시키되 검증됐다고 말하지 않는다(false-block 회피).
+    Task IR이 꺼져 있거나 requirement가 없으면 호출측이 False를 주므로 동작이 바뀌지 않는다.
     """
+    if requirement_gap:
+        return "completed_unverified"
     if gstate == "none":
         return "completed_unverified"
     if gstate == "passed" and vstate == "passed":
