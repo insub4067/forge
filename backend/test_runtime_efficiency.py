@@ -1079,3 +1079,64 @@ def test_precompaction_triggers_on_reasoning_and_args_alone():
                                keep_reasoning=True, on_compaction=noop))
     assert calls, "reasoning+args만으로 임계를 넘겼는데 사전 compaction이 시도되지 않았다"
     print("OK 긴 reasoning·대형 write_file args만으로도 사전 compaction 발동")
+
+
+def test_effective_thinking_unifies_fallback_across_estimate_and_send():
+    """reasoning 400 폴백 이후 추정본과 전송본의 reasoning 포함 여부가 일치한다.
+
+    폴백은 counters["reasoning_replay_failed"]로 role invocation에 전파된다. effective_thinking을
+    한 곳(_effective_thinking)에서 판단해 사전 compaction·breakdown·전송이 같은 결론을 쓴다.
+    """
+    import asyncio
+    from app.runtime.agent import AgentRuntime, CONTEXT_COMPACT_RATIO
+    from app.config import settings
+    from app.tools.registry import TOOL_SCHEMAS
+
+    ET = AgentRuntime._effective_thinking
+    assert ET(True, {}) is True
+    assert ET(True, {"reasoning_replay_failed": True}) is False   # 폴백 후
+    assert ET(False, {}) is False
+    assert ET(True, None) is True
+
+    class _Adapter:
+        requires_reasoning_replay = True
+
+    rt = AgentRuntime()
+    adapter = _Adapter()
+    # 폴백 전: thinking+tools → keep True
+    eff0 = ET(True, {"retries": 0})
+    assert rt._should_keep_reasoning(adapter, eff0, TOOL_SCHEMAS) is True
+    # 폴백 후: 같은 counters → keep False (전송본과 일치)
+    failed = {"retries": 1, "reasoning_replay_failed": True}
+    eff1 = ET(True, failed)
+    assert rt._should_keep_reasoning(adapter, eff1, TOOL_SCHEMAS) is False
+
+    # 다음 step 추정: keep=False면 reasoning이 추정에 포함되지 않아 total도 작다 → 불필요 compaction 없음
+    projected = [
+        {"role": "user", "content": "u"},
+        {"role": "assistant", "content": "a", "reasoning_content": "R" * 5000,
+         "tool_calls": [{"id": "c1", "type": "function",
+                         "function": {"name": "read_file", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "t"},
+    ]
+    sys_msg = {"role": "system", "content": "sys"}
+    keep = rt._estimate_context_areas(sys_msg, projected, "", "", True)
+    nokeep = rt._estimate_context_areas(sys_msg, projected, "", "", False)
+    assert keep["reasoning_content"] > 0 and nokeep["reasoning_content"] == 0
+    assert nokeep["total_est"] < keep["total_est"]
+
+    # _precompact가 keep=False(폴백 반영)면 이 reasoning으로는 compaction을 트리거하지 않는다
+    calls = []
+
+    async def fake_compact(all_messages, session_id):
+        calls.append(1); return False
+
+    async def noop(covered):
+        pass
+
+    rt._compact = fake_compact
+    rt._project = lambda all_messages, sid: projected
+    # reasoning만으로는 임계 미달이 되도록: reasoning 5000자(~1250tok)는 budget 훨씬 아래
+    asyncio.run(rt._precompact("sid", ["x"], sys_msg, "", "", keep_reasoning=False, on_compaction=noop))
+    assert not calls, "keep=False인데 reasoning 때문에 불필요한 compaction이 발생했다"
+    print("OK effective_thinking 통일: 폴백 후 추정=전송 일치, 불필요 compaction 없음")

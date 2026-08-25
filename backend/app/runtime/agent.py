@@ -792,8 +792,8 @@ class AgentRuntime:
         벗겨 토큰을 아낀다. 판단은 adapter의 requires_reasoning_replay capability에 위임한다."""
         adapter = self._adapter_for(model)
         # counters에 이전 스텝의 폴백 결과가 실려 있으면(이 role invocation 안에서 이미 400을
-        # 겪음) 이번 스텝도 thinking을 끈 채 시작한다.
-        no_think = bool(counters and counters.get("reasoning_replay_failed"))
+        # 겪음) 이번 스텝도 thinking을 끈 채 시작한다 — run_role의 추정과 같은 판단을 공유한다.
+        no_think = not self._effective_thinking(thinking, counters)
         transient_attempts = 0
         while True:
             call_thinking = False if no_think else thinking
@@ -1128,9 +1128,12 @@ class AgentRuntime:
             last_emit = 0.0
 
             # 이 호출에서 reasoning을 전송본에 유지할지 — 사전 압축 추정과 실제 전송이 같은
-            # 기준을 쓰도록 여기서 한 번 정한다(DeepSeek V4: thinking+tools면 유지).
+            # 기준을 쓰도록 여기서 한 번 정한다(DeepSeek V4: thinking+tools면 유지). 같은 role
+            # invocation에서 앞선 step이 400 폴백을 겪었으면 effective_thinking이 꺼져 추정본도
+            # 전송본과 동일하게 reasoning을 제외한다.
+            effective_thinking = self._effective_thinking(route["thinking"], counters)
             keep_reasoning = self._should_keep_reasoning(
-                self._adapter_for(route["model"]), route["thinking"], tool_schemas)
+                self._adapter_for(route["model"]), effective_thinking, tool_schemas)
 
             async def _on_compaction(covered):
                 route["compactions"] += 1
@@ -1147,8 +1150,11 @@ class AgentRuntime:
             # orphan tool 제거·write_file 접기·image 처리를 실제 전송본에 적용한다(원본 불변).
             send_proj = self._to_send_projection(projected, has_image)
             call_messages = [system_msg, *send_proj]
-            # context 영역 분해 계측(debug view/최적화 근거) — 실제 전송 payload 기준. compaction
-            # 판단과 같은 _estimate_context_areas를 공유한다(reasoning·tool arguments 포함).
+            # context 영역 분해 계측(debug view/최적화 근거) — 이 step에 '계획된' 요청 기준으로,
+            # effective_thinking(폴백 반영)을 써서 compaction 판단과 같은 _estimate_context_areas를
+            # 공유한다(reasoning·tool arguments 포함). 같은 step에서 처음 reasoning 400이 나
+            # non-thinking으로 재시도되면 그 재시도분은 이 breakdown에 반영되지 않고 다음 step부터
+            # 반영된다. 절대값은 추정이며 최종 권위는 provider usage(measured)다.
             if session_id:
                 areas = self._estimate_context_areas(
                     system_msg, send_proj, skills, room_memory, keep_reasoning)
@@ -1919,6 +1925,13 @@ class AgentRuntime:
                             "source": str(it.get("source", "")),
                             "evidence": str(it.get("evidence", ""))})
         return out
+
+    @staticmethod
+    def _effective_thinking(thinking, counters) -> bool:
+        """이 호출에 실제로 적용될 thinking 여부(순수). 같은 role invocation에서 이전 step이
+        reasoning 400 폴백을 겪었으면(counters["reasoning_replay_failed"]) thinking을 끈다.
+        사전 compaction·breakdown·전송이 모두 이 한 판단을 공유해 추정본과 전송본을 일치시킨다."""
+        return bool(thinking) and not bool(counters and counters.get("reasoning_replay_failed"))
 
     @staticmethod
     def _should_keep_reasoning(adapter, thinking, tool_schemas) -> bool:
