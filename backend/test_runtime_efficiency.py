@@ -1229,3 +1229,99 @@ def test_precompact_uses_image_projection_and_hides_data_uri():
     assert "data:image" not in dump and "base64" not in dump, "breakdown에 data URI 노출"
     assert "image_inputs" in dump
     print("OK vision precompact가 has_image projection 사용·임계 발동·data URI 미노출")
+
+
+def test_build_context_tree_categories_and_refs():
+    """계층형 context tree: 주요 영역 분류, tool call↔result 연관, 큰 결과 tool_store 참조,
+    추정/실측 구분(노드 measured=null), 원문·args 미노출, 이미지 노드, reserved_output."""
+    from app.runtime.agent import AgentRuntime
+    from app.config import settings
+
+    send_proj = [
+        {"role": "user", "content": "로그인 고쳐줘"},
+        {"role": "user", "content": "[이전 작업 요약 — 컨텍스트 압축됨]\n지난 진행 요약"},
+        {"role": "assistant", "content": "확인합니다", "reasoning_content": "R" * 400,
+         "tool_calls": [{"id": "c1", "type": "function",
+                         "function": {"name": "write_file",
+                                      "arguments": '{"path":"a.py","content":"SECRET_SRC"}'}}]},
+        {"role": "tool", "tool_call_id": "c1",
+         "content": "파일을 작성했습니다: /ws/a.py"},
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"id": "c2", "type": "function",
+                         "function": {"name": "bash", "arguments": '{"command":"pytest"}'}}]},
+        {"role": "tool", "tool_call_id": "c2",
+         "content": "테스트 로그...\n\n... (전체 42000자 저장됨 · 더 필요하면 read_tool_result('tr_abc1234567')) ..."},
+        {"role": "user", "content": [
+            {"type": "text", "text": "이 이미지"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,ZZZZ"}}]},
+    ]
+    out = AgentRuntime.build_context_tree(
+        role="developer", send_proj=send_proj, skills="### skill: x",
+        room_memory="방메모리", plan="계획", keep_reasoning=True)
+
+    tree = out["tree"]
+    cats = {n["category"] for n in tree}
+    for c in ("system", "rules", "skills", "plan", "summary", "conversation",
+              "reasoning", "tool_calls", "tool_results", "images", "reserved_output"):
+        assert c in cats, f"카테고리 누락: {c} ({cats})"
+
+    def node(cat):
+        return next(n for n in tree if n["category"] == cat)
+
+    # 노드 스키마: estimated 있고 measured는 null(허위 정밀도 방지)
+    n = node("tool_results")
+    assert n["measured_tokens"] is None and n["estimated_tokens"] > 0
+    assert "characters" in n and isinstance(n["children"], list)
+
+    # tool call↔result 연관: result 노드 label/children이 대응 tool name을 참조
+    dump = _json.dumps(out, ensure_ascii=False)
+    assert "bash" in dump and "write_file" in dump, "tool 이름 연관 없음"
+
+    # 큰 결과 tool_store 참조(content_ref), content_available
+    child_refs = [ch.get("content_ref") for ch in node("tool_results")["children"]]
+    assert "tr_abc1234567" in child_refs, f"tool_store 참조 없음: {child_refs}"
+    assert any(ch.get("content_available") for ch in node("tool_results")["children"])
+
+    # 원문·tool args 미노출: 파일 내용·명령 원문이 트리에 없어야
+    assert "SECRET_SRC" not in dump, "파일 원문이 트리에 노출됨"
+    assert "pytest" not in dump, "bash 명령 원문이 트리에 노출됨"
+
+    # 이미지 노드 > 0, reserved_output = max_output
+    assert node("images")["estimated_tokens"] == settings.image_input_token_estimate
+    assert node("reserved_output")["estimated_tokens"] == settings.max_output_tokens
+
+    # 추정 총합은 입력 영역만(reserved_output 제외), measured_total은 null
+    assert out["measured_total"] is None
+    assert out["total_est"] > 0
+    print("OK context tree: 카테고리·연관·tool_store참조·추정/실측·원문비노출·이미지·reserved")
+
+
+def test_build_context_tree_never_raises():
+    """breakdown 생성 실패가 agent를 중단시키면 안 된다 — 이상 입력에도 예외 없이 dict 반환."""
+    from app.runtime.agent import AgentRuntime
+    for bad in (None, [{"role": "assistant", "tool_calls": "not-a-list"}],
+                [{"content": 12345}], ["not-a-dict"]):
+        out = AgentRuntime.build_context_tree(
+            role="developer", send_proj=bad, skills="", room_memory="", plan="",
+            keep_reasoning=False)
+        assert isinstance(out, dict) and "tree" in out
+    print("OK context tree는 이상 입력에도 예외 없이 dict 반환")
+
+
+def test_context_api_keeps_areas_and_adds_tree():
+    """기존 context API 사용자 호환: areas(flat)는 그대로 두고 tree만 추가. tree 없이도 동작."""
+    from app.runtime.agent import AgentRuntime
+
+    rt = AgentRuntime()
+    areas = {"system_base_role": 10, "reasoning_content": 0, "total_est": 10}
+    tree = AgentRuntime.build_context_tree("developer", [{"role": "user", "content": "hi"}],
+                                           "", "", "", False)
+    rt._store_context_breakdown("s1", "developer", areas, None, tree)
+    out = rt.get_context_breakdown("s1")
+    assert out["areas"]["system_base_role"] == 10, "기존 areas 호환 깨짐"
+    assert isinstance(out.get("tree"), list) and out["tree"], "tree 미추가"
+    # tree 인자 없이 저장(기존 경로) → areas만, tree 없음
+    rt._store_context_breakdown("s2", "developer", areas)
+    o2 = rt.get_context_breakdown("s2")
+    assert "areas" in o2 and "tree" not in o2
+    print("OK /context는 areas 유지 + tree 추가(하위 호환)")

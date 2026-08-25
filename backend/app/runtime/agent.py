@@ -1160,7 +1160,9 @@ class AgentRuntime:
                 areas = self._estimate_context_areas(
                     system_msg, send_proj, skills, room_memory, keep_reasoning)
                 img_stats = self._image_stats(send_proj) if has_image else None
-                self._store_context_breakdown(session_id, role, areas, img_stats)
+                # 계층형 tree(build_context_tree는 예외를 삼켜 실패해도 실행을 막지 않는다).
+                tree = self.build_context_tree(role, send_proj, skills, room_memory, plan, keep_reasoning)
+                self._store_context_breakdown(session_id, role, areas, img_stats, tree)
             route["model_calls"] += 1
             # thinking·reasoning은 그대로 넘긴다. reasoning round-trip 유지와 400 폴백(role invocation 한정)은
             # _stream_with_recovery가 adapter capability + counters로 관리한다.
@@ -1954,6 +1956,130 @@ class AgentRuntime:
         return str(content or "")
 
     @staticmethod
+    def build_context_tree(role, send_proj, skills, room_memory, plan, keep_reasoning) -> dict:
+        """계층형 context 사용 트리(순수·근사). 전송 payload를 카테고리별 노드로 분해해 무엇이
+        컨텍스트를 차지하는지 드러낸다. 각 노드는 토큰·문자 수만 담고 원문·tool args는 넣지
+        않는다(민감정보 비노출). 노드별 measured_tokens는 null이다 — 실측은 provider usage로
+        전체 단위만 존재하므로 노드에 섞어 허위 정밀도를 만들지 않는다. 큰 tool 결과는 원문을
+        다시 싣지 않고 tool_store 참조(content_ref)만 남긴다. 어떤 이상 입력에도 예외를 던지지
+        않아(호출측 try 불필요) breakdown 실패가 agent 실행을 막지 못한다."""
+        try:
+            return AgentRuntime._build_context_tree_impl(
+                role, send_proj, skills, room_memory, plan, keep_reasoning)
+        except Exception:
+            return {"tree": [], "total_est": 0, "measured_total": None,
+                    "budget": settings.logical_budget, "max_output": settings.max_output_tokens}
+
+    @staticmethod
+    def _build_context_tree_impl(role, send_proj, skills, room_memory, plan, keep_reasoning) -> dict:
+        _tr_re = re.compile(r"read_tool_result\('(tr_[0-9a-f]+)'\)")
+        nid = [0]
+
+        def node(category, label, est_tokens, chars, *, children=None, content_ref=None):
+            nid[0] += 1
+            return {
+                "id": f"ctx-{nid[0]}",
+                "category": category,
+                "label": label,
+                "estimated_tokens": int(est_tokens),
+                "measured_tokens": None,   # 노드 단위 실측 없음 — 전체는 provider usage로 별도
+                "characters": int(chars),
+                "children": children or [],
+                "content_available": content_ref is not None,
+                "content_ref": content_ref,
+            }
+
+        def text_node(category, label, text, *, content_ref=None):
+            return node(category, label, _est_tokens(text), len(text), content_ref=content_ref)
+
+        tree: list[dict] = []
+        # 고정 프리픽스: system(base) / rules(role) / memory / skills / plan
+        tree.append(text_node("system", "System 기본 프롬프트", BASE_PROMPT))
+        tree.append(text_node("rules", f"{role} 역할 지침", _load_role(role)))
+        mem = (room_memory or "") + _load_global_memory()
+        if mem:
+            tree.append(text_node("memory", "메모리(방·전역)", mem))
+        if skills:
+            tree.append(text_node("skills", "축적 Skill", skills))
+        if plan:
+            tree.append(text_node("plan", "외부 계획(Planner)", plan))
+
+        # 동적 히스토리: 카테고리별로 집계하되 tool call/result는 개별 자식 노드로.
+        conv_tok = summ_tok = reason_tok = 0
+        conv_chars = summ_chars = reason_chars = 0
+        img_count = 0
+        call_children: list[dict] = []
+        result_children: list[dict] = []
+        call_name_by_id: dict[str, str] = {}
+        call_i = res_i = 0
+        for m in (send_proj or []):
+            if not isinstance(m, dict):
+                continue
+            role_m = m.get("role")
+            content = m.get("content", "")
+            text = AgentRuntime._msg_text(content)
+            if isinstance(content, list):
+                img_count += sum(1 for x in content
+                                 if isinstance(x, dict) and x.get("type") == "image_url")
+            if role_m == "user" and text.startswith("[이전 작업 요약"):
+                summ_tok += _est_tokens(text); summ_chars += len(text)
+            elif role_m == "tool":
+                res_i += 1
+                nm = call_name_by_id.get(m.get("tool_call_id"), "tool")
+                mo = _tr_re.search(text)
+                result_children.append(
+                    text_node("tool_results", f"{nm} #{res_i} 결과", text,
+                              content_ref=mo.group(1) if mo else None))
+            else:
+                conv_tok += _est_tokens(text); conv_chars += len(text)
+                if keep_reasoning and isinstance(m.get("reasoning_content"), str):
+                    reason_tok += _est_tokens(m["reasoning_content"])
+                    reason_chars += len(m["reasoning_content"])
+                tcs = m.get("tool_calls")
+                if isinstance(tcs, list):
+                    for tc in tcs:
+                        if not isinstance(tc, dict):
+                            continue
+                        fn = tc.get("function") or {}
+                        nm = fn.get("name", "tool")
+                        if tc.get("id"):
+                            call_name_by_id[tc["id"]] = nm
+                        call_i += 1
+                        # args 원문은 넣지 않고 문자 수만(토큰 추정 근거).
+                        call_children.append(
+                            text_node("tool_calls", f"{nm} #{call_i}", fn.get("arguments", "") or ""))
+
+        if summ_chars:
+            tree.append(node("summary", "이전 작업 요약(compaction)", summ_tok, summ_chars))
+        if conv_chars:
+            tree.append(node("conversation", "대화(user·assistant)", conv_tok, conv_chars))
+        if keep_reasoning and reason_chars:
+            tree.append(node("reasoning", "추론(reasoning_content)", reason_tok, reason_chars))
+        if call_children:
+            tree.append(node("tool_calls", "도구 호출",
+                             sum(c["estimated_tokens"] for c in call_children),
+                             sum(c["characters"] for c in call_children), children=call_children))
+        if result_children:
+            tree.append(node("tool_results", "도구 결과",
+                             sum(c["estimated_tokens"] for c in result_children),
+                             sum(c["characters"] for c in result_children), children=result_children))
+        if img_count:
+            tree.append(node("images", f"이미지 입력 {img_count}장",
+                             img_count * settings.image_input_token_estimate, 0))
+
+        # 예약 출력(입력 컨텍스트가 아니라 응답용으로 남겨둔 예산) — total_est에는 넣지 않는다.
+        tree.append(node("reserved_output", "예약 출력 토큰", settings.max_output_tokens, 0))
+
+        total_est = sum(n["estimated_tokens"] for n in tree if n["category"] != "reserved_output")
+        return {
+            "tree": tree,
+            "total_est": total_est,
+            "measured_total": None,      # provider usage(measured)로 별도 — 노드와 섞지 않음
+            "budget": settings.logical_budget,
+            "max_output": settings.max_output_tokens,
+        }
+
+    @staticmethod
     def _image_stats(projected) -> dict:
         """전송 payload의 이미지 입력 raw 계측(추정 토큰과 혼동 방지용). data URI 원문은 남기지
         않고 개수와 대략 bytes만 센다(추후 provider usage와 보정). image_url content만 대상."""
@@ -2048,9 +2174,11 @@ class AgentRuntime:
             projected = self._project(all_messages, session_id)
         return projected
 
-    def _store_context_breakdown(self, session_id, role, areas: dict, image_stats: dict | None = None):
+    def _store_context_breakdown(self, session_id, role, areas: dict,
+                                 image_stats: dict | None = None, tree: dict | None = None):
         """이미 계산된 areas(전송 payload 기준)를 debug view용으로 저장한다. 이미지 raw 계측
-        (개수·bytes)은 추정 토큰과 구분해 image_raw로 남긴다 — data URI 원문은 저장하지 않는다."""
+        (개수·bytes)은 추정 토큰과 구분해 image_raw로 남긴다 — data URI 원문은 저장하지 않는다.
+        계층형 tree가 있으면 함께 저장한다(기존 areas는 하위 호환으로 유지)."""
         try:
             budget = settings.logical_budget
             total = areas.get("total_est", 0)
@@ -2068,6 +2196,10 @@ class AgentRuntime:
                     "est_per_image": settings.image_input_token_estimate,
                     "estimated": True,
                 }
+            if tree and tree.get("tree"):
+                entry["tree"] = tree["tree"]
+                entry["max_output"] = tree.get("max_output")
+                entry["measured_total"] = tree.get("measured_total")
             self._last_context[session_id] = entry
         except Exception as err:
             error_log.record("context_breakdown", str(err), session_id)
