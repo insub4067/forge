@@ -986,6 +986,24 @@ async def due_jobs(now_utc) -> list[dict]:
         return [_job_dict(j) for j in result.scalars()]
 
 
+async def reset_orphaned_running_jobs() -> int:
+    """기동 시 status='running'에 갇힌 예약 잡을 'scheduled'로 되돌린다(재선점 가능화).
+
+    프로세스가 잡 실행 중 하드 크래시하면 finally/상태 갱신이 돌지 못해 잡이 'running'에
+    영구히 갇히고, claim_job(status!='running')이 다시 선점하지 못해 재실행이 막힌다.
+    세션 쪽 take_interrupted_runs와 대칭인 잡 버전이다. 기동 시점엔 실행 중인 잡이 없으므로
+    'running' 잡은 전부 크래시 고아 → 되돌려도 안전하다. 이후 next_run_at/재시도 정책이
+    정상 처리한다. 반환: 되돌린 잡 수."""
+    async with async_session() as s:
+        result = await s.execute(
+            update(ScheduledJob)
+            .where(ScheduledJob.status == "running")
+            .values(status="scheduled")
+        )
+        await s.commit()
+        return result.rowcount or 0
+
+
 async def claim_job(job_id: int) -> bool:
     """잡을 원자적으로 선점한다. 이미 running이면 False — 중복 실행 방지."""
     async with async_session() as s:

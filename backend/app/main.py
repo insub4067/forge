@@ -100,6 +100,11 @@ async def lifespan(app: FastAPI):
                     await store.mark_interrupted_note(it["id"])
     except Exception:
         pass
+    # 크래시로 'running'에 갇힌 예약 잡을 되돌려 재선점 가능하게(세션 복구와 대칭).
+    try:
+        await store.reset_orphaned_running_jobs()
+    except Exception:
+        pass
     # 예약 작업 스케줄러 시작(DB next_run_at이 authoritative → 재시작 복원).
     from . import scheduler
     scheduler.start()
