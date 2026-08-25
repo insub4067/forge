@@ -6,9 +6,10 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, select, update
 
-from .models import (AcceptanceGate, AgentRun, Checkpoint, Message, PushDevice,
-                     Refinement, ScheduledJob, Session, Task)
+from .models import (AcceptanceGate, AgentRun, Approval, Checkpoint, Message,
+                     PushDevice, Refinement, ScheduledJob, Session, Task)
 from .session import async_session
+from ..runtime import approvals as _appr
 
 
 async def ensure_session(
@@ -106,6 +107,7 @@ async def delete_room(session_id: str) -> None:
         await s.execute(delete(Message).where(Message.session_id == session_id))
         await s.execute(delete(Task).where(Task.session_id == session_id))
         await s.execute(delete(Checkpoint).where(Checkpoint.session_id == session_id))
+        await s.execute(delete(Approval).where(Approval.session_id == session_id))
         # acceptance_gates도 sessions FK — 안 지우면 세션 삭제가 FK 위반으로 실패한다.
         await s.execute(delete(AcceptanceGate).where(AcceptanceGate.session_id == session_id))
         await s.execute(delete(Session).where(Session.id == session_id))
@@ -1101,3 +1103,99 @@ async def decide_refinement(refinement_id: int, decision: str) -> dict | None:
         await s.commit()
         await s.refresh(row)
         return _refinement_dict(row)
+
+
+# ── Durable Approval — 승인의 authoritative store(상태 전이는 조건부 UPDATE로 원자·멱등) ──
+
+def _approval_dict(a: Approval) -> dict:
+    return {
+        "id": a.id, "session_id": a.session_id, "run_id": a.run_id,
+        "tool_name": a.tool_name, "args_hash": a.args_hash, "preview": a.preview,
+        "status": a.status,
+        "requested_at": a.requested_at.isoformat() if a.requested_at else None,
+        "expires_at": a.expires_at.isoformat() if a.expires_at else None,
+        "expires_at_ts": a.expires_at.timestamp() if a.expires_at else None,
+        "decided_at": a.decided_at.isoformat() if a.decided_at else None,
+        "decided_by": a.decided_by,
+        "consumed_at": a.consumed_at.isoformat() if a.consumed_at else None,
+    }
+
+
+async def create_approval(approval_id: str, session_id: str, run_id: str, tool_name: str,
+                          args_hash: str, preview: str, ttl_seconds: int = 3600) -> None:
+    """승인 요청을 requested로 기록한다. 실행 대기(Future)와 별개로 상태를 영속화한다."""
+    async with async_session() as s:
+        if await s.get(Session, session_id) is None:
+            return
+        s.add(Approval(
+            id=approval_id, session_id=session_id, run_id=run_id, tool_name=tool_name,
+            args_hash=args_hash, preview=preview[:2000], status="requested",
+            expires_at=datetime.utcnow() + timedelta(seconds=ttl_seconds),
+        ))
+        await s.commit()
+
+
+async def get_approval(approval_id: str) -> dict | None:
+    async with async_session() as s:
+        a = await s.get(Approval, approval_id)
+        return _approval_dict(a) if a else None
+
+
+async def decide_approval(approval_id: str, session_id: str, decision: str,
+                          decided_by: str = "user") -> bool:
+    """requested → approved|rejected 로 원자·멱등 전이. 조건부 UPDATE(WHERE status='requested'
+    AND session_id 일치)라 이미 결정됐거나 다른 session이면 rowcount 0(전이 안 됨)."""
+    if decision not in ("approved", "rejected"):
+        return False
+    async with async_session() as s:
+        res = await s.execute(
+            update(Approval)
+            .where(Approval.id == approval_id,
+                   Approval.session_id == session_id,
+                   Approval.status == "requested")
+            .values(status=decision, decided_at=datetime.utcnow(), decided_by=decided_by)
+        )
+        await s.commit()
+        return res.rowcount == 1
+
+
+async def consume_approval(approval_id: str, session_id: str, current_args_hash: str) -> tuple[bool, str]:
+    """실제 실행 직전 approved → consumed 로 전이한다. session·status·만료·args_hash를 재검증하고,
+    조건부 UPDATE(WHERE status='approved')로 중복 실행을 원자적으로 막는다. (ok, reason)."""
+    async with async_session() as s:
+        a = await s.get(Approval, approval_id)
+        if a is None:
+            return False, "not_found"
+        ok, why = _appr.can_consume(_approval_dict(a), session_id, current_args_hash,
+                                    datetime.utcnow().timestamp())
+        if not ok:
+            return False, why
+        res = await s.execute(
+            update(Approval)
+            .where(Approval.id == approval_id, Approval.status == "approved")
+            .values(status="consumed", consumed_at=datetime.utcnow())
+        )
+        await s.commit()
+        return (res.rowcount == 1), ("ok" if res.rowcount == 1 else "race_lost")
+
+
+async def list_pending_approvals(session_id: str = "") -> list[dict]:
+    """requested 승인 목록(재시작·SSE 재연결 시 복원용). session_id를 주면 그 세션만."""
+    async with async_session() as s:
+        q = select(Approval).where(Approval.status == "requested")
+        if session_id:
+            q = q.where(Approval.session_id == session_id)
+        res = await s.execute(q.order_by(Approval.requested_at))
+        return [_approval_dict(a) for a in res.scalars()]
+
+
+async def expire_stale_approvals() -> int:
+    """만료시각을 넘긴 requested 승인을 expired로 정리한다. 반환: 만료 처리 수."""
+    async with async_session() as s:
+        res = await s.execute(
+            update(Approval)
+            .where(Approval.status == "requested", Approval.expires_at < datetime.utcnow())
+            .values(status="expired", decided_at=datetime.utcnow(), decided_by="system")
+        )
+        await s.commit()
+        return res.rowcount

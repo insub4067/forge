@@ -194,3 +194,30 @@ class Refinement(Base):
     status: Mapped[str] = mapped_column(String, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Approval(Base):
+    """Durable Approval — 승인 상태의 authoritative store.
+
+    메모리의 pending_approvals(Future)는 실행 대기·실시간 UX에만 쓰고, 승인 사실·상태·감사
+    정보는 여기에 영속화한다. 서버 재시작 후에도 requested 승인을 복원하고, 승인 후 실제 실행
+    직전 args_hash를 재검증해 변조를 막으며, consumed로 중복 실행을 방지한다.
+    상태: requested → approved | rejected | expired | cancelled → consumed
+    """
+    __tablename__ = "approvals"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # uuid hex
+    session_id: Mapped[str] = mapped_column(String, ForeignKey("sessions.id"))
+    run_id: Mapped[str] = mapped_column(String, default="")
+    tool_name: Mapped[str] = mapped_column(String, default="")
+    # 정규화된 tool args의 sha256 — 실행 직전 재검증해 승인 후 args 변조를 차단한다.
+    args_hash: Mapped[str] = mapped_column(String, default="")
+    # 무엇을 승인하는지 보여줄 안전 축약(원문·전체 args가 아니라 제한된 미리보기).
+    preview: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String, default="requested")
+    requested_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    decided_by: Mapped[str] = mapped_column(String, default="")
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    meta: Mapped[str] = mapped_column(Text, default="{}")  # audit metadata(JSON)
