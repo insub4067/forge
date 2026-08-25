@@ -66,6 +66,11 @@ CONTEXT_BLOCK_RATIO = settings.emergency_block_threshold
 # 이 비율을 넘으면 오래된 대화를 요약해 모델 컨텍스트를 압축한다(비파괴 — 표시/저장용 원본은 유지).
 CONTEXT_COMPACT_RATIO = settings.compaction_threshold
 COMPACT_KEEP_RECENT = 8
+# 전송본에서 과거 write_file content를 접을 때 보존할 최근 메시지 수(compaction과 별개 정책).
+WRITE_ARGS_KEEP_RECENT_MESSAGES = 8
+# registry.execute_tool의 write_file 성공 반환 접두사. 이 마커와 일치하는 tool result가
+# 달린 write_file만 성공으로 보고 접는다(거부·오류·취소·무결과는 원문 유지).
+_WRITE_OK_PREFIX = "파일을 작성했습니다"
 # 부수효과·승인이 없는 읽기 전용 도구 — 한 응답에 여러 개면 병렬 실행 가능
 READ_ONLY_TOOLS = {"read_file", "list_dir", "grep", "find_symbol"}
 # Planner용 도구 스키마(읽기 전용만) — 구현·실행 도구를 주지 않아 계획만 하게 강제한다.
@@ -672,15 +677,28 @@ class AgentRuntime:
 
     @staticmethod
     def _fold_old_write_args(messages: list[dict], keep_recent: int) -> list[dict]:
-        """오래된 write_file 호출의 content 인자를 전송본에서 스텁으로 접는다.
+        """성공한 과거 write_file의 content 인자를 전송본에서 stub으로 접는다.
 
         write_file(path, content)의 content는 파일 전문이라, 접지 않으면 매 스텝 히스토리에
-        실려 재전송된다(실측: tool_call args의 최대 성분). 파일은 디스크에 있고 read_file로
-        다시 읽을 수 있으므로 최근 keep_recent 이내를 뺀 과거 것만 접는다. path는 남긴다.
-        edit_file(old/new diff)은 문맥이라 접지 않는다. 원본은 불변(모델 전송본만)."""
+        실려 재전송된다(실측: tool_call args의 최대 성분). 최근 keep_recent 이내를 뺀 과거
+        것만, 그리고 **실제로 성공한** write만 접는다 — 같은 tool_call_id의 tool result가
+        성공 마커로 시작할 때만. 승인 거부·오류·취소·결과 없음은 성공한 것처럼 기록되면 안
+        되므로 원문을 유지한다. edit_file(diff 문맥)은 접지 않는다. 원본은 불변(전송본만).
+
+        디스크의 현재 파일은 이후 스텝에서 바뀌었을 수 있어 과거 snapshot이 아니다. stub에
+        path·원본 bytes·sha256을 남겨 필요하면 식별·대조할 수 있게 하되, '복구 가능'이라고
+        단정하지 않는다."""
         cut = len(messages) - keep_recent
         if cut <= 0:
             return messages
+        # tool_call_id → 결과 content. 성공 판정에 대조한다.
+        results: dict[str, str] = {}
+        for m in messages:
+            if isinstance(m, dict) and m.get("role") == "tool":
+                cid = m.get("tool_call_id")
+                if cid is not None:
+                    results[cid] = str(m.get("content", ""))
+
         out: list[dict] = []
         for i, m in enumerate(messages):
             tcs = m.get("tool_calls") if isinstance(m, dict) else None
@@ -691,15 +709,24 @@ class AgentRuntime:
             changed = False
             for tc in tcs:
                 fn = tc.get("function", {})
-                if fn.get("name") == "write_file":
+                res = results.get(tc.get("id"))
+                if fn.get("name") == "write_file" and res is not None \
+                        and res.startswith(_WRITE_OK_PREFIX):
                     try:
                         a = json.loads(fn.get("arguments") or "{}")
-                        if isinstance(a.get("content"), str) and a["content"]:
-                            a["content"] = "[생략 — 디스크에 기록됨, read_file로 확인]"
+                        body = a.get("content")
+                        if isinstance(body, str) and body:
+                            raw = body.encode("utf-8")
+                            sha = hashlib.sha256(raw).hexdigest()
+                            a["content"] = (
+                                f"[write_file content 생략 — 성공한 과거 쓰기. "
+                                f"원본 {len(raw)}바이트, sha256={sha}. "
+                                f"현재 파일은 이후 변경됐을 수 있어 이 시점의 snapshot이 아니다.]"
+                            )
                             tc = {**tc, "function": {**fn, "arguments": json.dumps(a, ensure_ascii=False)}}
                             changed = True
                     except (json.JSONDecodeError, TypeError):
-                        pass
+                        pass  # malformed arguments는 원문 유지
                 new_tcs.append(tc)
             out.append({**m, "tool_calls": new_tcs} if changed else m)
         return out
@@ -1116,7 +1143,7 @@ class AgentRuntime:
             # 방어: orphan tool 제거 — compaction/순서 이상으로 섞여도 400으로 run이 죽지 않게.
             projected = self._drop_orphan_tools(projected)
             # 오래된 write_file content를 전송본에서 접어 재전송 비용을 줄인다(원본 불변).
-            projected = self._fold_old_write_args(projected, COMPACT_KEEP_RECENT)
+            projected = self._fold_old_write_args(projected, WRITE_ARGS_KEEP_RECENT_MESSAGES)
             if has_image:
                 call_messages = [
                     system_msg,

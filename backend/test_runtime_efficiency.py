@@ -3,6 +3,7 @@
 네트워크 없이 순수 함수/정책만 확인한다. 실행:
     cd backend && .venv/bin/python test_runtime_efficiency.py
 """
+import json as _json
 import tempfile
 from pathlib import Path
 
@@ -708,50 +709,114 @@ def test_reasoning_fallback_is_run_scoped():
     print("OK reasoning 폴백은 run-scope(미래 run/다른 세션 무오염)")
 
 
-def test_old_write_file_args_folded():
-    """오래된 write_file 호출의 content 인자는 전송본에서 스텁으로 접힌다.
+import hashlib as _hashlib
 
-    write_file(path, content)의 content는 파일 전문이라 히스토리에 영구 잔류하면 콜마다
-    재전송된다(실측 세션에서 tool_call args의 최대 성분, 13.5K tok). 파일은 디스크에 있고
-    read_file로 다시 읽을 수 있으므로, 최근 KEEP_RECENT 이내를 제외한 과거 write_file
-    content만 접는다. 실측 시뮬레이션(140콜): 콜당 입력 49,054 → 42,632 tok(-13.1%).
 
-    최근 것·edit_file(diff 문맥)·원본 히스토리는 건드리지 않는다.
+def _wf_call(call_id, path, content):
+    return {
+        "role": "assistant", "content": "",
+        "tool_calls": [{
+            "id": call_id, "type": "function",
+            "function": {"name": "write_file",
+                         "arguments": _json.dumps({"path": path, "content": content})},
+        }],
+    }
+
+
+def _tool_result(call_id, content):
+    return {"role": "tool", "tool_call_id": call_id, "content": content}
+
+
+# registry.execute_tool의 write_file 성공 반환 접두사와 일치해야 한다(그 계약에 결합).
+_OK = "파일을 작성했습니다: /ws/{}"
+
+
+def test_fold_only_successful_writes():
+    """성공한 과거 write_file만 접히고, 거부·실패·취소·결과없음은 원문을 유지한다.
+
+    이전 구현은 실행 성공 여부와 무관하게 접어, 승인 거부·오류·취소된 write도
+    성공한 것처럼 기록했다. 같은 tool_call_id의 tool result를 대조해 성공만 접는다.
     """
     import json
-    from app.runtime.agent import AgentRuntime, COMPACT_KEEP_RECENT
+    from app.runtime.agent import AgentRuntime, WRITE_ARGS_KEEP_RECENT_MESSAGES as K
 
-    def wf(path, content):
-        return {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [{
-                "id": "x", "type": "function",
-                "function": {"name": "write_file",
-                             "arguments": json.dumps({"path": path, "content": content})},
-            }],
-        }
-
-    old = wf("a.py", "OLD_BODY " * 500)
-    recent = wf("b.py", "RECENT_BODY " * 500)
-    ef = {
-        "role": "assistant", "content": "",
-        "tool_calls": [{"id": "y", "type": "function",
-                        "function": {"name": "edit_file",
-                                     "arguments": json.dumps({"path": "c.py", "old_string": "EDIT_OLD", "new_string": "EDIT_NEW"})}}],
-    }
-    # old/ef를 KEEP 경계 밖으로 밀어내되 recent는 경계 안(최근 KEEP)에 남긴다.
-    filler = [{"role": "user", "content": f"m{i}"} for i in range(COMPACT_KEEP_RECENT - 1)]
-    msgs = [old, ef, *filler, recent]
-
-    out = AgentRuntime._fold_old_write_args(msgs, COMPACT_KEEP_RECENT)
+    ok = _wf_call("ok", "ok.py", "OK_BODY " * 300)
+    denied = _wf_call("dn", "dn.py", "DENIED_BODY " * 300)
+    failed = _wf_call("fl", "fl.py", "FAILED_BODY " * 300)
+    noresult = _wf_call("nr", "nr.py", "NORESULT_BODY " * 300)
+    msgs = [
+        ok, _tool_result("ok", _OK.format("ok.py")),
+        denied, _tool_result("dn", "사용자가 실행을 거부했습니다."),
+        failed, _tool_result("fl", "오류: 디스크 꽉 참"),
+        noresult,  # tool result 없음
+        *[{"role": "user", "content": f"pad{i}"} for i in range(K)],
+    ]
+    out = AgentRuntime._fold_old_write_args(msgs, K)
     dump = json.dumps(out, ensure_ascii=False)
+    assert "OK_BODY" not in dump, "성공한 오래된 write가 접히지 않았다"
+    assert "DENIED_BODY" in dump, "거부된 write가 접혔다"
+    assert "FAILED_BODY" in dump, "실패한 write가 접혔다"
+    assert "NORESULT_BODY" in dump, "결과 없는 write가 접혔다"
+    print("OK 성공한 write만 접힘(거부·실패·무결과 보존)")
 
-    assert "OLD_BODY" not in dump, "오래된 write_file content가 접히지 않았다"
-    assert "RECENT_BODY" in dump, "최근 write_file content까지 접혔다"
-    assert "EDIT_OLD" in dump and "EDIT_NEW" in dump, "edit_file diff가 훼손됐다"
-    # path는 보존
-    assert json.loads(out[0]["tool_calls"][0]["function"]["arguments"])["path"] == "a.py"
-    # 원본 불변
-    assert "OLD_BODY" in json.loads(old["tool_calls"][0]["function"]["arguments"])["content"]
-    print("OK 오래된 write_file content만 전송본에서 접힘(원본·edit_file·최근 보존)")
+
+def test_fold_stub_has_path_bytes_sha_and_warning():
+    """접은 stub은 path·원본 bytes·sha256과 '스냅샷 아님' 경고를 담고, hash는 원본 기준이다."""
+    import json
+    from app.runtime.agent import AgentRuntime, WRITE_ARGS_KEEP_RECENT_MESSAGES as K
+
+    body = "SECRET_BODY " * 40
+    sha = _hashlib.sha256(body.encode("utf-8")).hexdigest()
+    nbytes = len(body.encode("utf-8"))
+    ok = _wf_call("ok", "x.py", body)
+    msgs = [ok, _tool_result("ok", _OK.format("x.py")),
+            *[{"role": "user", "content": f"p{i}"} for i in range(K)]]
+    out = AgentRuntime._fold_old_write_args(msgs, K)
+    args = json.loads(out[0]["tool_calls"][0]["function"]["arguments"])
+    assert args["path"] == "x.py", "path 유실"
+    stub = args["content"]
+    assert "SECRET_BODY" not in stub, "원문이 stub에 남음"
+    assert sha in stub, "원본 content sha256이 없음(또는 접기 후 기준)"
+    assert str(nbytes) in stub, "원본 bytes 수가 없음"
+    assert "스냅샷" in stub or "이후 변경" in stub, "현재파일 불일치 경고가 없음"
+    print("OK stub에 path·bytes·sha256·경고 포함, hash는 원본 기준")
+
+
+def test_fold_preserves_recent_edit_multiid_malformed_immutable():
+    """최근 write·edit_file 보존, 여러 ID 정확 연결, malformed 유지, 원본 deep equality,
+    접은 payload는 provider 직렬화 가능."""
+    import json, copy
+    from app.runtime.agent import AgentRuntime, WRITE_ARGS_KEEP_RECENT_MESSAGES as K
+
+    old_ok = _wf_call("o1", "old.py", "OLDOK_BODY " * 200)
+    old_ok2 = _wf_call("o2", "old2.py", "OLDOK2_BODY " * 200)
+    malformed = {
+        "role": "assistant", "content": "",
+        "tool_calls": [{"id": "mf", "type": "function",
+                        "function": {"name": "write_file", "arguments": "{not json"}}],
+    }
+    edit = {
+        "role": "assistant", "content": "",
+        "tool_calls": [{"id": "e1", "type": "function",
+                        "function": {"name": "edit_file",
+                                     "arguments": json.dumps({"path": "e.py", "old_string": "EO", "new_string": "EN"})}}],
+    }
+    recent = _wf_call("r1", "recent.py", "RECENT_BODY " * 200)
+    msgs = [
+        old_ok, _tool_result("o1", _OK.format("old.py")),
+        old_ok2, _tool_result("o2", _OK.format("old2.py")),
+        malformed, _tool_result("mf", _OK.format("old.py")),
+        edit, _tool_result("e1", "파일을 수정했습니다: /ws/e.py"),
+        *[{"role": "user", "content": f"pad{i}"} for i in range(K)],
+        recent, _tool_result("r1", _OK.format("recent.py")),
+    ]
+    original = copy.deepcopy(msgs)
+    out = AgentRuntime._fold_old_write_args(msgs, K)
+    dump = json.dumps(out, ensure_ascii=False)  # 직렬화 가능해야 함
+
+    assert "OLDOK_BODY" not in dump and "OLDOK2_BODY" not in dump, "여러 성공 write ID 접기 실패"
+    assert "RECENT_BODY" in dump, "최근 write가 접힘"
+    assert "EO" in dump and "EN" in dump, "edit_file diff 훼손"
+    assert "{not json" in dump, "malformed arguments가 변형됨"
+    assert msgs == original, "원본 history가 변형됨(deep equality 실패)"
+    print("OK 최근·edit·malformed 보존, 다중ID 접기, 원본 불변, 직렬화 가능")
