@@ -1007,3 +1007,75 @@ def test_strict_fake_and_replay_over_full_history():
     asyncio.run(drive(compacted))
     assert len(fake2.calls) == 1, "compaction 경계에서 400/재시도 발생"
     print("OK 강화 계약: 전체 assistant reasoning 보존·중간 누락 검출·compaction 경계 통과")
+
+
+def test_estimate_context_areas_counts_all_regions():
+    """context 추정이 content뿐 아니라 reasoning_content·tool_call arguments·tool_results를
+    별도 영역으로 집계하고, keep_reasoning에 따라 reasoning 포함/제외를 반영한다."""
+    from app.runtime.agent import AgentRuntime
+
+    system_msg = {"role": "system", "content": "S" * 400}
+    projected = [
+        {"role": "user", "content": "UUUU"},
+        {"role": "assistant", "content": "AA", "reasoning_content": "R" * 800,
+         "tool_calls": [{"id": "c1", "type": "function",
+                         "function": {"name": "write_file", "arguments": "X" * 800}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "T" * 400},
+    ]
+    keep = AgentRuntime._estimate_context_areas(system_msg, projected, "SK" * 50, "MEM" * 50, True)
+    strip = AgentRuntime._estimate_context_areas(system_msg, projected, "SK" * 50, "MEM" * 50, False)
+
+    expected = {"system_base_role", "memory", "skills", "history_content",
+                "tool_results", "reasoning_content", "tool_call_arguments", "total_est"}
+    assert expected <= set(keep), keep.keys()
+    assert keep["reasoning_content"] > 0 and strip["reasoning_content"] == 0
+    assert keep["tool_call_arguments"] > 0, "write_file arguments가 집계 안 됨"
+    assert keep["tool_results"] > 0 and keep["skills"] > 0 and keep["memory"] > 0
+    assert keep["total_est"] > strip["total_est"], "reasoning 포함분이 total에 반영 안 됨"
+    parts = sum(keep[k] for k in expected if k != "total_est")
+    assert keep["total_est"] == parts, "total_est가 영역 합과 불일치"
+    print("OK context 추정이 모든 영역(reasoning·tool args 포함) 집계")
+
+
+def test_precompaction_triggers_on_reasoning_and_args_alone():
+    """content가 작아도 긴 reasoning + 대형 write_file arguments만으로 임계를 넘으면
+    사전 compaction이 발동한다(예전엔 content만 세어 이 경우를 놓쳤다)."""
+    import asyncio
+    from app.runtime.agent import AgentRuntime, CONTEXT_COMPACT_RATIO
+    from app.config import settings
+    from app.tools.registry import TOOL_SCHEMAS
+
+    rt = AgentRuntime()
+    budget = settings.logical_budget
+    # content는 작지만 reasoning·args로 임계 초과하도록 크게
+    big = int(budget * CONTEXT_COMPACT_RATIO)
+    projected = [
+        {"role": "user", "content": "짧음"},
+        {"role": "assistant", "content": "x",
+         "reasoning_content": "R" * (big * 3),  # ASCII ~4자/토큰
+         "tool_calls": [{"id": "c1", "type": "function",
+                         "function": {"name": "write_file", "arguments": "A" * (big * 3)}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "짧은 결과"},
+    ]
+    system_msg = {"role": "system", "content": "sys"}
+
+    # content만 세는 옛 방식이면 임계 미달, 새 방식이면 초과여야 한다
+    areas = AgentRuntime._estimate_context_areas(system_msg, projected, "", "", keep_reasoning=True)
+    assert areas["total_est"] > budget * CONTEXT_COMPACT_RATIO, "reasoning+args로 임계 초과가 안 잡힘"
+
+    # 실제 사전 compaction 루프가 이 판단으로 _compact를 호출하는지
+    calls = []
+
+    async def fake_compact(all_messages, session_id):
+        calls.append(1)
+        return False  # 더 못 줄임 → 루프 종료(무한루프 방지)
+
+    async def noop(covered):
+        pass
+
+    rt._compact = fake_compact
+    rt._project = lambda all_messages, sid: projected
+    asyncio.run(rt._precompact("sid", ["placeholder"], system_msg, "", "",
+                               keep_reasoning=True, on_compaction=noop))
+    assert calls, "reasoning+args만으로 임계를 넘겼는데 사전 compaction이 시도되지 않았다"
+    print("OK 긴 reasoning·대형 write_file args만으로도 사전 compaction 발동")

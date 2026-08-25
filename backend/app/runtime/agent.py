@@ -799,8 +799,7 @@ class AgentRuntime:
             call_thinking = False if no_think else thinking
             call_effort = None if no_think else effort
             # thinking+tools + provider가 replay를 요구하면 reasoning을 유지, 아니면 벗긴다.
-            keep_reasoning = (call_thinking and bool(tool_schemas)
-                              and getattr(adapter, "requires_reasoning_replay", False))
+            keep_reasoning = self._should_keep_reasoning(adapter, call_thinking, tool_schemas)
             msgs = messages if keep_reasoning else self._strip_reasoning(messages)
             produced = False
             try:
@@ -1128,43 +1127,32 @@ class AgentRuntime:
             usage: dict[str, int] = {}
             last_emit = 0.0
 
-            # vision 모델(이미지 작업)이면 원본 이미지를 data URI로 실어 보낸다(/uploads 경로는
-            # 모델이 못 읽음). non-vision 모델에는 이미지를 보내지 않는다(모델이 image 미지원 → 400).
-            projected = self._project(all_messages, session_id)
+            # 이 호출에서 reasoning을 전송본에 유지할지 — 사전 압축 추정과 실제 전송이 같은
+            # 기준을 쓰도록 여기서 한 번 정한다(DeepSeek V4: thinking+tools면 유지).
+            keep_reasoning = self._should_keep_reasoning(
+                self._adapter_for(route["model"]), route["thinking"], tool_schemas)
+
+            async def _on_compaction(covered):
+                route["compactions"] += 1
+                await send("compaction", {"covered": covered})
+
             # 전송 전 사전 압축: 한 스텝에서 도구 결과가 대량으로 쌓이면(예: 병렬 read_file
             # 다수) 실측 후 압축은 이미 예산 초과 호출을 한 번 보내버린다(실측 195K 관측).
-            # 보내기 전에 추정치로 미리 압축해 그 초과 호출 자체를 막는다.
+            # 실제 전송 payload와 동일한 형태(reasoning·tool arguments 포함)로 추정해 미리 압축한다.
+            projected = await self._precompact(
+                session_id, all_messages, system_msg, skills, room_memory,
+                keep_reasoning, _on_compaction)
+            # vision 모델(이미지 작업)이면 원본 이미지를 data URI로 실어 보낸다(/uploads 경로는
+            # 모델이 못 읽음). non-vision 모델에는 이미지를 보내지 않는다(모델이 image 미지원 → 400).
+            # orphan tool 제거·write_file 접기·image 처리를 실제 전송본에 적용한다(원본 불변).
+            send_proj = self._to_send_projection(projected, has_image)
+            call_messages = [system_msg, *send_proj]
+            # context 영역 분해 계측(debug view/최적화 근거) — 실제 전송 payload 기준. compaction
+            # 판단과 같은 _estimate_context_areas를 공유한다(reasoning·tool arguments 포함).
             if session_id:
-                for _ in range(3):
-                    est = _est_tokens(system_msg.get("content", "")) + sum(
-                        _est_tokens(m["content"]) for m in projected
-                        if isinstance(m.get("content"), str)
-                    )
-                    if est <= settings.logical_budget * CONTEXT_COMPACT_RATIO:
-                        break
-                    if not await self._compact(all_messages, session_id):
-                        break
-                    route["compactions"] += 1
-                    await send("compaction", {"covered": self._compaction[session_id]["covered"]})
-                    projected = self._project(all_messages, session_id)
-            # 방어: orphan tool 제거 — compaction/순서 이상으로 섞여도 400으로 run이 죽지 않게.
-            projected = self._drop_orphan_tools(projected)
-            # 오래된 write_file content를 전송본에서 접어 재전송 비용을 줄인다(원본 불변).
-            projected = self._fold_old_write_args(projected, WRITE_ARGS_KEEP_RECENT_MESSAGES)
-            if has_image:
-                call_messages = [
-                    system_msg,
-                    *[
-                        {**m, "content": [_to_data_uri_item(c) for c in m["content"]]}
-                        if isinstance(m.get("content"), list) else m
-                        for m in projected
-                    ],
-                ]
-            else:
-                call_messages = [system_msg, *self._strip_images(projected)]
-            # context 영역 분해 계측(debug view/최적화 근거) — 무엇이 컨텍스트를 차지하는지.
-            if session_id:
-                self._record_context_breakdown(session_id, role, system_msg, projected, skills, room_memory)
+                areas = self._estimate_context_areas(
+                    system_msg, send_proj, skills, room_memory, keep_reasoning)
+                self._store_context_breakdown(session_id, role, areas)
             route["model_calls"] += 1
             # thinking·reasoning은 그대로 넘긴다. reasoning round-trip 유지와 400 폴백(role invocation 한정)은
             # _stream_with_recovery가 adapter capability + counters로 관리한다.
@@ -1932,36 +1920,99 @@ class AgentRuntime:
                             "evidence": str(it.get("evidence", ""))})
         return out
 
-    def _record_context_breakdown(self, session_id, role, system_msg, projected, skills, room_memory):
-        """전송 직전 context를 영역별로 추정해 저장한다(debug view/최적화 근거).
-        절대값은 추정, 상대 비중 파악이 목적. 실측 총량은 usage(measured)가 별도로 남는다."""
+    @staticmethod
+    def _should_keep_reasoning(adapter, thinking, tool_schemas) -> bool:
+        """이 호출에서 히스토리의 reasoning_content를 전송본에 유지할지(순수).
+        DeepSeek V4 계약: thinking+tools + provider가 replay를 요구하면 유지, 아니면 제거."""
+        return (bool(thinking) and bool(tool_schemas)
+                and getattr(adapter, "requires_reasoning_replay", False))
+
+    @staticmethod
+    def _msg_text(content) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return " ".join(
+                x.get("text", "") for x in content
+                if isinstance(x, dict) and x.get("type") == "text"
+            )
+        return str(content or "")
+
+    @staticmethod
+    def _estimate_context_areas(system_msg, projected, skills, room_memory, keep_reasoning) -> dict:
+        """최종 전송 payload 기준 영역별 토큰 추정(순수). projected는 fold/strip이 적용된
+        전송 형태를 받는다. content만 세던 옛 계산이 reasoning_content와 tool_call arguments를
+        누락해 실측과 크게 어긋나던 것을 바로잡는다. reasoning은 keep_reasoning일 때만 포함
+        (전송본에서 실제로 벗겨지면 0). compaction 판단과 debug breakdown이 이 함수를 공유한다.
+        절대값은 추정이며 실측 총량은 provider usage(measured)가 별도로 남는다."""
+        system_total = _est_tokens(AgentRuntime._msg_text(system_msg.get("content", "")))
+        skills_t = _est_tokens(skills or "")
+        memory_t = _est_tokens(room_memory or "") + _est_tokens(_load_global_memory())
+        base_role_t = max(0, system_total - skills_t - memory_t)  # base+role = system − memory − skills
+        hist_t = tool_t = reason_t = args_t = 0
+        for m in projected:
+            text = AgentRuntime._msg_text(m.get("content", ""))
+            if m.get("role") == "tool":
+                tool_t += _est_tokens(text)
+            else:
+                hist_t += _est_tokens(text)
+            if keep_reasoning and isinstance(m.get("reasoning_content"), str):
+                reason_t += _est_tokens(m["reasoning_content"])
+            for tc in (m.get("tool_calls") or []):
+                args_t += _est_tokens((tc.get("function") or {}).get("arguments", "") or "")
+        total = base_role_t + skills_t + memory_t + hist_t + tool_t + reason_t + args_t
+        return {
+            "system_base_role": base_role_t,
+            "memory": memory_t,
+            "skills": skills_t,
+            "history_content": hist_t,
+            "tool_results": tool_t,
+            "reasoning_content": reason_t,
+            "tool_call_arguments": args_t,
+            "total_est": total,
+        }
+
+    def _to_send_projection(self, projected: list[dict], has_image: bool) -> list[dict]:
+        """모델에 보낼 최종 projection(system 제외): orphan tool 제거 → write_file 접기 →
+        image 처리. 원본은 불변. est/breakdown/실제 전송이 모두 이 형태를 기준으로 한다."""
+        p = self._drop_orphan_tools(projected)
+        p = self._fold_old_write_args(p, WRITE_ARGS_KEEP_RECENT_MESSAGES)
+        if has_image:
+            return [
+                {**m, "content": [_to_data_uri_item(c) for c in m["content"]]}
+                if isinstance(m.get("content"), list) else m
+                for m in p
+            ]
+        return self._strip_images(p)
+
+    async def _precompact(self, session_id, all_messages, system_msg, skills, room_memory,
+                          keep_reasoning, on_compaction) -> list[dict]:
+        """전송 전 사전 압축: 실제 전송 payload와 동일한 형태로 추정한 total_est가 임계를
+        넘으면 미리 압축해 초과 호출 자체를 막는다. content만 세던 옛 판단은 reasoning·tool
+        arguments를 놓쳐(실측상 히스토리 대부분) 사전 압축이 헛돌던 것을 바로잡는다.
+        압축이 일어나면 on_compaction(covered)를 await한다. 최종 projected(변환 전)를 반환."""
+        projected = self._project(all_messages, session_id)
+        if not session_id:
+            return projected
+        for _ in range(3):
+            payload = self._to_send_projection(projected, has_image=False)
+            areas = self._estimate_context_areas(system_msg, payload, skills, room_memory, keep_reasoning)
+            if areas["total_est"] <= settings.logical_budget * CONTEXT_COMPACT_RATIO:
+                break
+            if not await self._compact(all_messages, session_id):
+                break
+            await on_compaction(self._compaction[session_id]["covered"])
+            projected = self._project(all_messages, session_id)
+        return projected
+
+    def _store_context_breakdown(self, session_id, role, areas: dict):
+        """이미 계산된 areas(전송 payload 기준)를 debug view용으로 저장한다."""
         try:
-            system_total = _est_tokens(system_msg.get("content", ""))
-            skills_t = _est_tokens(skills or "")
-            memory_t = _est_tokens(room_memory or "") + _est_tokens(_load_global_memory())
-            tool_t = hist_t = 0
-            for m in projected:
-                c = m.get("content", "")
-                text = c if isinstance(c, str) else " ".join(
-                    x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text"
-                ) if isinstance(c, list) else str(c)
-                if m.get("role") == "tool":
-                    tool_t += _est_tokens(text)
-                else:
-                    hist_t += _est_tokens(text)
-            # base+role 지침 = system 전체에서 memory/skills를 뺀 근사
-            base_role_t = max(0, system_total - skills_t - memory_t)
-            total = system_total + tool_t + hist_t
             budget = settings.logical_budget
+            total = areas.get("total_est", 0)
             self._last_context[session_id] = {
                 "role": role,
-                "areas": {
-                    "system_base_role": base_role_t,
-                    "memory": memory_t,
-                    "skills": skills_t,
-                    "history": hist_t,
-                    "tool_results": tool_t,
-                },
+                "areas": {k: v for k, v in areas.items() if k != "total_est"},
                 "total_est": total,
                 "budget": budget,
                 "pct_est": round(total / budget * 100, 1) if budget else 0,
