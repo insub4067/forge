@@ -70,7 +70,7 @@ async def _call_tool(name: str, args: dict) -> dict:
     if name == "forge_result":
         return _text(json.dumps(await task_facade.result(str(args.get("task_id", ""))), ensure_ascii=False))
     if name == "forge_cancel":
-        ok = task_facade.cancel(str(args.get("task_id", "")))
+        ok = await task_facade.cancel(str(args.get("task_id", "")))
         return _text(json.dumps({"cancelled": ok}, ensure_ascii=False))
     return _text(f"알 수 없는 도구: {name}", is_error=True)
 

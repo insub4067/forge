@@ -86,6 +86,17 @@ async def lifespan(app: FastAPI):
         return  # DB 없이 resume/scheduler를 띄우지 않는다(치명 초기화 실패).
 
     # ── 선택 기능: 하나 실패해도 서비스 전체를 죽이지 않는다. 다만 조용히 넘기지 않고 로그를 남긴다.
+    # 재시작으로 실행 주체(메모리 Future·continuation)를 잃은 미결 승인을 cancelled로 정리한다.
+    # 전체 args·실행 continuation이 영속화되지 않는 현재 구조에선 기존 실행을 이어갈 수 없으므로,
+    # 이런 승인을 실행 가능한 카드로 복원하지 않는다(Auto Resume는 새 run에서 새 승인 ID로 재요청).
+    try:
+        n_orphan = await store.cleanup_orphan_approvals()
+        if n_orphan:
+            error_log.record("startup_orphan_approvals",
+                             f"재시작으로 실행 주체를 잃은 승인 {n_orphan}건을 cancelled로 정리", "")
+    except Exception as err:
+        error_log.record("startup_orphan_approvals", str(err), "")
+
     # 재시작으로 중단된 run 복구(auto_resume면 이어서 완주, 아니면 안내만).
     try:
         interrupted = await store.take_interrupted_runs()

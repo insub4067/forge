@@ -478,6 +478,7 @@ class AgentRuntime:
         self._last_seq: dict[str, int] = {}
         self._last_context: dict[str, dict] = {}  # 세션별 마지막 context 영역 분해(debug view)
         self._auto_approve_sessions: set[str] = set()
+        self._run_ids: dict[str, str] = {}  # session_id → 현재 run 식별자(승인 audit·정리 범위)
         # 세션별 모델 티어: auto(flash+막히면 pro) | pro(항상) | flash(승격 없음)
         self._model_tier: dict[str, str] = {}
         # 세션별 에이전트 모드: auto(복잡도 기반 자동) | multi(경량 3역할) | single(올인원)
@@ -897,6 +898,7 @@ class AgentRuntime:
 
     def cleanup_session(self, session_id: str) -> None:
         self._running_sessions.discard(session_id)
+        self._run_ids.pop(session_id, None)
         self._injections.pop(session_id, None)
         self._cancel_sessions.discard(session_id)
         self._cancel_events.pop(session_id, None)
@@ -932,14 +934,25 @@ class AgentRuntime:
         # 항상 auto — FORGE가 작업 복잡도로 single/multi를 자동 판단한다.
         return "auto"
 
-    def resolve_pending_approvals(self, session_id: str = "") -> int:
-        """해당 세션의 대기 승인만 승인 처리한다(자동 승인 켤 때).
-        session_id로 필터하지 않으면 한 세션의 auto-approve가 다른 세션의 pending까지 승인한다."""
+    async def resolve_pending_approvals(self, session_id: str = "") -> int:
+        """해당 세션의 대기 승인을 자동 승인 처리한다(auto_approve 켤 때). PG에서 requested→
+        approved 전이를 먼저 성공시킨 것만 메모리 Future를 approve로 해소한다 — PG가 requested로
+        남아 실행 직전 consume이 status_requested로 실패하던 불일치를 막는다. DB 오류·상태 경쟁이
+        나면 그 승인은 실행하지 않는다(Future를 건드리지 않음). 다른 세션 승인은 절대 건드리지 않는다."""
         count = 0
         for approval_id, fut in list(self.pending_approvals.items()):
-            if session_id and self._pending_meta.get(approval_id, {}).get("session_id") != session_id:
+            meta = self._pending_meta.get(approval_id, {})
+            sid = meta.get("session_id", "")
+            if session_id and sid != session_id:
                 continue
-            if not fut.done():
+            if meta.get("kind") != "approval" or fut.done():
+                continue
+            try:
+                ok = await store.decide_approval(approval_id, sid, "approved", "auto_approve")
+            except Exception as err:
+                error_log.record("auto_approve_decide", str(err), sid)
+                continue
+            if ok:  # PG 전이 성공한 것만 Future를 approve로 해소
                 fut.set_result("approve")
                 count += 1
         return count
@@ -981,7 +994,7 @@ class AgentRuntime:
         if session_id:
             try:
                 await store.create_approval(
-                    approval_id, session_id, run_id, name,
+                    approval_id, session_id, run_id or self._run_ids.get(session_id, ""), name,
                     approvals.args_hash(args), self._approval_preview(name, args))
             except Exception as err:
                 error_log.record("approval_persist", str(err), session_id)
@@ -2315,6 +2328,10 @@ class AgentRuntime:
         workspace: str | None = None,
     ) -> list[dict]:
         ws = workspace or settings.workspace
+        # 이 run의 식별자 — 승인 audit·세션/run 범위 정리에 쓴다. run() 1회(세션당 선점)마다
+        # 새로 만들며, resume도 새 run이라 새 run_id를 받는다. cleanup_session에서 정리한다.
+        if session_id:
+            self._run_ids[session_id] = uuid.uuid4().hex
         # 재시작 내성: _last_seq는 in-memory라 서버 재시작 시 비어 있다. 세션의 seq를 처음
         # 쓸 때 eventlog에서 그 세션의 마지막 seq를 읽어 seed — 이미 로그에 쌓인 높은 seq와
         # 충돌해 폴링 dedup이 깨지는 것을 막는다.

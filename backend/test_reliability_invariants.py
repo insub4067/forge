@@ -85,6 +85,11 @@ def make_rt(verify_states, dev_status="done", changed=True, change_from=1):
     A.store.list_gates = lambda *a, **k: _empty()
     A.store.replace_gates = lambda *a, **k: _noop()
     A.store.save_gate_result = lambda *a, **k: _noop()
+    # resolve_pending_approvals는 PG decide 성공분만 Future를 해소한다 — DB 없이 성공 경로 목킹.
+    async def _decide_ok(*a, **k):
+        return True
+    A.store.decide_approval = _decide_ok
+    A.store.create_approval = lambda *a, **k: _noop()
     return rt, committed
 
 
@@ -288,7 +293,7 @@ async def main():
         rt2._request_approval("bash", {"command": "echo hi"}, await _collector(ev), "s-resume"))
     await asyncio.sleep(0.05)
     assert any(t == "approval_request" for t, _ in ev), "resume 후에도 수동 세션은 승인 요청해야 함"
-    rt2.resolve_pending_approvals("s-resume")
+    await rt2.resolve_pending_approvals("s-resume")
     assert (await task)[1] == "approve"
     print("resume 후 승인 게이트: OK — 수동 세션은 여전히 approval_request로 pause")
 

@@ -115,9 +115,15 @@ async def result(task_id: str) -> dict:
     }
 
 
-def cancel(task_id: str) -> bool:
+async def cancel(task_id: str) -> bool:
     from ..api.routes import runtime
+    from ..db import store
     if not runtime.is_running(task_id):
         return False
+    # 미결 승인을 PG에서 cancelled로 먼저 정리한 뒤 Future를 깨운다(라우트 취소와 동일 규율).
+    try:
+        await store.cancel_approvals(task_id)
+    except Exception:
+        pass
     runtime.cancel(task_id)
     return True

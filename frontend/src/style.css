@@ -1588,6 +1588,7 @@ main {
   padding: 12px;
 }
 
+.approval-err { margin-top: 8px; font-size: 12px; color: #f87171; }
 .approval-head {
   font-size: 13px;
   font-weight: 600;

@@ -1148,12 +1148,16 @@ async def decide_approval(approval_id: str, session_id: str, decision: str,
     if decision not in ("approved", "rejected"):
         return False
     async with async_session() as s:
+        # 만료되지 않은 requested만 결정 가능 — 만료 정리와 사용자 결정이 경쟁해도 조건부
+        # UPDATE라 한 전이만 성공한다(만료됐으면 rowcount 0).
+        now = datetime.utcnow()
         res = await s.execute(
             update(Approval)
             .where(Approval.id == approval_id,
                    Approval.session_id == session_id,
-                   Approval.status == "requested")
-            .values(status=decision, decided_at=datetime.utcnow(), decided_by=decided_by)
+                   Approval.status == "requested",
+                   (Approval.expires_at.is_(None)) | (Approval.expires_at > now))
+            .values(status=decision, decided_at=now, decided_by=decided_by)
         )
         await s.commit()
         return res.rowcount == 1
@@ -1180,9 +1184,13 @@ async def consume_approval(approval_id: str, session_id: str, current_args_hash:
 
 
 async def list_pending_approvals(session_id: str = "") -> list[dict]:
-    """requested 승인 목록(재시작·SSE 재연결 시 복원용). session_id를 주면 그 세션만."""
+    """살아있는(requested·미만료) 승인 목록. SSE 재연결 복원용. session_id를 주면 그 세션만.
+    만료된 requested는 제외한다(만료 카드를 프런트에 노출하지 않는다)."""
+    now = datetime.utcnow()
     async with async_session() as s:
-        q = select(Approval).where(Approval.status == "requested")
+        q = select(Approval).where(
+            Approval.status == "requested",
+            (Approval.expires_at.is_(None)) | (Approval.expires_at > now))
         if session_id:
             q = q.where(Approval.session_id == session_id)
         res = await s.execute(q.order_by(Approval.requested_at))
@@ -1197,5 +1205,33 @@ async def expire_stale_approvals() -> int:
             .where(Approval.status == "requested", Approval.expires_at < datetime.utcnow())
             .values(status="expired", decided_at=datetime.utcnow(), decided_by="system")
         )
+        await s.commit()
+        return res.rowcount
+
+
+async def cancel_approvals(session_id: str, run_id: str = "") -> int:
+    """세션(선택적으로 run) 범위의 requested 승인을 cancelled로 원자 전이한다. 세션 취소 시
+    미결 승인이 requested로 남아 이후 잘못 소비되는 것을 막는다. 반환: 취소 처리 수."""
+    async with async_session() as s:
+        q = (update(Approval)
+             .where(Approval.status == "requested", Approval.session_id == session_id))
+        if run_id:
+            q = q.where(Approval.run_id == run_id)
+        res = await s.execute(
+            q.values(status="cancelled", decided_at=datetime.utcnow(), decided_by="cancel"))
+        await s.commit()
+        return res.rowcount
+
+
+async def cleanup_orphan_approvals() -> int:
+    """서버 기동 시, 실행 주체(메모리 Future·continuation)를 잃은 모든 requested 승인을
+    cancelled로 정리한다. 전체 tool args·실행 continuation이 영속화되지 않는 현재 구조에선
+    재시작 후 기존 실행을 이어갈 수 없으므로, 이런 승인을 '실행 가능한 카드'로 복원하지 않는다.
+    Auto Resume가 승인형 도구를 다시 수행하려면 새 run에서 새 승인 ID로 다시 요청해야 한다."""
+    async with async_session() as s:
+        res = await s.execute(
+            update(Approval)
+            .where(Approval.status == "requested")
+            .values(status="cancelled", decided_at=datetime.utcnow(), decided_by="restart"))
         await s.commit()
         return res.rowcount

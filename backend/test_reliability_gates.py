@@ -33,6 +33,15 @@ async def main():
     A.store.list_tasks = fake_list
     A.store.replace_tasks = fake_replace
 
+    # resolve_pending_approvals는 이제 PG decide 성공분만 Future를 해소한다. 이 테스트는 순수
+    # Future 로직을 검증하므로 decide/create를 목킹해 DB 없이 성공 경로를 만든다.
+    async def _fake_decide(approval_id, session_id, decision, decided_by="user"):
+        return True
+    async def _fake_create(*a, **k):
+        return None
+    A.store.decide_approval = _fake_decide
+    A.store.create_approval = _fake_create
+
     events = []
     await rt._finalize_tasks("s1", await send_collector(events))
     assert all(t["status"] == "done" for t in stored["tasks"]), stored
@@ -206,7 +215,7 @@ async def main():
     await asyncio.sleep(0.05)  # pending 등록 대기
     assert any(t == "approval_request" for t, _ in ev), ev
     assert rt.pending_approvals, "수동 세션은 pending에 남아 승인을 기다려야 함"
-    rt.resolve_pending_approvals("s-manual")
+    await rt.resolve_pending_approvals("s-manual")
     _, decision = await task
     assert decision == "approve", decision
     print("승인 경계(수동): OK — approval_request 전송 + pending 등록 후 승인")
@@ -219,7 +228,7 @@ async def main():
     fut_mine = asyncio.get_running_loop().create_future()
     rt.pending_approvals["mine-1"] = fut_mine
     rt._pending_meta["mine-1"] = {"session_id": "s-manual", "kind": "approval"}
-    n = rt.resolve_pending_approvals("s-manual")
+    n = await rt.resolve_pending_approvals("s-manual")
     assert n == 1, n
     assert fut_mine.done() and fut_mine.result() == "approve", "해당 세션 pending은 승인돼야 함"
     assert not fut_other.done(), "타 세션 pending은 승인되면 안 됨"

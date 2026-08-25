@@ -54,7 +54,9 @@ async def main():
         r = await server.handle({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
                                  "params": {"name": "forge_status", "arguments": {"task_id": "t"}}})
         assert json.loads(r["result"]["content"][0]["text"])["role"] == "coder"
-    with mock.patch.object(server.task_facade, "cancel", lambda tid: True):
+    async def _fake_cancel(tid):  # task_facade.cancel은 async(승인 PG 정리 포함)
+        return True
+    with mock.patch.object(server.task_facade, "cancel", _fake_cancel):
         r = await server.handle({"jsonrpc": "2.0", "id": 6, "method": "tools/call",
                                  "params": {"name": "forge_cancel", "arguments": {"task_id": "t"}}})
         assert json.loads(r["result"]["content"][0]["text"])["cancelled"] is True

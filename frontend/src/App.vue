@@ -114,6 +114,7 @@ async function deleteSkill(name, scope = 'workspace') {
 }
 const activeQuestion = ref(null)
 const activeApproval = ref(null) // 스트림 끊긴 사이 뜬 승인 요청 복구용
+const approvalError = ref('')    // 승인 API 실패(409 이미 처리/만료·404 없음) 시 안내
 const questionAnswer = ref('')
 const debug = ref('대기 중')
 
@@ -259,8 +260,9 @@ async function fetchStatus(id) {
   return st
 }
 
-// PG authoritative store에서 미결(requested) 승인을 복원한다. 메모리 status는 재시작 시
-// 초기화되므로, 서버가 재시작됐거나 SSE가 끊긴 사이에도 승인 카드를 다시 띄운다.
+// SSE·브라우저 재연결(서버 프로세스는 생존) 시 아직 살아있는 미결 승인 카드를 복원한다.
+// 서버 프로세스 재시작은 다르다 — 실행 주체(메모리 Future·continuation)를 잃은 승인은 서버
+// 기동 시 cancelled로 정리되므로 여기서 조회해도 나오지 않는다(실행 불가 카드를 띄우지 않음).
 async function restorePendingApproval(id) {
   if (!id || activeApproval.value) return
   try {
@@ -1473,14 +1475,26 @@ function removeText() {
 }
 
 async function decide(approval, decision) {
-  activeApproval.value = null // 복구 모달 닫기
+  approvalError.value = ''
   try {
-    await fetch(`/api/approvals/${approval.id}`, {
+    const res = await fetch(`/api/approvals/${approval.id}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ decision }),
     })
-  } catch {}
+    // 성공(2xx)일 때만 카드를 닫는다 — DB 상태와 화면이 어긋나지 않게. 실패면 카드를 유지하고
+    // 짧은 안내를 띄운다(409=이미 처리·만료, 404=없음). 재시작으로 실행 주체를 잃은 승인은
+    // 서버가 cancelled로 정리하므로 여기서 409로 걸러진다.
+    if (res.ok) {
+      activeApproval.value = null // 복구 모달 닫기
+    } else {
+      approvalError.value = res.status === 409 ? '이미 처리됐거나 만료된 승인입니다.'
+        : res.status === 404 ? '승인을 찾을 수 없습니다.'
+        : '승인 처리에 실패했습니다.'
+    }
+  } catch {
+    approvalError.value = '네트워크 오류로 처리하지 못했습니다.'
+  }
 }
 
 async function answerQuestion(q, answer) {
@@ -1725,6 +1739,7 @@ document.addEventListener('visibilitychange', () => {
                 <button class="ok" @click="decide(m.approval, 'approve')">승인</button>
                 <button class="no" @click="decide(m.approval, 'reject')">거부</button>
               </div>
+              <div v-if="approvalError" class="approval-err">{{ approvalError }}</div>
             </div>
 
             <div v-if="m.doneMessage" class="done-msg">{{ m.doneMessage }}</div>
@@ -1914,6 +1929,7 @@ document.addEventListener('visibilitychange', () => {
         <div class="modal-head">도구 실행 승인이 필요합니다</div>
         <div class="modal-question">{{ activeApproval.tool }}<span v-if="summarizeArgs(activeApproval.args)"> — {{ summarizeArgs(activeApproval.args) }}</span></div>
         <pre v-if="approvalBody(activeApproval.args)" class="approval-body">{{ approvalBody(activeApproval.args) }}</pre>
+        <div v-if="approvalError" class="approval-err">{{ approvalError }}</div>
         <div class="modal-actions">
           <button class="no" @click="decide(activeApproval, 'reject')">거부</button>
           <button class="ok" @click="decide(activeApproval, 'approve')">승인</button>

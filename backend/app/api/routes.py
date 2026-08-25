@@ -413,26 +413,33 @@ async def get_messages(session_id: str):
 @router.post("/approvals/{approval_id}")
 async def resolve_approval(approval_id: str, req: Request):
     body = await req.json()
-    decision = str(body.get("decision", "reject"))
-    approve = decision in ("approve", "approved")
-    # durable: PG 상태를 먼저 원자·멱등 전이(요청한 세션만, 이미 결정된 것 역전 불가)한 뒤
-    # 메모리 Future를 해소한다. session은 서버가 보관한 pending_meta에서 가져와 격리한다.
-    sid = runtime.pending_session(approval_id)
-    persisted = False
-    if sid:
-        try:
-            persisted = await store.decide_approval(
-                approval_id, sid, "approved" if approve else "rejected")
-        except Exception as err:
-            error_log.record("approval_decide", str(err), sid)
+    approve = str(body.get("decision", "reject")) in ("approve", "approved")
+    target = "approved" if approve else "rejected"
+    # PG가 authoritative. 승인의 소유 session으로 조건부·멱등 전이를 먼저 성공시킨 경우에만
+    # 동일 결정으로 메모리 Future를 해소한다 — DB가 rejected인데 Future가 approve가 되는
+    # 불일치를 구조적으로 막는다. 없으면 404, 이미 결정/만료면 409(프런트는 카드를 유지한다).
+    a = await store.get_approval(approval_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="승인을 찾을 수 없습니다.")
+    ok = False
+    try:
+        ok = await store.decide_approval(approval_id, a["session_id"], target)
+    except Exception as err:
+        error_log.record("approval_decide", str(err), a["session_id"])
+        raise HTTPException(status_code=500, detail="승인 처리 중 오류가 발생했습니다.")
+    if not ok:
+        # 이미 결정됐거나 만료됐거나(경쟁) 세션 불일치 — 상태를 뒤집지 않는다.
+        raise HTTPException(status_code=409,
+                            detail=f"승인을 처리할 수 없습니다(상태: {a['status']}).")
     resolved = runtime.resolve_approval(approval_id, "approve" if approve else "reject")
-    return {"resolved": resolved, "decision": decision, "persisted": persisted}
+    return {"resolved": resolved, "decision": target, "persisted": True}
 
 
 @router.get("/sessions/{session_id}/pending-approvals")
 async def pending_approvals(session_id: str):
-    """이 세션의 미결(requested) 승인 목록 — 재시작·SSE 재연결 시 승인 카드 복원용.
-    PG가 authoritative store라 메모리가 비어도(재시작) 복원된다."""
+    """이 세션의 살아있는(requested·미만료) 승인 목록 — SSE·브라우저 재연결(서버 프로세스
+    생존) 시 승인 카드 복원용. 서버 프로세스 재시작으로 실행 주체를 잃은 승인은 기동 시
+    cancelled로 정리되므로 여기 나오지 않는다(실행 불가 카드를 복원하지 않는다)."""
     try:
         return {"pending": await store.list_pending_approvals(session_id)}
     except Exception:
@@ -449,6 +456,11 @@ async def answer_question(question_id: str, req: Request):
 
 @router.post("/sessions/{session_id}/cancel")
 async def cancel_session(session_id: str):
+    # 미결 승인을 PG에서 cancelled로 먼저 원자 전이한 뒤(이후 잘못 소비 방지) Future를 깨운다.
+    try:
+        await store.cancel_approvals(session_id)
+    except Exception as err:
+        error_log.record("cancel_approvals", str(err), session_id)
     runtime.cancel(session_id)
     return {"cancelled": True}
 
@@ -840,7 +852,7 @@ async def set_auto_approve(session_id: str, req: Request):
     enabled = bool(body.get("enabled", False))
     runtime.set_auto_approve(session_id, enabled)
     await store.set_session_auto_approve(session_id, enabled)  # 영속화(resume가 복원)
-    resolved = runtime.resolve_pending_approvals(session_id) if enabled else 0
+    resolved = await runtime.resolve_pending_approvals(session_id) if enabled else 0
     return {"enabled": enabled, "resolved": resolved}
 
 

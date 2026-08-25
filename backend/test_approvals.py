@@ -174,6 +174,7 @@ async def _run_scenario():
     await store.ensure_session(sid, "run-appr", ws)
     try:
         rt = AgentRuntime()
+        rt._run_ids[sid] = "run-e2e"  # run() 대신 직접 _run_role 호출이라 run 식별자를 수동 세팅
         fake = FakeAdapter("out.txt", "HELLO_APPROVED")  # 인스턴스 재사용(스텝 간 n 누적)
         rt._adapter_for = lambda m: fake
         events = []
@@ -201,7 +202,9 @@ async def _run_scenario():
         # 검증 2: 실행 직전 consume으로 approved→consumed 전이(중복 실행 방지 상태)
         a = await store.get_approval(aid)
         assert a["status"] == "consumed", f"consumed 아님: {a['status']}"
-        # 검증 3: approval_granted 이벤트 발행
+        # 검증 3: run_id가 approval에 배선됨(빈 문자열 아님)
+        assert a["run_id"] == "run-e2e", f"run_id 미배선: {a['run_id']!r}"
+        # 검증 4: approval_granted 이벤트 발행
         assert any(t == "approval_granted" for t, _ in events), "approval_granted 없음"
         print("RUN_APPROVAL_OK")
     finally:
@@ -218,3 +221,95 @@ def test_manual_approval_runs_and_consumes_end_to_end():
                        env=dict(os.environ), capture_output=True, text=True)
     assert "RUN_APPROVAL_OK" in r.stdout, f"stdout={r.stdout}\nstderr={r.stderr[-2000:]}"
     print("OK 수동 승인 end-to-end: 승인→consume→실제 write_file 실행")
+
+
+# ── 정합성 결함 수정 검증(취소·재시작 orphan·만료·auto_approve PG·session 격리·FK) ──
+
+_INTEGRITY_CODE = r'''
+import asyncio, uuid
+from app.runtime.agent import AgentRuntime
+from app.runtime import approvals as A
+from app.db import store
+from app.db.session import engine
+from app.db.models import Base
+
+async def _run():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    sid = "t-int-" + uuid.uuid4().hex[:8]
+    other = "t-oth-" + uuid.uuid4().hex[:8]
+    await store.ensure_session(sid, "int")
+    await store.ensure_session(other, "oth")
+    h = A.args_hash({"command": "ls"})
+    try:
+        # (결함4/8) 만료 승인은 pending 조회에서 제외되고 결정도 불가
+        e = uuid.uuid4().hex
+        await store.create_approval(e, sid, "r1", "bash", h, "bash: ls", ttl_seconds=-1)
+        assert e not in {p["id"] for p in await store.list_pending_approvals(sid)}, "만료가 pending에 노출"
+        assert await store.decide_approval(e, sid, "approved") is False, "만료 승인이 결정됨"
+        # (결함9) 만료 전이 — 한 상태만
+        assert await store.expire_stale_approvals() >= 1
+        assert (await store.get_approval(e))["status"] == "expired"
+
+        # (결함3) 세션 취소 → requested→cancelled
+        c = uuid.uuid4().hex
+        await store.create_approval(c, sid, "r1", "bash", h, "bash: ls")
+        assert await store.cancel_approvals(sid) >= 1
+        assert (await store.get_approval(c))["status"] == "cancelled"
+
+        # (결함10) 다른 session 취소·결정·consume은 이 세션 승인을 건드리지 않는다
+        d = uuid.uuid4().hex
+        await store.create_approval(d, sid, "r1", "bash", h, "bash: ls")
+        await store.cancel_approvals(other)
+        assert (await store.get_approval(d))["status"] == "requested", "다른 세션 취소가 침범"
+        assert await store.decide_approval(d, other, "approved") is False, "다른 세션 결정 허용"
+        await store.decide_approval(d, sid, "approved")
+        ok, _ = await store.consume_approval(d, other, h)
+        assert not ok, "다른 세션 consume 허용"
+
+        # (결함1/6) 재시작 흉내 — cleanup_orphan이 모든 requested를 cancelled로, pending 비움
+        o = uuid.uuid4().hex
+        await store.create_approval(o, sid, "r1", "bash", h, "bash: ls")
+        await store.cleanup_orphan_approvals()
+        assert (await store.get_approval(o))["status"] == "cancelled", "orphan 미정리"
+        assert not await store.list_pending_approvals(sid), "재시작 후 pending 잔존"
+
+        # (결함3) auto_approve 전환: PG approved 성공분만 Future approve
+        rt = AgentRuntime()
+        loop = asyncio.get_running_loop()
+        aid = uuid.uuid4().hex
+        await store.create_approval(aid, sid, "r1", "bash", h, "bash: ls")
+        f = loop.create_future()
+        rt.pending_approvals[aid] = f
+        rt._pending_meta[aid] = {"session_id": sid, "kind": "approval"}
+        # (결함4) PG에 없는 승인은 Future를 건드리지 않는다
+        ghost = uuid.uuid4().hex
+        fg = loop.create_future()
+        rt.pending_approvals[ghost] = fg
+        rt._pending_meta[ghost] = {"session_id": sid, "kind": "approval"}
+        n = await rt.resolve_pending_approvals(sid)
+        assert n == 1, f"resolve_pending 전이 수 불일치: {n}"
+        assert f.done() and f.result() == "approve", "PG approved인데 Future 미해소"
+        assert (await store.get_approval(aid))["status"] == "approved"
+        assert not fg.done(), "PG 없는 승인이 Future approve됨(도구 실행 위험)"
+
+        # (결함12) 세션 삭제 시 Approval FK 정리
+        x = uuid.uuid4().hex
+        await store.create_approval(x, other, "r1", "bash", h, "bash: ls")
+        await store.delete_room(other)
+        assert await store.get_approval(x) is None, "세션 삭제 후 approval 잔존"
+        print("INTEGRITY_OK")
+    finally:
+        await store.delete_room(sid)
+        await store.delete_room(other)
+
+asyncio.run(_run())
+'''
+
+
+def test_approval_integrity_fixes():
+    """취소·재시작 orphan·만료·auto_approve PG 정합·session 격리·FK 정리를 실DB로 검증."""
+    r = subprocess.run([sys.executable, "-c", _INTEGRITY_CODE], cwd=str(_BACKEND),
+                       env=dict(os.environ), capture_output=True, text=True)
+    assert "INTEGRITY_OK" in r.stdout, f"stdout={r.stdout}\nstderr={r.stderr[-2000:]}"
+    print("OK 승인 정합성: 취소·orphan·만료·auto_approve·session격리·FK")
