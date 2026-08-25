@@ -190,6 +190,7 @@ TOOL_SCHEMAS: list[dict] = [
                                     "description": "pending/working/blocked/abandoned/unavailable만 설정한다. passed/failed는 프로세스 전용.",
                                 },
                                 "failure_reason": {"type": "string", "description": "blocked/abandoned/unavailable일 때 사유"},
+                                "requirement_id": {"type": "string", "description": "이 gate가 검증하는 Task IR 요구사항 id(예: R1). 있으면 연결, 없으면 빈 값(선택)."},
                             },
                             "required": ["title"],
                         },

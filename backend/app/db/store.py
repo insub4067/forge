@@ -500,6 +500,7 @@ def merge_gates(existing: list[dict], incoming: list[dict]) -> list[dict]:
                 "status": status,
                 "evidence": m.get("evidence", "{}"),
                 "failure_reason": str(g.get("failure_reason") or m.get("failure_reason") or ""),
+                "requirement_id": str(g.get("requirement_id") or m.get("requirement_id") or ""),
             })
         else:
             out.append({
@@ -511,6 +512,7 @@ def merge_gates(existing: list[dict], incoming: list[dict]) -> list[dict]:
                 "status": str(g.get("status", "pending")),
                 "evidence": "{}",
                 "failure_reason": str(g.get("failure_reason") or ""),
+                "requirement_id": str(g.get("requirement_id") or ""),
             })
     # append-preserving(P0-2): 모델이 payload에서 빠뜨린 기존 gate는 조용히 삭제하지 않고
     # 그대로 보존한다. 요구사항을 실수로 누락하는 것만으로 완료 조건(gate)이나 process-owned
@@ -539,7 +541,8 @@ async def replace_gates(session_id: str, gates: list[dict]) -> list[dict]:
                                      description=m["description"],
                                      verification_method=m["verification_method"],
                                      expected_result=m["expected_result"],
-                                     status=m["status"], failure_reason=m["failure_reason"])
+                                     status=m["status"], failure_reason=m["failure_reason"],
+                                     requirement_id=m.get("requirement_id", ""))
                 s.add(row)
             else:
                 row.title = m["title"]
@@ -548,6 +551,7 @@ async def replace_gates(session_id: str, gates: list[dict]) -> list[dict]:
                 row.expected_result = m["expected_result"]
                 row.status = m["status"]
                 row.failure_reason = m["failure_reason"]
+                row.requirement_id = m.get("requirement_id", "")
                 keep.add(row.id)
         for r in rows:
             if r.id not in keep:
