@@ -125,6 +125,8 @@ class AcceptanceGate(Base):
     status: Mapped[str] = mapped_column(String, default="pending")
     evidence: Mapped[str] = mapped_column(Text, default="{}")       # JSON — process-owned
     failure_reason: Mapped[str] = mapped_column(Text, default="")   # blocked/abandoned/unavailable 사유
+    # Task IR requirement 참조(Phase 1, 하위호환). 빈 문자열이면 미연결 — 기존 gate와 완전 호환.
+    requirement_id: Mapped[str] = mapped_column(String, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()

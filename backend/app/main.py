@@ -50,6 +50,8 @@ _COLUMN_PATCHES = [
     "evidence_json TEXT DEFAULT '{}', failure_pattern VARCHAR DEFAULT '', "
     "expected_effect VARCHAR DEFAULT '', status VARCHAR DEFAULT 'pending', "
     "created_at TIMESTAMP DEFAULT now(), decided_at TIMESTAMP)",
+    # Phase 1: gate가 Task IR requirement를 참조(하위호환 — 빈 값이면 미연결).
+    "ALTER TABLE acceptance_gates ADD COLUMN IF NOT EXISTS requirement_id VARCHAR DEFAULT ''",
 ]
 
 

@@ -460,6 +460,7 @@ def _gate_dict(g: AcceptanceGate) -> dict:
         "status": g.status,
         "evidence": g.evidence,
         "failure_reason": g.failure_reason,
+        "requirement_id": getattr(g, "requirement_id", "") or "",
     }
 
 
