@@ -50,9 +50,16 @@ Kanban.
 
 `passed/failed`는 process가 실제 command 실행 뒤에만 쓴다. Evidence에는 command/exit/output/expected가 기록된다. Gate update는 기존 requirement를 조용히 삭제하지 않도록 merge/ledger invariants를 사용한다.
 
-## checkpoints
+## checkpoints (legacy/deprecated)
 
-mutation 전 Git SHA/step checkpoint.
+승인형 도구 실행 직전 `(git_sha, step_no)`를 저장하던 marker였다. 실제 rollback이나
+durable checkpoint resume 기능은 없었다 — writer만 있고 reader/rollback 소비자가 어느
+계층에도 없었다. 게다가 git_sha는 commit 시에만 바뀌는데 일반 workspace는 작업 끝에 한 번
+autocommit하므로 step별 sha가 거의 동일해, rollback 지점 자체가 성립하지 않았다.
+
+현재 **writer/reader 모두 없다**(writer는 제거됨). 기존 데이터·FK 정리 호환을 위해 테이블과
+모델, 세션 삭제 경로(`delete(Checkpoint)`)만 유지한다. rollback·durable checkpoint resume은
+제공하지 않는다.
 
 - `session_id`, `git_sha`, `step_no`, `created_at`
 

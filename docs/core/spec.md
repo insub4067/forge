@@ -85,7 +85,9 @@ Long-term project memory와 long conversation context를 분리한다.
 - persisted approval/model-tier policy
 - JSONL event log
 
-현재 Python coroutine/worker process 자체를 checkpoint에서 이어붙이는 event-sourced worker는 아니다. history/state에서 안전한 새 run으로 재구성하는 resume다.
+현재 Python coroutine/worker process 자체를 checkpoint에서 이어붙이는 event-sourced worker는 아니다. history/state에서 안전한 새 run으로 재구성하는 resume다. `checkpoints` 테이블은 legacy/deprecated로, writer/reader가 없고 rollback·durable checkpoint resume을 제공하지 않는다(FK 정리 호환용으로만 유지).
+
+verification 실패 시 하네스는 commit하지 않지만(검증 안 된 코드는 done·commit 안 됨), workspace의 파일 변경 자체는 dirty state로 남을 수 있다 — rollback으로 되돌리지 않는다.
 
 ## 8. Automation / Remote
 

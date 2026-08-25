@@ -102,7 +102,8 @@ ExecutionBackend 공통 interface(Local/Docker/SSH)는 아직 정리되지 않�
 
 PostgreSQL tables:
 
-- sessions / messages / tasks / acceptance_gates / checkpoints
+- sessions / messages / tasks / acceptance_gates
+- checkpoints (legacy/deprecated — writer/reader 없음, FK 정리 호환용으로 테이블만 유지. rollback·durable resume 미제공)
 - agent_runs
 - push_devices
 - scheduled_jobs
