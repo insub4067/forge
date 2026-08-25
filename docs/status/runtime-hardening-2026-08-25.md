@@ -66,11 +66,14 @@ cd backend && .venv/bin/python gate_eval.py      → Gate 판정 정확도 100%(
   - F4 코드 변경 없이 설명만(gate 없음) → `completed_unverified`
   - F5 정상+통과조건 충족 → `completed`(false FAIL 아님)
   - F8 self-grading passed 주장 → clamp로 `working`, 방법 없으면 `unavailable`(evidence 필수)
-- **구조적 GAP 2유형(현재 Gate가 못 잡음 = 잠재 false PASS 리스크)**:
+- **F7 테스트 삭제/약화 — 감지·표면화 추가(`d10b3f7`)**: `change_guard.detect_test_weakening`이
+  이번 변경의 `git diff --numstat`에서 테스트 파일 삭제·라인 순감소를 감지해 `test_weakening`
+  경고로 표면화(비차단, verdict 미변경). gate_eval에서 gap → detectable로 승격, false PASS 0.
+  verdict 차단은 정당한 리팩터 false-block 방지를 위해 별도 결정으로 분리.
+- **남은 구조적 GAP 1유형**:
   - F6 무관한 파일 변경: gate는 verification_method 결과만 보고 변경 파일 범위를 대조하지 않음.
-  - F7 테스트 삭제/약화: gate는 명령 exit만 보고 테스트 수·커버리지 baseline과 대조하지 않음.
-  - → 강화 후보: gate 검증에 (a)변경 파일 범위 화이트리스트 대조, (b)테스트 수/커버리지
-    baseline 대조를 추가. test_gate_eval이 이 gap을 상시 표시해 잊히지 않게 고정.
+  - → 강화 후보: gate 검증에 변경 파일 범위 화이트리스트 대조 추가. test_gate_eval이 이 gap을
+    상시 표시해 잊히지 않게 고정.
 
 ## 7. 호환성·마이그레이션
 
@@ -107,7 +110,7 @@ cd backend && .venv/bin/python gate_eval.py      → Gate 판정 정확도 100%(
 - CORS `allow_origins=['*']` — fail-closed와 별개로 원격 모드에서 강화 필요.
 
 **다음 작업 우선순위**
-1. Gate 강화: 변경 파일 범위 대조 + 테스트 수/커버리지 baseline 대조(F6/F7 해소) — gate_eval로 회귀 고정.
+1. Gate 강화: F7 감지 완료(비차단 표면화, `d10b3f7`). 남은 F6(무관 파일 범위 대조) 추가 — gate_eval로 회귀 고정. (선택) test_weakening을 verdict 차단으로 승격할지 정책 결정.
 2. 대형 파일 2차 분리 순서(책임 기준):
    - agent.py: **verification 계층**(`_verify`/`_verify_gates`/`_verify_integration`/`_gates_report`)을
      `runtime/verification.py`로(다음 후보 — 정책은 이미 분리됨, 검증 실행은 sandbox 의존이라 주입 필요).
