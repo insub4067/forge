@@ -2,6 +2,10 @@ from typing import Any, AsyncIterator, Protocol
 
 
 class LLMAdapter(Protocol):
+    # thinking 모드에서 이전 assistant reasoning_content를 후속 요청에 되돌려줘야 하는지.
+    # True면 런타임이 thinking+tools 호출에서 reasoning을 전송본에 유지한다(DeepSeek V4).
+    requires_reasoning_replay: bool
+
     def stream_chat(
         self,
         messages: list[dict[str, Any]],

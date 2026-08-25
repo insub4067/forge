@@ -553,46 +553,159 @@ def test_runtime_smoke_fails_on_dead_backend():
     print("OK 런타임 스모크가 서버 생존을 검증(축 A)")
 
 
-def test_reasoning_content_not_resent():
-    """assistant.reasoning_content는 다음 요청 전송본에서 제거된다.
+class _StrictDeepSeekFake:
+    """DeepSeek V4 thinking mode 계약을 강제하는 fake adapter.
 
-    DeepSeek 계약상 reasoning_content는 되돌려주면 안 되고(무시되거나 400), 그대로 실으면
-    입력 토큰만 먹는다. 실측(세션 5c34d84f, 140콜): 누적 입력 8,556,521 → 6,867,668 tok
-    (-19.7%). 히스토리·Debug view에는 남기고 전송본에서만 벗긴다.
+    실제 계약(codex #24500, opencode #24190, qwen-code #3658에서 확인):
+    thinking=True + tools 존재 상태에서 히스토리의 assistant(tool_calls 보유)에
+    reasoning_content가 없으면 400. 이전 코드/커밋 b01da1c가 정확히 이걸 유발했다.
+    """
+    requires_reasoning_replay = True
 
-    예전엔 400을 한 번 겪은 세션(_strip_reasoning_sessions)만 벗겨서, 나머지 전 세션이
-    매 콜마다 지난 추론을 재전송했다.
+    def __init__(self, fail_first: bool = False):
+        self.calls: list[dict] = []
+        self._fail_first = fail_first  # 첫 호출만 강제 400(폴백 경로 검증용)
+
+    async def stream_chat(self, messages, tools=None, thinking=False, reasoning_effort=None):
+        self.calls.append({"thinking": thinking, "has_tools": bool(tools),
+                           "messages": messages})
+        if self._fail_first and len(self.calls) == 1:
+            raise RuntimeError(
+                "DeepSeek API 오류 400: The reasoning_content in the thinking mode "
+                "must be passed back to the API")
+        if thinking and tools:
+            for m in reversed(messages):
+                if m.get("role") == "assistant" and m.get("tool_calls"):
+                    if "reasoning_content" not in m:
+                        raise RuntimeError(
+                            "DeepSeek API 오류 400: The reasoning_content in the "
+                            "thinking mode must be passed back to the API")
+                    break
+        yield {"content": "ok"}
+
+
+def _tool_loop_history():
+    """reasoning + tool_call → tool result 를 포함한 발전된 tool-loop 히스토리."""
+    return [
+        {"role": "user", "content": "작업"},
+        {"role": "assistant", "content": "",
+         "reasoning_content": "단계별 사고" * 50,
+         "tool_calls": [{"id": "c1", "type": "function",
+                         "function": {"name": "read_file", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "파일 내용"},
+    ]
+
+
+def test_reasoning_replayed_across_tool_calls():
+    """thinking+tools tool-loop에서 assistant reasoning_content가 전송본에 유지된다.
+
+    DeepSeek V4 계약: 누락하면 400. 전송본에만 유지하고 원본 history는 불변으로 둔다.
+    검증: (1) 400 없이 통과 (2) 전송본에 reasoning 유지 (3) retry 0 (4) 원본 불변.
+    """
+    import asyncio
+    from app.runtime.agent import AgentRuntime
+    from app.tools.registry import TOOL_SCHEMAS
+
+    rt = AgentRuntime()
+    fake = _StrictDeepSeekFake()
+    rt._adapter_for = lambda model: fake
+    history = _tool_loop_history()
+    counters = {"retries": 0}
+
+    async def drive():
+        async for _ in rt._stream_with_recovery(
+            "deepseek-v4-flash", history, TOOL_SCHEMAS, True, "medium", "s1", counters
+        ):
+            pass
+
+    asyncio.run(drive())  # 400이면 예외로 실패
+    assert len(fake.calls) == 1, f"재시도가 발생: {len(fake.calls)}"
+    assert counters["retries"] == 0, f"retry 발생: {counters}"
+    sent = fake.calls[0]["messages"]
+    assert any("reasoning_content" in m for m in sent), "전송본에서 reasoning이 사라짐"
+    assert fake.calls[0]["thinking"] is True, "thinking이 꺼짐"
+    # 원본 history 불변(deep equality)
+    assert history == _tool_loop_history(), "원본 history가 변형됨"
+    print("OK thinking+tools에서 reasoning round-trip 유지(400 없음, retry 0, 원본 불변)")
+
+
+def test_reasoning_stripped_when_no_tools():
+    """tools 없는 요청에서는 reasoning_content를 전송본에서 제거한다(토큰 절감 유지).
+
+    tool_call 히스토리가 아니면 round-trip 계약이 없어 안전하게 벗길 수 있다.
     """
     import asyncio
     from app.runtime.agent import AgentRuntime
 
     rt = AgentRuntime()
-    seen: list[list[dict]] = []
-
-    class FakeAdapter:
-        async def stream_chat(self, messages, tools=None, thinking=False, reasoning_effort=None):
-            seen.append(messages)
-            yield {"content": "ok"}
-
-    rt._adapter_for = lambda model: FakeAdapter()
+    fake = _StrictDeepSeekFake()
+    rt._adapter_for = lambda model: fake
     history = [
-        {"role": "user", "content": "작업"},
-        {"role": "assistant", "content": "함", "reasoning_content": "긴 추론" * 100},
+        {"role": "user", "content": "요약해줘"},
+        {"role": "assistant", "content": "답", "reasoning_content": "사고" * 50},
     ]
 
     async def drive():
         async for _ in rt._stream_with_recovery(
-            "deepseek-v4-flash", history, None, True, "medium", "s-new"
+            "deepseek-v4-flash", history, None, True, "medium", "s2"
         ):
             pass
 
     asyncio.run(drive())
-    assert seen, "어댑터가 호출되지 않았다"
-    sent = seen[0]
-    assert not any("reasoning_content" in m for m in sent), "전송본에 reasoning_content가 남았다"
-    # 원본 히스토리는 보존(Debug view·재개용)
-    assert "reasoning_content" in history[1], "원본 히스토리가 파괴됐다"
-    print("OK reasoning_content는 전송본에서만 제거(원본 보존)")
+    sent = fake.calls[0]["messages"]
+    assert not any("reasoning_content" in m for m in sent), "tools 없는데 reasoning 유지됨"
+    assert "reasoning_content" in history[1], "원본 history가 파괴됨"
+    print("OK tools 없는 요청에서는 reasoning 제거(원본 보존)")
+
+
+def test_reasoning_fallback_is_run_scoped():
+    """400 폴백은 현재 run(counters) 범위로만 제한되고 미래 run/다른 세션을 오염시키지 않는다.
+
+    첫 호출 400 → thinking 끄고 재시도(같은 run 내). 새 run(새 counters)은 다시 thinking 시작.
+    세션 영구 상태(_strip_reasoning_sessions)는 존재하지 않는다.
+    """
+    import asyncio
+    from app.runtime.agent import AgentRuntime
+    from app.tools.registry import TOOL_SCHEMAS
+
+    rt = AgentRuntime()
+    assert not hasattr(rt, "_strip_reasoning_sessions"), \
+        "세션 영구 non-thinking 상태가 아직 존재한다"
+
+    fake = _StrictDeepSeekFake(fail_first=True)
+    rt._adapter_for = lambda model: fake
+
+    # run A — 첫 호출 400 → 폴백으로 thinking 끄고 재시도
+    countersA = {"retries": 0}
+
+    async def driveA():
+        async for _ in rt._stream_with_recovery(
+            "deepseek-v4-flash", _tool_loop_history(), TOOL_SCHEMAS, True, "medium",
+            "sess", countersA
+        ):
+            pass
+
+    asyncio.run(driveA())
+    assert len(fake.calls) == 2, "폴백 재시도가 없었다"
+    assert fake.calls[0]["thinking"] is True and fake.calls[1]["thinking"] is False, \
+        "폴백이 thinking을 끄지 않았다"
+    assert countersA["retries"] == 1
+
+    # run B — 같은 세션이지만 새 counters. thinking이 다시 켜져야 한다(오염 없음).
+    fake2 = _StrictDeepSeekFake()
+    rt._adapter_for = lambda model: fake2
+    countersB = {"retries": 0}
+
+    async def driveB():
+        async for _ in rt._stream_with_recovery(
+            "deepseek-v4-flash", _tool_loop_history(), TOOL_SCHEMAS, True, "medium",
+            "sess", countersB
+        ):
+            pass
+
+    asyncio.run(driveB())
+    assert fake2.calls[0]["thinking"] is True, "이전 run의 폴백이 새 run을 오염시킴"
+    print("OK reasoning 폴백은 run-scope(미래 run/다른 세션 무오염)")
 
 
 def test_old_write_file_args_folded():

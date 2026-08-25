@@ -5,6 +5,13 @@ import httpx
 
 
 class DeepSeekAdapter:
+    # DeepSeek V4 thinking mode 계약: thinking=True로 호출할 때 히스토리의 assistant
+    # reasoning_content를 그대로 되돌려줘야 한다. 누락하면 400
+    # ("The reasoning_content in the thinking mode must be passed back to the API").
+    # 런타임이 이 capability를 보고 전송본에서 reasoning을 벗길지 유지할지 결정한다
+    # (전역 규칙으로 하드코딩하지 않는다 — provider마다 다르다).
+    requires_reasoning_replay = True
+
     def __init__(self, api_key: str, model: str):
         self.api_key = api_key
         self.model = model

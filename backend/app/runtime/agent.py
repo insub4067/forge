@@ -473,8 +473,6 @@ class AgentRuntime:
         # 세션 단위로 단조 증가시켜 eventlog.tail(since)의 전제를 보장한다.
         self._last_seq: dict[str, int] = {}
         self._last_context: dict[str, dict] = {}  # 세션별 마지막 context 영역 분해(debug view)
-        # reasoning_content 400을 한 번 겪은 세션 — 이후 호출은 미리 reasoning을 벗긴다.
-        self._strip_reasoning_sessions: set[str] = set()
         self._auto_approve_sessions: set[str] = set()
         # 세션별 모델 티어: auto(flash+막히면 pro) | pro(항상) | flash(승격 없음)
         self._model_tier: dict[str, str] = {}
@@ -747,21 +745,32 @@ class AgentRuntime:
     async def _stream_with_recovery(self, model, messages, tool_schemas, thinking, effort, session_id, counters=None):
         """LLM 스트림을 호출하되 요청 시점 오류를 유형별로 회복한다.
 
-        - reasoning_content 400: thinking을 꺼서 즉시 재시도(이후 스텝도 학습)
+        - reasoning_content 400: thinking을 꺼서 즉시 재시도. 폴백 상태는 counters(=이번
+          run 로컬)에만 담아 이후 스텝에 전파하되, run이 끝나면 counters와 함께 사라진다
+          (세션·미래 run·다른 세션을 오염시키지 않는다).
         - 일시적 오류(429/5xx/timeout/connection): 백오프(1·2·4초) 후 최대 3회 재시도
         - terminal(잘못된 요청·인증 등): 전파
-        긴 실행이 네트워크 블립이나 일시적 API 장애로 통째로 죽지 않게 한다."""
-        no_think = False
+        긴 실행이 네트워크 블립이나 일시적 API 장애로 통째로 죽지 않게 한다.
+
+        reasoning_content 처리: DeepSeek V4 thinking mode는 thinking=True로 호출할 때
+        히스토리의 assistant reasoning_content를 그대로 되돌려줘야 한다(누락 시 400).
+        따라서 thinking+tools 호출에서는 유지하고, 그 외(비-thinking·tools 없음·폴백)에서만
+        벗겨 토큰을 아낀다. 판단은 adapter의 requires_reasoning_replay capability에 위임한다."""
+        adapter = self._adapter_for(model)
+        # counters에 이전 스텝의 폴백 결과가 실려 있으면(이번 run 안에서 이미 400을 겪음)
+        # 이번 스텝도 thinking을 끈 채 시작한다.
+        no_think = bool(counters and counters.get("reasoning_replay_failed"))
         transient_attempts = 0
         while True:
-            # reasoning_content는 계약상 다음 요청에 되돌려주지 않는다(무시되거나 400).
-            # 전송본에서만 벗긴다 — 원본 히스토리는 Debug view·재개용으로 보존.
-            msgs = self._strip_reasoning(messages)
             call_thinking = False if no_think else thinking
             call_effort = None if no_think else effort
+            # thinking+tools + provider가 replay를 요구하면 reasoning을 유지, 아니면 벗긴다.
+            keep_reasoning = (call_thinking and bool(tool_schemas)
+                              and getattr(adapter, "requires_reasoning_replay", False))
+            msgs = messages if keep_reasoning else self._strip_reasoning(messages)
             produced = False
             try:
-                async for delta in self._adapter_for(model).stream_chat(
+                async for delta in adapter.stream_chat(
                     msgs, tool_schemas, thinking=call_thinking, reasoning_effort=call_effort
                 ):
                     produced = True
@@ -772,15 +781,19 @@ class AgentRuntime:
                 if produced:
                     raise
                 kind = self._classify_error(err)
-                # reasoning_content 400: reasoning을 벗기고 thinking을 꺼서 재시도.
-                # non-thinking 호출은 reasoning_content 계약 자체가 없어 확실히 회피된다.
+                # reasoning_content 400: thinking을 꺼서 재시도. 정상 tool-loop에서는
+                # reasoning을 올바로 round-trip하므로 이 경로는 손상된/재구성된 히스토리
+                # (예: reasoning 없는 assistant tool_call)에서만 밟힌다.
                 if kind == "reasoning" and not no_think:
                     no_think = True
-                    if session_id:
-                        self._strip_reasoning_sessions.add(session_id)
                     if counters is not None:
+                        counters["reasoning_replay_failed"] = True  # run-scope 전파
                         counters["retries"] = counters.get("retries", 0) + 1
-                    error_log.record("llm_recovered", f"thinking 끄고 재시도: {err}", session_id)
+                    error_log.record(
+                        "reasoning_replay_fallback",
+                        f"reasoning round-trip 실패 → thinking 끄고 재시도(run 한정): {err}",
+                        session_id,
+                    )
                     continue
                 if kind == "transient" and transient_attempts < 3:
                     transient_attempts += 1
@@ -1115,21 +1128,18 @@ class AgentRuntime:
                 ]
             else:
                 call_messages = [system_msg, *self._strip_images(projected)]
-            # reasoning_content 400을 겪은 세션은 이후 내내 thinking을 끈다.
-            # (thinking을 켜둔 채 보내면 매 콜마다 400→재시도가 반복돼 낭비 — recovery의 성공
-            #  상태와 동일하게 처음부터 thinking을 꺼서 그 재시도 사이클을 없앤다.)
-            # reasoning 제거 자체는 전 세션 상시다(_stream_with_recovery).
-            reasoning_disabled = session_id in self._strip_reasoning_sessions
             # context 영역 분해 계측(debug view/최적화 근거) — 무엇이 컨텍스트를 차지하는지.
             if session_id:
                 self._record_context_breakdown(session_id, role, system_msg, projected, skills, room_memory)
             route["model_calls"] += 1
+            # thinking·reasoning은 그대로 넘긴다. reasoning round-trip 유지와 400 폴백(run 한정)은
+            # _stream_with_recovery가 adapter capability + counters로 관리한다.
             async for delta in self._stream_with_recovery(
                 route["model"],
                 call_messages,
                 tool_schemas,
-                False if reasoning_disabled else route["thinking"],
-                None if reasoning_disabled else route["reasoning_effort"],
+                route["thinking"],
+                route["reasoning_effort"],
                 session_id,
                 counters,
             ):
