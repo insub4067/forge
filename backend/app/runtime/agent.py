@@ -23,6 +23,16 @@ from . import memory_guard
 from . import refine
 from . import tool_store
 from ..security import preflight as security_preflight
+# 완료/게이트 판정 정책(순수 함수)은 completion_policy로 분리 — 여기서 re-export해 기존
+# 호출부와 A.<name> 인터페이스를 그대로 유지한다.
+from .completion_policy import (  # noqa: F401
+    needs_gate_recovery,
+    _coverage_kind,
+    _blocking_reason,
+    resolve_completion_verification,
+    _clamp_task_status,
+    _clamp_gate_status,
+)
 from ..llm.factory import create_adapter
 from ..orchestrator.model_router import ModelRouter
 from ..tools.registry import APPROVAL_REQUIRED, CHAT_TOOLS, TOOL_SCHEMAS, execute_tool
@@ -343,17 +353,6 @@ def _reviewer_context(all_messages: list[dict], plan: str) -> list[dict]:
     return msgs
 
 
-def needs_gate_recovery(route_kind: str, files_changed: list, gate_count: int) -> bool:
-    """gate 복구가 필요한 상황인가 — 새 LLM 분류 호출 없이 기존 runtime state만 본다.
-
-    조건: 작업(code) run + 실제 파일 변경 발생 + gate 0개.
-    `files_changed`가 비어 있지 않다는 것 자체가 mutation 작업이었다는 가장 강한 증거다
-    (설명·조회·리뷰 요청은 파일을 바꾸지 않으므로 여기 걸리지 않는다). 별도 분류기를
-    두면 비용이 늘고 오분류가 새 실패 모드를 만든다.
-    """
-    return route_kind == "code" and bool(files_changed) and gate_count == 0
-
-
 def build_gate_recovery_context(goal: str, files_changed: list, tasks: list) -> list[dict]:
     """복구 턴에 주는 최소 컨텍스트 — Developer의 거대한 transcript를 재전송하지 않는다.
 
@@ -369,57 +368,6 @@ def build_gate_recovery_context(goal: str, files_changed: list, tasks: list) -> 
     lines.append("\n구현은 끝났다. 위 사용자 요청을 검증할 acceptance gate를 "
                  "update_gates로 등록하라. 코드는 고치지 않는다.")
     return [{"role": "user", "content": "\n".join(lines)}]
-
-
-def _coverage_kind(gate_count: int, files_changed: list, recovered: bool,
-                   is_code: bool) -> str:
-    """이 run이 어떤 경로로 마감됐는지 분류한다(telemetry). 상태를 바꾸지 않는다.
-
-    gated           — gate가 있었고 정상 흐름을 탔다
-    recovered_gated — gate가 없어 복구 턴이 만들어 냈다
-    generic_only    — 복구 후에도 gate 0. 요구사항 미검증(가장 주의해야 할 분류)
-    no_change       — 코드 변경 없음(gate가 필요 없다)
-    not_applicable  — 작업 run이 아니다(대화·조회)
-    """
-    if not is_code:
-        return "not_applicable"
-    if not files_changed:
-        return "no_change"
-    if gate_count == 0:
-        return "generic_only"
-    return "recovered_gated" if recovered else "gated"
-
-
-def _blocking_reason(status: str, gstate: str, vstate: str) -> str:
-    """왜 완전히 검증된 완료가 아닌가 — 한 가지 사유만(가장 근본적인 것)."""
-    if status == "completed":
-        return ""
-    if gstate == "none":
-        return "요구사항 게이트 없음"
-    if gstate == "failed":
-        return "요구사항 검증 실패"
-    if vstate != "passed":
-        return "실행 가능한 test/build 없음"
-    return "일부 요구사항 미검증"
-
-
-def resolve_completion_verification(gstate: str, vstate: str) -> str:
-    """최종 완료 상태를 결정한다(순수 함수 — 이 프로젝트의 핵심 invariant).
-
-    **gate가 없는 코드 변경은 완전히 검증된 완료가 아니다.** generic verification은
-    "기존 test/build가 안 깨졌다"만 말하고 사용자 요구사항 충족은 확인하지 않는다.
-    gate 0으로 `completed`를 내주면 모델이 요구사항을 놓쳐도 완료로 둔갑한다
-    (false_completion — 이 프로젝트가 가장 위험하게 보는 실패).
-
-    gate 없음 ≠ verification_failed (실패한 게 아니다)
-    gate 없음 ≠ completed        (완전히 검증된 것도 아니다)
-    gate 없음 = completed_unverified
-    """
-    if gstate == "none":
-        return "completed_unverified"
-    if gstate == "passed" and vstate == "passed":
-        return "completed"
-    return "completed_unverified"
 
 
 def _last_assistant_text(messages: list[dict]) -> str:
@@ -482,34 +430,6 @@ _COMPLEX_KEYWORDS = (
     "설계", "리팩토링", "리팩터링", "아키텍처", "마이그레이션", "전체",
     "여러 모듈", "다중 모듈", "시스템 전반", "모노레포", "대규모",
 )
-
-
-# 칸반 invariant: 모델은 todo/working만 설정한다. testing→done은 프로세스(검증 게이트·
-# _finalize_tasks)가 소유하므로, 모델이 넣은 done/testing/레거시 상태를 강등한다.
-_TASK_STATUS_CLAMP = {
-    "todo": "todo", "working": "working",
-    "planning": "todo", "in_progress": "working", "in-progress": "working",
-    "review": "working", "debug": "working",
-}
-
-
-def _clamp_task_status(status: str) -> str:
-    """모델이 설정할 수 있는 task 상태를 todo/working으로 제한한다(done/testing은 프로세스만)."""
-    return _TASK_STATUS_CLAMP.get(str(status), "working")
-
-
-# gate 상태 invariant: 모델은 pending/working/blocked/abandoned/unavailable(선언)만 쓴다.
-# passed/failed는 검증을 실제로 실행한 프로세스만 설정한다(self-grading 방지).
-_GATE_STATUS_CLAMP = {
-    "pending": "pending", "working": "working",
-    "blocked": "blocked", "abandoned": "abandoned",
-    "unavailable": "unavailable",  # 모델이 "검증 방법 없음"을 선언 — 프로세스가 재확인 후 확정
-}
-
-
-def _clamp_gate_status(status: str) -> str:
-    """모델이 설정할 수 있는 gate 상태로 제한한다(passed/failed는 프로세스 전용)."""
-    return _GATE_STATUS_CLAMP.get(str(status), "working")
 
 
 def _estimate_complexity(goal: str, all_messages: list[dict]) -> str:
