@@ -22,6 +22,7 @@ from .. import metrics as metrics_calc
 from . import memory_guard
 from . import refine
 from . import tool_store
+from . import change_guard
 from ..security import preflight as security_preflight
 # 완료/게이트 판정 정책(순수 함수)은 completion_policy로 분리 — 여기서 re-export해 기존
 # 호출부와 A.<name> 인터페이스를 그대로 유지한다.
@@ -1399,6 +1400,25 @@ class AgentRuntime:
         except Exception as err:
             error_log.record("fail_pending_tasks", str(err), session_id)
 
+    async def _check_test_weakening(self, ws: str, send: EventSink) -> None:
+        """이번 변경에서 테스트가 삭제/축소됐는지 감지해 경고를 표면화한다(비차단).
+
+        gate는 명령 exit만 보므로 '통과를 위해 테스트를 약화한' 경우(가장 위험한 false_completion
+        벡터의 하나)를 못 잡는다. autocommit 전에 `git diff --numstat HEAD`로 감지해 사실만
+        드러낸다 — verdict는 바꾸지 않는다(정당한 리팩터를 자동 차단하지 않기 위함). 감지 실패는
+        run을 깨뜨리지 않는다(fail-open)."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", ws, "diff", "--numstat", "HEAD",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+            warnings = change_guard.detect_test_weakening(out.decode("utf-8", "replace"))
+            if warnings:
+                await send("test_weakening", {"warnings": warnings})
+        except Exception as err:  # noqa: BLE001 — 감지 실패가 run을 깨뜨리지 않는다
+            error_log.record("test_weakening_check", str(err), "")
+
     async def _mark_testing(self, session_id: str, send: EventSink) -> None:
         """검증(test) 단계 진입 시 남은 task를 testing으로 — 프로세스가 칸반 stage를 소유한다
         (todo→working은 모델이, testing→done은 프로세스가). 칸반이 진행 상태를 정직히 반영."""
@@ -2398,6 +2418,7 @@ class AgentRuntime:
         # 흐름: implementation → generic verification → acceptance gate verification
         #       → integration verification → completed
         await self._mark_testing(session_id, send)  # 칸반: 검증(test) 단계 진입(프로세스 소유)
+        await self._check_test_weakening(ws, send)   # F7: 테스트 약화 감지(비차단 경고, autocommit 전)
         vstate, report = await self._verify(ws, send)
         # failed일 때만 1회 수리 재시도(bounded — 무제한 repair loop 금지, 비용 상한).
         if vstate == "failed":
