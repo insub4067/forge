@@ -820,3 +820,88 @@ def test_fold_preserves_recent_edit_multiid_malformed_immutable():
     assert "{not json" in dump, "malformed arguments가 변형됨"
     assert msgs == original, "원본 history가 변형됨(deep equality 실패)"
     print("OK 최근·edit·malformed 보존, 다중ID 접기, 원본 불변, 직렬화 가능")
+
+
+def test_reasoning_thinking_persists_across_multiple_steps():
+    """여러 tool step에 걸쳐 reasoning이 계속 round-trip되고 thinking이 유지된다(필수 검증 2).
+
+    각 스텝이 새 assistant(reasoning+tool_call)/tool result를 누적한다. strict fake는 매
+    호출에서 마지막 assistant의 reasoning 누락을 400으로 잡으므로, 전 스텝 통과 = round-trip 유지.
+    """
+    import asyncio
+    from app.runtime.agent import AgentRuntime
+    from app.tools.registry import TOOL_SCHEMAS
+
+    rt = AgentRuntime()
+    fake = _StrictDeepSeekFake()
+    rt._adapter_for = lambda model: fake
+    history = _tool_loop_history()
+    counters = {"retries": 0}
+
+    async def one_step():
+        async for _ in rt._stream_with_recovery(
+            "deepseek-v4-flash", history, TOOL_SCHEMAS, True, "medium", "s-multi", counters
+        ):
+            pass
+
+    async def run_steps():
+        for n in range(3):
+            await one_step()  # 400이면 예외
+            # 다음 스텝 히스토리 성장: reasoning+tool_call → tool result
+            history.append({
+                "role": "assistant", "content": "",
+                "reasoning_content": f"사고{n}" * 20,
+                "tool_calls": [{"id": f"s{n}", "type": "function",
+                                "function": {"name": "read_file", "arguments": "{}"}}]})
+            history.append({"role": "tool", "tool_call_id": f"s{n}", "content": "결과"})
+
+    asyncio.run(run_steps())
+    assert len(fake.calls) == 3, f"스텝 수 불일치: {len(fake.calls)}"
+    assert all(c["thinking"] is True for c in fake.calls), "중간에 thinking이 꺼짐"
+    assert counters["retries"] == 0, f"불필요한 retry: {counters}"
+    print("OK 다중 스텝에서 reasoning round-trip·thinking 유지(retry 0)")
+
+
+def test_reasoning_replay_survives_auto_resume_history():
+    """Auto Resume로 복원한 tool-loop history도 정상 동작한다(필수 검증 7).
+
+    save/load_history는 메시지를 통째로 직렬화하므로 reasoning_content가 보존된다 →
+    복원 후 thinking 호출이 400 없이 통과. 반대로 구 데이터라 reasoning이 없는 assistant
+    tool_call이면 폴백(run-scope)이 thinking을 꺼 완주시킨다.
+    """
+    import asyncio, json
+    from app.runtime.agent import AgentRuntime
+    from app.tools.registry import TOOL_SCHEMAS
+
+    rt = AgentRuntime()
+
+    # (a) reasoning 보존된 복원 history — round-trip 직렬화까지 통과
+    restored = [json.loads(json.dumps(m)) for m in _tool_loop_history()]
+    fake = _StrictDeepSeekFake()
+    rt._adapter_for = lambda model: fake
+
+    async def drive(hist, counters):
+        async for _ in rt._stream_with_recovery(
+            "deepseek-v4-flash", hist, TOOL_SCHEMAS, True, "medium", "s-resume", counters
+        ):
+            pass
+
+    asyncio.run(drive(restored, {"retries": 0}))
+    assert fake.calls[0]["thinking"] is True and len(fake.calls) == 1, "복원 history에서 400/재시도 발생"
+
+    # (b) reasoning 누락된 구 복원 history — 폴백이 run-scope로 완주시킴
+    legacy = [
+        {"role": "user", "content": "작업"},
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"id": "c1", "type": "function",
+                         "function": {"name": "read_file", "arguments": "{}"}}]},  # reasoning 없음
+        {"role": "tool", "tool_call_id": "c1", "content": "내용"},
+    ]
+    fake2 = _StrictDeepSeekFake()
+    rt._adapter_for = lambda model: fake2
+    counters = {"retries": 0}
+    asyncio.run(drive(legacy, counters))
+    assert len(fake2.calls) == 2, "폴백 재시도가 없었다"
+    assert fake2.calls[1]["thinking"] is False, "폴백이 thinking을 끄지 않았다"
+    assert counters["retries"] == 1
+    print("OK Auto Resume 복원 history 정상(보존 시 유지, 구 데이터는 run-scope 폴백)")
