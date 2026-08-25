@@ -673,6 +673,40 @@ class AgentRuntime:
         return out
 
     @staticmethod
+    def _fold_old_write_args(messages: list[dict], keep_recent: int) -> list[dict]:
+        """오래된 write_file 호출의 content 인자를 전송본에서 스텁으로 접는다.
+
+        write_file(path, content)의 content는 파일 전문이라, 접지 않으면 매 스텝 히스토리에
+        실려 재전송된다(실측: tool_call args의 최대 성분). 파일은 디스크에 있고 read_file로
+        다시 읽을 수 있으므로 최근 keep_recent 이내를 뺀 과거 것만 접는다. path는 남긴다.
+        edit_file(old/new diff)은 문맥이라 접지 않는다. 원본은 불변(모델 전송본만)."""
+        cut = len(messages) - keep_recent
+        if cut <= 0:
+            return messages
+        out: list[dict] = []
+        for i, m in enumerate(messages):
+            tcs = m.get("tool_calls") if isinstance(m, dict) else None
+            if i >= cut or not tcs:
+                out.append(m)
+                continue
+            new_tcs = []
+            changed = False
+            for tc in tcs:
+                fn = tc.get("function", {})
+                if fn.get("name") == "write_file":
+                    try:
+                        a = json.loads(fn.get("arguments") or "{}")
+                        if isinstance(a.get("content"), str) and a["content"]:
+                            a["content"] = "[생략 — 디스크에 기록됨, read_file로 확인]"
+                            tc = {**tc, "function": {**fn, "arguments": json.dumps(a, ensure_ascii=False)}}
+                            changed = True
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                new_tcs.append(tc)
+            out.append({**m, "tool_calls": new_tcs} if changed else m)
+        return out
+
+    @staticmethod
     def _strip_images(messages: list[dict]) -> list[dict]:
         """content 리스트의 image_url 항목을 텍스트 placeholder로 치환한다.
         non-vision 모델은 이미지를 못 받으므로(400), 텍스트만 남긴다.
@@ -713,15 +747,16 @@ class AgentRuntime:
     async def _stream_with_recovery(self, model, messages, tool_schemas, thinking, effort, session_id, counters=None):
         """LLM 스트림을 호출하되 요청 시점 오류를 유형별로 회복한다.
 
-        - reasoning_content 400: reasoning을 벗겨 즉시 재시도(이후 스텝도 학습)
+        - reasoning_content 400: thinking을 꺼서 즉시 재시도(이후 스텝도 학습)
         - 일시적 오류(429/5xx/timeout/connection): 백오프(1·2·4초) 후 최대 3회 재시도
         - terminal(잘못된 요청·인증 등): 전파
         긴 실행이 네트워크 블립이나 일시적 API 장애로 통째로 죽지 않게 한다."""
-        stripped = session_id in self._strip_reasoning_sessions
         no_think = False
         transient_attempts = 0
         while True:
-            msgs = self._strip_reasoning(messages) if stripped else messages
+            # reasoning_content는 계약상 다음 요청에 되돌려주지 않는다(무시되거나 400).
+            # 전송본에서만 벗긴다 — 원본 히스토리는 Debug view·재개용으로 보존.
+            msgs = self._strip_reasoning(messages)
             call_thinking = False if no_think else thinking
             call_effort = None if no_think else effort
             produced = False
@@ -739,8 +774,7 @@ class AgentRuntime:
                 kind = self._classify_error(err)
                 # reasoning_content 400: reasoning을 벗기고 thinking을 꺼서 재시도.
                 # non-thinking 호출은 reasoning_content 계약 자체가 없어 확실히 회피된다.
-                if kind == "reasoning" and not (stripped and no_think):
-                    stripped = True
+                if kind == "reasoning" and not no_think:
                     no_think = True
                     if session_id:
                         self._strip_reasoning_sessions.add(session_id)
@@ -1081,6 +1115,8 @@ class AgentRuntime:
                     projected = self._project(all_messages, session_id)
             # 방어: orphan tool 제거 — compaction/순서 이상으로 섞여도 400으로 run이 죽지 않게.
             projected = self._drop_orphan_tools(projected)
+            # 오래된 write_file content를 전송본에서 접어 재전송 비용을 줄인다(원본 불변).
+            projected = self._fold_old_write_args(projected, COMPACT_KEEP_RECENT)
             if has_image:
                 call_messages = [
                     system_msg,
@@ -1092,12 +1128,11 @@ class AgentRuntime:
                 ]
             else:
                 call_messages = [system_msg, *self._strip_images(projected)]
-            # reasoning_content 400을 겪은 세션은 이후 내내 reasoning을 벗기고 thinking도 끈다.
+            # reasoning_content 400을 겪은 세션은 이후 내내 thinking을 끈다.
             # (thinking을 켜둔 채 보내면 매 콜마다 400→재시도가 반복돼 낭비 — recovery의 성공
             #  상태와 동일하게 처음부터 thinking을 꺼서 그 재시도 사이클을 없앤다.)
+            # reasoning 제거 자체는 전 세션 상시다(_stream_with_recovery).
             reasoning_disabled = session_id in self._strip_reasoning_sessions
-            if reasoning_disabled:
-                call_messages = self._strip_reasoning(call_messages)
             # context 영역 분해 계측(debug view/최적화 근거) — 무엇이 컨텍스트를 차지하는지.
             if session_id:
                 self._record_context_breakdown(session_id, role, system_msg, projected, skills, room_memory)

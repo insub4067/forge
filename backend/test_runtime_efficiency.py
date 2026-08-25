@@ -551,3 +551,94 @@ def test_runtime_smoke_fails_on_dead_backend():
     assert '"failed", ("런타임 스모크 실패 — 백엔드가 응답하지 않음' in src \
         or "백엔드가 응답하지 않음" in src
     print("OK 런타임 스모크가 서버 생존을 검증(축 A)")
+
+
+def test_reasoning_content_not_resent():
+    """assistant.reasoning_content는 다음 요청 전송본에서 제거된다.
+
+    DeepSeek 계약상 reasoning_content는 되돌려주면 안 되고(무시되거나 400), 그대로 실으면
+    입력 토큰만 먹는다. 실측(세션 5c34d84f, 140콜): 누적 입력 8,556,521 → 6,867,668 tok
+    (-19.7%). 히스토리·Debug view에는 남기고 전송본에서만 벗긴다.
+
+    예전엔 400을 한 번 겪은 세션(_strip_reasoning_sessions)만 벗겨서, 나머지 전 세션이
+    매 콜마다 지난 추론을 재전송했다.
+    """
+    import asyncio
+    from app.runtime.agent import AgentRuntime
+
+    rt = AgentRuntime()
+    seen: list[list[dict]] = []
+
+    class FakeAdapter:
+        async def stream_chat(self, messages, tools=None, thinking=False, reasoning_effort=None):
+            seen.append(messages)
+            yield {"content": "ok"}
+
+    rt._adapter_for = lambda model: FakeAdapter()
+    history = [
+        {"role": "user", "content": "작업"},
+        {"role": "assistant", "content": "함", "reasoning_content": "긴 추론" * 100},
+    ]
+
+    async def drive():
+        async for _ in rt._stream_with_recovery(
+            "deepseek-v4-flash", history, None, True, "medium", "s-new"
+        ):
+            pass
+
+    asyncio.run(drive())
+    assert seen, "어댑터가 호출되지 않았다"
+    sent = seen[0]
+    assert not any("reasoning_content" in m for m in sent), "전송본에 reasoning_content가 남았다"
+    # 원본 히스토리는 보존(Debug view·재개용)
+    assert "reasoning_content" in history[1], "원본 히스토리가 파괴됐다"
+    print("OK reasoning_content는 전송본에서만 제거(원본 보존)")
+
+
+def test_old_write_file_args_folded():
+    """오래된 write_file 호출의 content 인자는 전송본에서 스텁으로 접힌다.
+
+    write_file(path, content)의 content는 파일 전문이라 히스토리에 영구 잔류하면 콜마다
+    재전송된다(실측 세션에서 tool_call args의 최대 성분, 13.5K tok). 파일은 디스크에 있고
+    read_file로 다시 읽을 수 있으므로, 최근 KEEP_RECENT 이내를 제외한 과거 write_file
+    content만 접는다. 실측 시뮬레이션(140콜): 콜당 입력 49,054 → 42,632 tok(-13.1%).
+
+    최근 것·edit_file(diff 문맥)·원본 히스토리는 건드리지 않는다.
+    """
+    import json
+    from app.runtime.agent import AgentRuntime, COMPACT_KEEP_RECENT
+
+    def wf(path, content):
+        return {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "x", "type": "function",
+                "function": {"name": "write_file",
+                             "arguments": json.dumps({"path": path, "content": content})},
+            }],
+        }
+
+    old = wf("a.py", "OLD_BODY " * 500)
+    recent = wf("b.py", "RECENT_BODY " * 500)
+    ef = {
+        "role": "assistant", "content": "",
+        "tool_calls": [{"id": "y", "type": "function",
+                        "function": {"name": "edit_file",
+                                     "arguments": json.dumps({"path": "c.py", "old_string": "EDIT_OLD", "new_string": "EDIT_NEW"})}}],
+    }
+    # old/ef를 KEEP 경계 밖으로 밀어내되 recent는 경계 안(최근 KEEP)에 남긴다.
+    filler = [{"role": "user", "content": f"m{i}"} for i in range(COMPACT_KEEP_RECENT - 1)]
+    msgs = [old, ef, *filler, recent]
+
+    out = AgentRuntime._fold_old_write_args(msgs, COMPACT_KEEP_RECENT)
+    dump = json.dumps(out, ensure_ascii=False)
+
+    assert "OLD_BODY" not in dump, "오래된 write_file content가 접히지 않았다"
+    assert "RECENT_BODY" in dump, "최근 write_file content까지 접혔다"
+    assert "EDIT_OLD" in dump and "EDIT_NEW" in dump, "edit_file diff가 훼손됐다"
+    # path는 보존
+    assert json.loads(out[0]["tool_calls"][0]["function"]["arguments"])["path"] == "a.py"
+    # 원본 불변
+    assert "OLD_BODY" in json.loads(old["tool_calls"][0]["function"]["arguments"])["content"]
+    print("OK 오래된 write_file content만 전송본에서 접힘(원본·edit_file·최근 보존)")
