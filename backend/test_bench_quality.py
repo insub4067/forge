@@ -64,6 +64,22 @@ def main():
             except Exception as e:
                 raise AssertionError(f"{t['code']} checker가 오염 상태에서 크래시: {e}")
 
+    # ── 신뢰성 지표 산식 회귀 고정: FORGE 완료 주장 × deterministic checker confusion matrix ──
+    from bench import aggregate
+    agg = aggregate([
+        {"code": "T", "success": True, "cost": 0.01, "elapsed_s": 5.0, "forge_status": "completed"},
+        {"code": "T", "success": False, "cost": 0.02, "elapsed_s": 6.0, "forge_status": "completed"},
+        {"code": "T", "success": True, "cost": 0.03, "elapsed_s": 7.0, "forge_status": "verification_failed"},
+        {"code": "T", "success": True, "cost": 0.04, "elapsed_s": 8.0, "forge_status": "completed_unverified"},
+    ])["overall"]
+    assert agg["verified_success_rate"] == 0.5, agg          # completed+checker / total
+    assert agg["false_completion_rate"] == 0.25, agg          # completed인데 checker 실패(최악)
+    assert agg["false_failure_rate"] == 0.25, agg             # verification_failed인데 checker 성공
+    assert abs(agg["cost_per_verified_task"] - 0.05) < 1e-9, agg  # 0.10 / verified 2
+    assert aggregate([{"code": "Z", "success": False, "cost": 0.1, "elapsed_s": 1.0,
+                       "forge_status": "verification_failed"}])["overall"]["cost_per_verified_task"] is None
+    print("benchmark 신뢰성 지표: OK — verified/false_completion/cost_per_verified 산식 고정")
+
     print(f"benchmark 품질 테스트 통과 ✓ (task {len(TASKS)} · 카테고리 {len(cats)} · COMPLEX {n_complex} · 정답 노출 없음)")
 
 
