@@ -97,3 +97,48 @@ def test_no_session_id_still_works_and_stores_nothing():
         True, "A를 해줘",
         json.dumps({"intent": "code_change", "requirements": [{"text": "A"}]}))
     assert ir is not None and any(e[0] == "task_ir" for e in events)
+
+
+def test_end_to_end_traceability_event_on_completion():
+    """실제 run() 완료 경로에서 traceability 이벤트가 발화하는지(글루 회귀).
+
+    flag ON + 요구사항 2개(R1,R2), gate는 R1만 passed로 연결 → R2 미검증 →
+    false_completion 후보. run()이 done과 함께 traceability를 emit해야 한다.
+    """
+    from test_reliability_invariants import make_rt  # run()을 구동하는 목킹 하네스 재사용
+
+    rt, _ = make_rt(["passed"])  # verify passed → 정상 완료 경로
+    rt._adapter_for = lambda model: _MockAdapter(json.dumps({
+        "intent": "code_change",
+        "requirements": [{"text": "A", "source": "user"},
+                         {"text": "B", "source": "user"}]}))
+
+    async def _linked_gates(*a, **k):
+        # R1만 gate로 연결·passed, R2는 gate 없음. id/title은 _verify_gates가 읽는다.
+        return [{"id": 1, "title": "R1작업", "requirement_id": "R1", "status": "passed",
+                 "verification_method": "", "expected_result": "", "failure_reason": ""}]
+    A.store.list_gates = _linked_gates
+
+    events = []
+
+    async def emit(e):
+        events.append(e)
+
+    old = A.settings.task_ir_enabled
+    A.settings.task_ir_enabled = True
+    try:
+        asyncio.run(rt.run([{"role": "user", "content": "A와 B를 해줘"}],
+                           emit, "s1", "/tmp"))
+    finally:
+        A.settings.task_ir_enabled = old
+
+    types = [e["type"] for e in events]
+    tr = [e for e in events if e["type"] == "traceability"]
+    assert tr, f"traceability 이벤트가 없다: {types}"
+    d = tr[-1]["data"]
+    assert d["requirements_total"] == 2 and d["requirements_verified"] == 1
+    assert d["false_completion_candidate"] is True and d["unverified_ids"] == ["R2"]
+    # flag OFF면 이 경로가 전혀 없어야 한다(관찰 전용·기본 불변) — 대조.
+    events.clear()
+    asyncio.run(rt.run([{"role": "user", "content": "A와 B를 해줘"}], emit, "s1", "/tmp"))
+    assert not any(e["type"] == "traceability" for e in events)
