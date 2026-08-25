@@ -56,7 +56,7 @@ def test_runtime_match_tools():
     expect = {
         "developer": sorted(t["function"]["name"] for t in TOOL_SCHEMAS),
         "planner": sorted(t["function"]["name"] for t in R.READ_ONLY_TOOL_SCHEMAS),
-        "reviewer": sorted(t["function"]["name"] for t in TOOL_SCHEMAS),  # runtime 기본값
+        "reviewer": sorted(t["function"]["name"] for t in R.READ_ONLY_TOOL_SCHEMAS),  # capability 격리(read-only)
         "chat": sorted(t["function"]["name"] for t in CHAT_TOOLS),
     }
     for a in A.agent_definitions():
@@ -202,9 +202,11 @@ def test_agent_detail_tool_details():
     assert write["approval_required"] is True
     read = next(t for t in dev["tool_details"] if t["name"] == "read_file")
     assert read["approval_required"] is False
-    # reviewer 상세는 실제 스키마(전체 도구)를 공개하되 정책 노트로 검증 전용임을 밝힌다.
+    # reviewer 상세는 실제 read-only 스키마를 공개한다 — mutation 없음, 정책 노트로 근거 명시.
     rev = A.agent_detail("reviewer")
-    assert rev is not None and "write_file" in rev["tools"]
+    assert rev is not None
+    assert "write_file" not in rev["tools"] and "bash" not in rev["tools"], rev["tools"]
+    assert "read_file" in rev["tools"]
     assert rev["policy_note"], "reviewer 정책 노트가 비어 있다"
 
 

@@ -57,9 +57,12 @@ _ROLE_MAX_STEPS = {"developer": DEVELOPER_MAX_STEPS,
 # 막혀서 못 풀 때 pro로 승격해 재시도하는 최대 횟수(무한 루프·비용 폭주 방지).
 MAX_ESCALATIONS = 2
 MAX_REPEATED_CALLS = 3
-CONTEXT_BLOCK_RATIO = 0.95
+# working budget 대비 운영 임계치 — config로 분리(hard_context_limit과 구분되는 운영 정책).
+# 기본값은 기존과 동일(0.95/0.75)이라 동작 불변. hard block은 working budget 기준이며, working
+# budget(logical_budget)은 hard_context_limit보다 훨씬 작아 provider 한도를 넘기 전에 걸린다.
+CONTEXT_BLOCK_RATIO = settings.emergency_block_threshold
 # 이 비율을 넘으면 오래된 대화를 요약해 모델 컨텍스트를 압축한다(비파괴 — 표시/저장용 원본은 유지).
-CONTEXT_COMPACT_RATIO = 0.75
+CONTEXT_COMPACT_RATIO = settings.compaction_threshold
 COMPACT_KEEP_RECENT = 8
 # 부수효과·승인이 없는 읽기 전용 도구 — 한 응답에 여러 개면 병렬 실행 가능
 READ_ONLY_TOOLS = {"read_file", "list_dir", "grep", "find_symbol"}
@@ -2246,7 +2249,8 @@ class AgentRuntime:
                     reviewer_msgs = _reviewer_context(all_messages, plan)
                     r_status, p, c, route = await self._run_role(
                         "reviewer", reviewer_msgs, send, session_id, ws, state, recent_calls,
-                        step_base, room_memory, skills=skills, persist=False,
+                        step_base, room_memory, tools=READ_ONLY_TOOL_SCHEMAS, skills=skills,
+                        persist=False,
                     )
                     await record("reviewer", p, c, route)
                     step_base += REVIEWER_MAX_STEPS

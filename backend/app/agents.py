@@ -33,13 +33,14 @@ MAIN_ROLES = ("developer", "planner", "reviewer", "chat")
 # role → 실제로 `_run_role`에 넘겨지는 tool schema.
 # developer: tools 미지정 → TOOL_SCHEMAS 전체.
 # planner:   READ_ONLY_TOOL_SCHEMAS(읽기 4종만).
-# reviewer:  tools 미지정 → TOOL_SCHEMAS 전체. 단 fresh-context + reviewer.md가
-#            "검증 전용 사용"을 강제한다(스키마상 write 권한이 있으나 정책상 금지).
+# reviewer:  READ_ONLY_TOOL_SCHEMAS — 프롬프트가 아니라 런타임 스키마로 write/edit/bash/build/
+#            skill을 결정적으로 차단한다(프롬프트를 보안 경계로 쓰지 않는다). 프로세스가
+#            _verify/_verify_integration로 독립 검증하므로 Reviewer는 코드 리뷰에 집중한다.
 # chat:      CHAT_TOOLS(읽기·질문·browser만).
 _ROLE_TOOLS: dict[str, list[dict]] = {
     "developer": TOOL_SCHEMAS,
     "planner": READ_ONLY_TOOL_SCHEMAS,
-    "reviewer": TOOL_SCHEMAS,
+    "reviewer": READ_ONLY_TOOL_SCHEMAS,
     "chat": CHAT_TOOLS,
 }
 
@@ -48,7 +49,8 @@ _FRESH_CONTEXT = {"planner", "reviewer"}
 
 # role → 정책상 사용 제약(스키마와 별개). 빈 문자열이면 제약 없음.
 _POLICY_NOTE = {
-    "reviewer": "스키마는 전체 도구를 받지만 fresh 컨텍스트 + reviewer.md가 검증 전용 사용을 강제합니다.",
+    "reviewer": "읽기 전용 스키마(read/list/grep/find_symbol)로 write/edit/bash/build/skill이 "
+                "런타임에서 결정적으로 차단됩니다. 독립 검증은 프로세스가 수행합니다.",
 }
 
 # 표시 메타데이터(발음·카테고리·성격 문구). 런타임 로직이 아니라 presentation layer다.
@@ -165,9 +167,8 @@ def _capabilities(role: str) -> list[str]:
     """카드 badge용 짧은 capability — 도구·fresh·정책에서 파생(하드코딩 금지)."""
     names = _role_tool_names(role)
     if role == "reviewer":
-        # 스키마는 전체 도구를 받지만 사용 정책은 검증 전용(reviewer.md 강제) — Write/Bash를
-        # 일반 능력처럼 보여주지 않는다. 실제 스키마와 정책 노트는 상세 화면에서 함께 공개한다.
-        return ["Fresh", "Verify"]
+        # read-only 스키마(런타임 강제) + fresh 컨텍스트로 독립 검증에 집중. Write/Bash 없음.
+        return ["Fresh", "Read Only", "Verify"]
     caps: list[str] = []
     if not _read_only(role):
         caps.append("Write")

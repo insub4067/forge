@@ -28,10 +28,21 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://forge:forge@localhost:5432/forge"
     redis_url: str = "redis://localhost:6379"
     workspace: str = str(BASE_DIR.parent.parent)
-    # 컨텍스트 예산 — DeepSeek 실제 한도(~128k)에 맞춘다. 이전 값(256k)은 모델 한도의 2배라
-    # compaction(예산×0.75)이 영영 안 돌고, 128k에서 모델단이 먼저 앞부분을 잘라 "리셋"처럼
-    # 보였다. 128k로 맞추면 96k에서 요약 압축이 먼저 돈다.
-    logical_budget: int = 131072
+    # ── 컨텍스트 예산: provider capability와 FORGE 운영 정책을 분리한다 ──
+    # working_context_budget: 성능·비용을 위한 FORGE 운영 정책(하드 한도가 아니다). compaction과
+    #   emergency block은 이 값 기준으로 동작한다. logical_budget과 동일 값을 유지(하위호환 — 기존
+    #   env·DB·UI context gauge가 logical_budget을 그대로 쓴다). 런타임은 이 두 값을 같은 것으로 본다.
+    # hard_context_limit: provider/model의 공식 컨텍스트 상한(용량 metadata). 운영 예산은 항상 이보다
+    #   작아야 하며, 여기서 단순히 예산을 이 값으로 키우지 않는다(모델단 절단·리셋 회귀 방지).
+    # max_output_tokens: provider/model의 최대 출력 토큰(용량 metadata).
+    # compaction_threshold / emergency_block_threshold: working budget 대비 비율(운영 정책).
+    #   (확인하지 못한 provider 사양은 추측하지 않는다 — 아래 기본값은 조정 가능한 metadata다.)
+    logical_budget: int = 131072              # = working_context_budget (하위호환 이름 유지)
+    working_context_budget: int = 131072      # 운영 예산(= logical_budget). 명시적 개념 이름.
+    hard_context_limit: int = 1_000_000       # provider 공식 컨텍스트 상한(metadata, 조정 가능)
+    max_output_tokens: int = 8192             # provider 최대 출력(metadata, 조정 가능)
+    compaction_threshold: float = 0.75        # working budget의 이 비율에서 압축 시작
+    emergency_block_threshold: float = 0.95   # working budget의 이 비율에서 하드 블록
     sandbox_image: str = "forge-sandbox:latest"
     # bash 실행 모드. "docker"(기본, 격리·안전) | "host"(호스트 직접 실행 — 자기검증·
     # 풀파워 가능하지만 에이전트가 맥 전체에 접근. 신뢰하는 개인 환경에서만 옵트인).
