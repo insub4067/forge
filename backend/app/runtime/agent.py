@@ -39,7 +39,8 @@ from .completion_policy import (  # noqa: F401
 )
 from ..llm.factory import create_adapter
 from ..orchestrator.model_router import ModelRouter
-from ..tools.registry import APPROVAL_REQUIRED, CHAT_TOOLS, TOOL_SCHEMAS, execute_tool
+from ..tools.registry import (APPROVAL_REQUIRED, CHAT_TOOLS, TOOL_SCHEMAS,
+                              WRITE_OK_PREFIX, execute_tool)
 from ..sandbox.executor import DockerSandbox
 
 MAX_STEPS = 30
@@ -68,9 +69,6 @@ CONTEXT_COMPACT_RATIO = settings.compaction_threshold
 COMPACT_KEEP_RECENT = 8
 # 전송본에서 과거 write_file content를 접을 때 보존할 최근 메시지 수(compaction과 별개 정책).
 WRITE_ARGS_KEEP_RECENT_MESSAGES = 8
-# registry.execute_tool의 write_file 성공 반환 접두사. 이 마커와 일치하는 tool result가
-# 달린 write_file만 성공으로 보고 접는다(거부·오류·취소·무결과는 원문 유지).
-_WRITE_OK_PREFIX = "파일을 작성했습니다"
 # 부수효과·승인이 없는 읽기 전용 도구 — 한 응답에 여러 개면 병렬 실행 가능
 READ_ONLY_TOOLS = {"read_file", "list_dir", "grep", "find_symbol"}
 # Planner용 도구 스키마(읽기 전용만) — 구현·실행 도구를 주지 않아 계획만 하게 강제한다.
@@ -681,9 +679,11 @@ class AgentRuntime:
 
         write_file(path, content)의 content는 파일 전문이라, 접지 않으면 매 스텝 히스토리에
         실려 재전송된다(실측: tool_call args의 최대 성분). 최근 keep_recent 이내를 뺀 과거
-        것만, 그리고 **실제로 성공한** write만 접는다 — 같은 tool_call_id의 tool result가
-        성공 마커로 시작할 때만. 승인 거부·오류·취소·결과 없음은 성공한 것처럼 기록되면 안
-        되므로 원문을 유지한다. edit_file(diff 문맥)은 접지 않는다. 원본은 불변(전송본만).
+        것만, 그리고 **실제로 성공한** write만 접는다 — 그 assistant 바로 뒤에 오는(protocol상)
+        대응 tool result가 성공 마커로 시작할 때만. 승인 거부·오류·취소·결과 없음은 성공한
+        것처럼 기록되면 안 되므로 원문을 유지한다. 매칭은 전역 id map이 아니라 이 assistant
+        이후 구간에서 찾는다 — 같은 tool_call_id가 재등장해도 과거 실패가 이후 성공 결과로
+        잘못 접히지 않게 한다. edit_file(diff 문맥)은 접지 않는다. 원본은 불변(전송본만).
 
         디스크의 현재 파일은 이후 스텝에서 바뀌었을 수 있어 과거 snapshot이 아니다. stub에
         path·원본 bytes·sha256을 남겨 필요하면 식별·대조할 수 있게 하되, '복구 가능'이라고
@@ -691,13 +691,18 @@ class AgentRuntime:
         cut = len(messages) - keep_recent
         if cut <= 0:
             return messages
-        # tool_call_id → 결과 content. 성공 판정에 대조한다.
-        results: dict[str, str] = {}
-        for m in messages:
-            if isinstance(m, dict) and m.get("role") == "tool":
-                cid = m.get("tool_call_id")
-                if cid is not None:
-                    results[cid] = str(m.get("content", ""))
+
+        def _result_after(idx: int, call_id) -> str | None:
+            """messages[idx](assistant) 뒤에서 call_id에 대응하는 첫 tool result content.
+            다음 assistant(tool_calls 보유)를 만나면 그 구간이 끝난 것으로 보고 중단한다."""
+            for m in messages[idx + 1:]:
+                if not isinstance(m, dict):
+                    continue
+                if m.get("role") == "tool" and m.get("tool_call_id") == call_id:
+                    return str(m.get("content", ""))
+                if m.get("role") == "assistant" and m.get("tool_calls"):
+                    break
+            return None
 
         out: list[dict] = []
         for i, m in enumerate(messages):
@@ -709,9 +714,9 @@ class AgentRuntime:
             changed = False
             for tc in tcs:
                 fn = tc.get("function", {})
-                res = results.get(tc.get("id"))
+                res = _result_after(i, tc.get("id"))
                 if fn.get("name") == "write_file" and res is not None \
-                        and res.startswith(_WRITE_OK_PREFIX):
+                        and res.startswith(WRITE_OK_PREFIX):
                     try:
                         a = json.loads(fn.get("arguments") or "{}")
                         body = a.get("content")

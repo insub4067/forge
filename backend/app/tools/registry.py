@@ -4,6 +4,11 @@ from pathlib import Path
 
 from ..config import settings
 
+# write_file 성공 시 반환 접두사(사용자 표시 문자열 겸 내부 성공 marker). 런타임의
+# 히스토리 접기(_fold_old_write_args)가 이 상수를 import해 성공 판정에 쓴다 — 표시 문구를
+# 여기서 바꾸면 접기 판정도 함께 따라가 조용히 중단되지 않는다.
+WRITE_OK_PREFIX = "파일을 작성했습니다"
+
 TOOL_SCHEMAS: list[dict] = [
     {
         "type": "function",
@@ -609,7 +614,7 @@ async def execute_tool(name: str, args: dict, workspace: str) -> tuple[str, str]
         diff = _make_diff(old_text, new_text, str(p))
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(new_text, encoding="utf-8")
-        return f"파일을 작성했습니다: {p}", diff
+        return f"{WRITE_OK_PREFIX}: {p}", diff
     if name == "edit_file":
         p = _resolve(workspace, str(args["path"]))
         old = str(args["old_string"])

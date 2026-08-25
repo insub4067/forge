@@ -728,7 +728,9 @@ def _tool_result(call_id, content):
 
 
 # registry.execute_tool의 write_file 성공 반환 접두사와 일치해야 한다(그 계약에 결합).
-_OK = "파일을 작성했습니다: /ws/{}"
+# 성공 marker는 registry 상수를 공유한다 — 표시 문구가 바뀌어도 테스트가 함께 따라간다.
+from app.tools.registry import WRITE_OK_PREFIX as _WRITE_OK_PREFIX
+_OK = _WRITE_OK_PREFIX + ": /ws/{}"
 
 
 def test_fold_only_successful_writes():
@@ -905,3 +907,26 @@ def test_reasoning_replay_survives_auto_resume_history():
     assert fake2.calls[1]["thinking"] is False, "폴백이 thinking을 끄지 않았다"
     assert counters["retries"] == 1
     print("OK Auto Resume 복원 history 정상(보존 시 유지, 구 데이터는 run-scope 폴백)")
+
+
+def test_fold_duplicate_id_past_failure_not_folded():
+    """중복 tool_call_id에서 과거 실패한 write가 이후 성공 결과 때문에 잘못 접히지 않는다.
+
+    전역 ID map(id→마지막 결과)은 같은 id의 과거 실패를 나중 성공으로 덮어 잘못 접는다.
+    protocol상 각 assistant 뒤에 오는 대응 tool result로 매칭해 이를 막는다.
+    """
+    import json
+    from app.runtime.agent import AgentRuntime, WRITE_ARGS_KEEP_RECENT_MESSAGES as K
+
+    past_fail = _wf_call("dup", "x.py", "PAST_FAIL_BODY " * 100)
+    later_ok = _wf_call("dup", "x.py", "LATER_OK_BODY " * 100)
+    msgs = [
+        past_fail, _tool_result("dup", "오류: 권한 없음"),
+        later_ok, _tool_result("dup", _OK.format("x.py")),
+        *[{"role": "user", "content": f"p{i}"} for i in range(K)],
+    ]
+    out = AgentRuntime._fold_old_write_args(msgs, K)
+    dump = json.dumps(out, ensure_ascii=False)
+    assert "PAST_FAIL_BODY" in dump, "과거 실패 write가 이후 성공 때문에 잘못 접혔다"
+    assert "LATER_OK_BODY" not in dump, "이후 성공 write가 접히지 않았다"
+    print("OK 중복 id에서 과거 실패는 보존, 이후 성공만 접힘(protocol 매칭)")
