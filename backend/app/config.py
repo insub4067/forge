@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -49,13 +50,15 @@ class Settings(BaseSettings):
     sandbox_mode: str = "docker"
     # 앱 레벨 토큰 게이트(defense-in-depth). 설정 시 모든 /api 요청에 토큰 요구.
     # 미설정이면 무동작 — Cloudflare Access + 127.0.0.1 바인딩에만 의존(auth.py 참고).
-    auth_token: str = ""
+    # 문서·기동 메시지가 FORGE_ 접두사를 안내하므로 FORGE_AUTH_TOKEN을 우선 읽되, 기존
+    # 접두사 없는 이름도 계속 인식한다(전역 env_prefix는 .env의 다른 무접두 키를 깨므로 쓰지 않는다).
+    auth_token: str = Field("", validation_alias=AliasChoices("FORGE_AUTH_TOKEN", "AUTH_TOKEN"))
     # 원격 운영 모드. True면 fail-closed — auth_token이 없으면 서버가 기동을 거부한다.
     # 기본 False(로컬 개발): 기존 동작 그대로. 외부 노출 배포는 FORGE_REQUIRE_AUTH=1로 켠다.
-    require_auth: bool = False
+    require_auth: bool = Field(False, validation_alias=AliasChoices("FORGE_REQUIRE_AUTH", "REQUIRE_AUTH"))
     # 허용 CORS origin(콤마 구분). 설정 시 화이트리스트, 미설정이면 '*'(로컬 개발 기본).
     # 외부 노출 배포는 실제 도메인만 나열해 cross-origin 접근을 좁힌다.
-    allowed_origins: str = ""
+    allowed_origins: str = Field("", validation_alias=AliasChoices("FORGE_ALLOWED_ORIGINS", "ALLOWED_ORIGINS"))
     # skill 주입 전면 비활성(skill 효과 A/B 실험용). 기본 False.
     skills_off: bool = False
     # Task IR 인터프리터(Phase 1) 활성화. 기본 False — off면 완전 스킵(동작·비용 불변). A/B로
