@@ -71,6 +71,9 @@ COMPACT_KEEP_RECENT = 8
 WRITE_ARGS_KEEP_RECENT_MESSAGES = 8
 # 부수효과·승인이 없는 읽기 전용 도구 — 한 응답에 여러 개면 병렬 실행 가능
 READ_ONLY_TOOLS = {"read_file", "list_dir", "grep", "find_symbol"}
+# 파일·프로세스·git에 부수효과를 내는 도구(=승인 대상과 동일). 실행 직후 즉시 history를
+# 저장해 crash 후 resume이 같은 부수효과를 재실행하지 않게 한다.
+_SIDE_EFFECT_TOOLS = APPROVAL_REQUIRED
 # Planner용 도구 스키마(읽기 전용만) — 구현·실행 도구를 주지 않아 계획만 하게 강제한다.
 READ_ONLY_TOOL_SCHEMAS = [
     t for t in TOOL_SCHEMAS if t["function"]["name"] in READ_ONLY_TOOLS
@@ -1484,6 +1487,16 @@ class AgentRuntime:
                 all_messages.append(
                     {"role": "tool", "tool_call_id": tc["id"], "content": _content}
                 )
+                # durable: side-effect 도구는 실행 직후 즉시 history를 저장해 재실행 창을 없앤다.
+                # save가 스텝 시작에만 있으면, side effect 완료 후 다음 스텝 save 전 crash 시
+                # 그 tool_call이 저장되지 않아 resume이 같은 부작용을 다시 실행한다(write/bash/git
+                # 중복). 여기서 즉시 저장하면 crash 후 resume이 이미 실행된 결과를 history로 보고
+                # 재실행하지 않는다. 읽기 전용 도구는 무해하므로 대상이 아니다.
+                if session_id and persist and name in _SIDE_EFFECT_TOOLS:
+                    try:
+                        await store.save_history(session_id, all_messages)
+                    except Exception as err:
+                        error_log.record("side_effect_save", str(err), session_id)
 
         return "max_steps", total_prompt, total_completion, route
 

@@ -179,6 +179,14 @@ async def _run_scenario():
         rt._adapter_for = lambda m: fake
         events = []
         async def send(t, d): events.append((t, d))
+        # durable idempotency: side-effect 도구(write_file) 실행 직후 즉시 save가 도는지 확인.
+        # 즉시 save가 없으면 tool result 담긴 save는 '다음 스텝 시작' 1회뿐 — crash 창이 열린다.
+        saves = []
+        _orig_save = store.save_history
+        async def _spy_save(sid_, hist):
+            saves.append(any(m.get("role") == "tool" for m in hist))
+            return await _orig_save(sid_, hist)
+        store.save_history = _spy_save
         state = {"files_changed": [], "errors": []}
         # manual 세션(auto_approve 아님) → _request_approval이 Future로 대기하므로 task로 돌린다.
         task = asyncio.create_task(
@@ -206,8 +214,13 @@ async def _run_scenario():
         assert a["run_id"] == "run-e2e", f"run_id 미배선: {a['run_id']!r}"
         # 검증 4: approval_granted 이벤트 발행
         assert any(t == "approval_granted" for t, _ in events), "approval_granted 없음"
+        # 검증 5: side-effect(write_file) 직후 즉시 save + 다음 스텝 시작 save → tool 담긴 save ≥2.
+        # (즉시 save가 없으면 1회뿐이라 crash 시 재실행 창이 열린다.)
+        assert sum(1 for s in saves if s) >= 2, f"side-effect 즉시 save 미발생: tool 담긴 save={sum(saves)}"
+        store.save_history = _orig_save
         print("RUN_APPROVAL_OK")
     finally:
+        store.save_history = _orig_save
         await store.delete_room(sid)
 
 asyncio.run(_run_scenario())
