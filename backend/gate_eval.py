@@ -135,12 +135,16 @@ async def case_f8_no_command_record():
 
 # ── 구조적 gap(현재 Gate가 못 잡는 유형) — 정직하게 표시 ──
 async def case_f6_unrelated_files_gap():
-    # 무관한 파일 변경 허용: gate는 verification_method 결과만 보고 '어떤 파일이 바뀌었는지'는
-    # 검사하지 않는다. 따라서 무관한 파일이 바뀌어도 gate는 통과할 수 있다.
+    # 무관한 파일 변경 허용: '무관'은 요청 의도를 알아야 판정 가능해 결정적으로 잡을 수 없다.
+    # gate verdict는 여전히 파일 범위를 검사하지 않는다(gap 유지). 단, 고위험 슬라이스(시크릿·키·
+    # CI·의존성 lock·git 훅)는 change_guard.detect_sensitive_changes가 sensitive_change로 표면화.
+    from app.runtime.change_guard import detect_sensitive_changes
+    surfaced = len(detect_sensitive_changes([".env", "app/x.py"]))  # 부분 완화 동작 확인
     st, _, _ = await _run_verify_gates([_gate(1, "기능", "echo ok", "ok")])
-    # gate는 passed지만, 이 passed는 파일 범위와 무관 → 무관 변경을 못 막는다.
-    expected, actual = "무관변경 차단", "미차단(gate에 파일범위 검사 없음)"
-    return expected, actual, f"gate={st} 이지만 파일범위 미검사 — memory_guard는 memory만 결박", False, False
+    expected, actual = "무관변경 차단", "미차단(임의 무관변경은 의미판정 불가)"
+    return (expected, actual,
+            f"gate={st} 파일범위 미검사(gap) — 단 민감 파일 변경 {surfaced}건은 표면화(부분 완화)",
+            False, False)
 
 
 async def case_f7_weakened_tests():
@@ -202,7 +206,8 @@ def format_report(results: list[EvalResult]) -> str:
         lines.append("구조적 GAP(현재 Gate가 못 잡는 유형 — 잠재 false PASS 리스크):")
         for g in gaps:
             lines.append(f"  - [{g.case_id}] {g.failure_type}: {g.basis}")
-        lines.append("  → 다음 작업 후보: gate에 (a)변경 파일 범위 대조 (b)테스트 수/커버리지 baseline 대조 추가")
+        lines.append("  → 남은 강화 후보: gate verdict에 '변경 파일 범위 화이트리스트 대조' 추가"
+                     "(F6 임의 무관변경). 현재는 민감 파일 변경만 sensitive_change로 표면화(비차단).")
     return "\n".join(lines)
 
 

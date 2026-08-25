@@ -55,3 +55,21 @@ def test_mixed():
     w = detect_test_weakening(ns)
     assert len(w) == 2, w
     assert any("test_a.py" in x for x in w) and any("c.test.ts" in x for x in w), w
+
+
+def test_detect_sensitive_changes():
+    from app.runtime.change_guard import detect_sensitive_changes
+    paths = [
+        "app/runtime/agent.py",        # 일반 소스(무시)
+        ".env",                        # 시크릿
+        "certs/server.pem",            # 키
+        ".github/workflows/ci.yml",    # CI
+        "frontend/pnpm-lock.yaml",     # 의존성 lock
+        ".env.example",                # 공개 예시(무시)
+        "backend/id_ed25519",          # ssh 키
+    ]
+    w = detect_sensitive_changes(paths)
+    got = " | ".join(w)
+    assert ".env" in got and "server.pem" in got and "ci.yml" in got and "pnpm-lock.yaml" in got and "id_ed25519" in got, w
+    assert "agent.py" not in got and ".env.example" not in got, w
+    assert len(w) == 5, w
