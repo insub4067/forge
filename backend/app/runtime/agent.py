@@ -25,6 +25,7 @@ from . import tool_store
 from . import change_guard
 from . import verification
 from . import task_ir
+from . import traceability
 from ..security import preflight as security_preflight
 # 완료/게이트 판정 정책(순수 함수)은 completion_policy로 분리 — 여기서 re-export해 기존
 # 호출부와 A.<name> 인터페이스를 그대로 유지한다.
@@ -482,6 +483,9 @@ class AgentRuntime:
         # 세션별 컨텍스트 압축 상태: {session_id: {"summary": str, "covered": int}}
         # summary가 all_messages[:covered]를 대체(모델 전송 시에만).
         self._compaction: dict[str, dict] = {}
+        # 세션별 Task IR 요구사항(관찰용) — 완료 시 gate와 대조해 traceability를 낸다.
+        # ponytail: in-memory, resume 시 유실 허용(관찰 전용, 영속이 필요해지면 컬럼 추가).
+        self._task_ir_reqs: dict[str, list] = {}
         # 세션별 라이브 상태 — 스트림이 끊겨도 언제나 조회 가능해야 한다.
         # {role, last_event, ts(monotonic), waiting_for, pending}
         self._status: dict[str, dict] = {}
@@ -930,7 +934,8 @@ class AgentRuntime:
             self._pending_meta.pop(question_id, None)
             self._status_update(session_id, waiting_for=None, pending=None)
 
-    async def _maybe_interpret(self, full_request: str, send: EventSink):
+    async def _maybe_interpret(self, full_request: str, send: EventSink,
+                               session_id: str = ""):
         """Task IR 인터프리터(Phase 1) — 기본 off. 켜져 있으면 저비용 flash로 원문을 Task IR로
         정규화해 task_ir 이벤트로 관찰용 발행한다. 현재는 라우팅 결정을 바꾸지 않는다(관찰 전용).
         실패/None이면 조용히 넘어간다(기존 경로 그대로). off면 어댑터 호출 자체가 없어 비용 0."""
@@ -943,7 +948,10 @@ class AgentRuntime:
             error_log.record("task_ir", str(err), "")
             return None
         if ir is not None:
-            await send("task_ir", {"task_ir": ir.to_dict()})
+            d = ir.to_dict()
+            if session_id:
+                self._task_ir_reqs[session_id] = d.get("requirements", [])
+            await send("task_ir", {"task_ir": d})
         return ir
 
     async def _triage(self, all_messages: list[dict]) -> tuple[str, int, int]:
@@ -2009,7 +2017,7 @@ class AgentRuntime:
             if saved and saved["covered"] <= len(all_messages):
                 self._compaction[session_id] = saved
         room_memory = _load_room_memory(ws)
-        await self._maybe_interpret(full_request, send)  # Task IR(Phase 1) — 기본 off, 관찰 전용
+        await self._maybe_interpret(full_request, send, session_id)  # Task IR(Phase 1) — 기본 off, 관찰 전용
         # Security preflight — 주입 설정 표면/추적 시크릿을 결정적 스캔. 관찰 전용(fail-open):
         # 실행을 막지 않고 findings가 있을 때만 이벤트 한 건 표면화한다. 어떤 예외도 run에
         # 영향을 주지 않는다. HIGH→approval 게이팅은 의도적으로 후속(벤치 재측정 필요).
@@ -2129,6 +2137,11 @@ class AgentRuntime:
                         _n, state["files_changed"],
                         bool(state.get("gate_recovery_ran")), route_kind == "code"),
                 })
+                # Task IR requirement ↔ gate 대조(관찰 전용). Task IR이 있을 때만.
+                # false_completion(요구사항을 놓친 채 완료) 후보를 드러낸다.
+                _reqs = self._task_ir_reqs.pop(session_id, None)
+                if _reqs:
+                    await send("traceability", traceability.compute_traceability(_reqs, _gates))
             # done 이벤트를 보내면서 세션 final_status를 영속화(성공 정의·집계 기준).
             if session_id:
                 await store.set_session_final_status(session_id, status)
