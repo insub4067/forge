@@ -1494,6 +1494,31 @@ class AgentRuntime:
                             continue
                     await send("approval_granted", {"name": name})
 
+                # durable 실행 장부 — 이전 run에서 started로만 남은 같은 부작용이 있으면
+                # 실제 반영 여부를 알 수 없다. 모르는 것을 자동 재실행하지 않는다(§7).
+                # 장부 자체의 오류는 실행을 막지 않는다(fail-open — 장부는 방어지 관문이 아니다).
+                _ledger_id = ""
+                if session_id and persist and name in _SIDE_EFFECT_TOOLS:
+                    _hash = approvals.args_hash(args)
+                    _run = self._run_ids.get(session_id, "")
+                    try:
+                        if await store.has_ambiguous_tool(session_id, name, _hash, _run):
+                            result = (
+                                f"[재실행 차단] 이 '{name}' 호출은 이전 실행이 시작된 기록만 있고 "
+                                "완료 기록이 없습니다(서버 중단 추정). 실제로 반영됐는지 알 수 없어 "
+                                "같은 인자로 자동 재실행하지 않습니다. 현재 상태를 먼저 확인한 뒤"
+                                "(read_file·git diff·git log) 필요한 만큼만 진행하세요.")
+                            await send("tool_result", {"name": name, "result": result})
+                            all_messages.append(
+                                {"role": "tool", "tool_call_id": tc["id"], "content": result}
+                            )
+                            # 경고는 1회 — 알린 뒤 행을 닫는다(영구 차단이 아니다).
+                            await store.resolve_ambiguous_tool(session_id, name, _hash)
+                            continue
+                        _ledger_id = await store.ledger_start(session_id, _run, name, _hash)
+                    except Exception as err:
+                        error_log.record("tool_ledger", str(err), session_id)
+
                 diff = ""
                 try:
                     if tc["id"] in prefetched:
@@ -1532,6 +1557,10 @@ class AgentRuntime:
                 if session_id and persist and name in _SIDE_EFFECT_TOOLS:
                     try:
                         await store.save_history(session_id, all_messages)
+                        # 저장이 끝난 뒤에만 장부를 닫는다 — 저장에 실패했는데 닫으면
+                        # history에 없는 부작용이 '기록된 실행'으로 둔갑한다.
+                        if _ledger_id:
+                            await store.ledger_complete(_ledger_id)
                     except Exception as err:
                         error_log.record("side_effect_save", str(err), session_id)
 

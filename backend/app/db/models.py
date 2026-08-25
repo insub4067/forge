@@ -221,3 +221,24 @@ class Approval(Base):
     decided_by: Mapped[str] = mapped_column(String, default="")
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     meta: Mapped[str] = mapped_column(Text, default="{}")  # audit metadata(JSON)
+
+
+class ToolLedger(Base):
+    """side-effect 도구 실행 장부 — resume이 이미 실행된 부작용을 다시 실행하지 않게.
+
+    history 즉시 저장이 재실행 창을 거의 닫았지만, 도구 실행 완료와 저장 사이의 극소 구간이
+    남는다. 그 사이에 프로세스가 죽으면 history에는 흔적이 없고 부작용만 디스크·git에 남는다
+    (write 중복·bash 재실행·중복 커밋). 그래서 실행 **전에** started를 적고 history 저장 뒤에
+    completed로 닫는다. started인 채 남은 행 = "실행됐는지 알 수 없음"이고, 이 상태에서는
+    같은 (tool, args)를 자동 재실행하지 않는다 — 모르는 것을 실행하는 것이 가장 위험하다.
+    """
+    __tablename__ = "tool_ledger"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # uuid hex
+    session_id: Mapped[str] = mapped_column(String, ForeignKey("sessions.id"))
+    run_id: Mapped[str] = mapped_column(String, default="")
+    tool_name: Mapped[str] = mapped_column(String, default="")
+    args_hash: Mapped[str] = mapped_column(String, default="")
+    status: Mapped[str] = mapped_column(String, default="started")  # started | completed
+    started_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

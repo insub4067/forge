@@ -52,6 +52,14 @@ _COLUMN_PATCHES = [
     "created_at TIMESTAMP DEFAULT now(), decided_at TIMESTAMP)",
     # Phase 1: gate가 Task IR requirement를 참조(하위호환 — 빈 값이면 미연결).
     "ALTER TABLE acceptance_gates ADD COLUMN IF NOT EXISTS requirement_id VARCHAR DEFAULT ''",
+    # side-effect 실행 장부 — create_all이 만들지만 기존 DB 대비 idempotent CREATE로 보강.
+    "CREATE TABLE IF NOT EXISTS tool_ledger ("
+    "id VARCHAR PRIMARY KEY, session_id VARCHAR, run_id VARCHAR DEFAULT '', "
+    "tool_name VARCHAR DEFAULT '', args_hash VARCHAR DEFAULT '', "
+    "status VARCHAR DEFAULT 'started', started_at TIMESTAMP DEFAULT now(), "
+    "completed_at TIMESTAMP)",
+    "CREATE INDEX IF NOT EXISTS ix_tool_ledger_lookup "
+    "ON tool_ledger (session_id, tool_name, args_hash, status)",
 ]
 
 

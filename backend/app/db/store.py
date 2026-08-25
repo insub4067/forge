@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, select, update
 
-from .models import (AcceptanceGate, AgentRun, Approval, Checkpoint, Message,
+from .models import (AcceptanceGate, AgentRun, Approval, Checkpoint, Message, ToolLedger,
                      PushDevice, Refinement, ScheduledJob, Session, Task)
 from .session import async_session
 from ..runtime import approvals as _appr
@@ -110,6 +110,7 @@ async def delete_room(session_id: str) -> None:
         await s.execute(delete(Approval).where(Approval.session_id == session_id))
         # acceptance_gates도 sessions FK — 안 지우면 세션 삭제가 FK 위반으로 실패한다.
         await s.execute(delete(AcceptanceGate).where(AcceptanceGate.session_id == session_id))
+        await s.execute(delete(ToolLedger).where(ToolLedger.session_id == session_id))
         await s.execute(delete(Session).where(Session.id == session_id))
         await s.commit()
 
@@ -1235,3 +1236,56 @@ async def cleanup_orphan_approvals() -> int:
             .values(status="cancelled", decided_at=datetime.utcnow(), decided_by="restart"))
         await s.commit()
         return res.rowcount
+
+
+# ── side-effect 실행 장부 (resume 재실행 방어) ────────────────────────────────
+async def ledger_start(session_id: str, run_id: str, tool_name: str, args_hash: str) -> str:
+    """실행 **직전** started를 기록하고 ledger id를 준다. 실패하면 빈 문자열(장부는 fail-open —
+    장부 오류가 도구 실행을 막으면 정상 작업이 죽는다)."""
+    lid = uuid.uuid4().hex
+    async with async_session() as s:
+        s.add(ToolLedger(id=lid, session_id=session_id, run_id=run_id or "",
+                         tool_name=tool_name, args_hash=args_hash, status="started"))
+        await s.commit()
+    return lid
+
+
+async def ledger_complete(ledger_id: str) -> None:
+    """history 저장까지 끝난 뒤 started → completed로 닫는다. 저장 전에 닫으면 안 된다 —
+    닫힌 행은 '재실행해도 안전한 기록된 실행'을 뜻하기 때문이다."""
+    async with async_session() as s:
+        await s.execute(update(ToolLedger).where(ToolLedger.id == ledger_id)
+                        .values(status="completed", completed_at=datetime.utcnow()))
+        await s.commit()
+
+
+async def resolve_ambiguous_tool(session_id: str, tool_name: str, args_hash: str) -> None:
+    """차단을 한 번 알린 뒤 started 행을 닫는다(reported).
+
+    영구 차단이 아니다 — 목적은 "모르는 채 자동으로 다시 실행하지 않는 것"이지 그 도구를
+    영원히 못 쓰게 하는 것이 아니다. 한 번 알렸으면 모델은 상태를 확인하고 판단할 수 있고,
+    같은 경고를 반복하면 정상 작업이 막힌다(사용자 취소로 남은 행이 세션을 영영 오염시킨다).
+    """
+    async with async_session() as s:
+        await s.execute(update(ToolLedger).where(
+            ToolLedger.session_id == session_id, ToolLedger.tool_name == tool_name,
+            ToolLedger.args_hash == args_hash, ToolLedger.status == "started")
+            .values(status="reported", completed_at=datetime.utcnow()))
+        await s.commit()
+
+
+async def has_ambiguous_tool(session_id: str, tool_name: str, args_hash: str,
+                             exclude_run_id: str = "") -> bool:
+    """같은 (session, tool, args)가 이전 run에서 started인 채 끝났는가.
+
+    True면 그 부작용이 실제로 반영됐는지 알 수 없다 — 호출측은 자동 재실행하지 않는다.
+    현재 run의 행은 제외한다(내가 방금 연 행이 나를 막으면 정상 실행이 불가능하다)."""
+    q = (select(ToolLedger.id)
+         .where(ToolLedger.session_id == session_id,
+                ToolLedger.tool_name == tool_name,
+                ToolLedger.args_hash == args_hash,
+                ToolLedger.status == "started"))
+    if exclude_run_id:
+        q = q.where(ToolLedger.run_id != exclude_run_id)
+    async with async_session() as s:
+        return (await s.execute(q.limit(1))).scalar_one_or_none() is not None
