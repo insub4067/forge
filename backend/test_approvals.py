@@ -142,3 +142,79 @@ def test_durable_approval_lifecycle_and_invariants():
                        env=dict(os.environ), capture_output=True, text=True)
     assert "APPROVAL_LIFECYCLE_OK" in r.stdout, f"stdout={r.stdout}\nstderr={r.stderr}"
     print("OK durable approval: 멱등·session격리·consume중복방지·args변조·만료·pending복원")
+
+
+# ── run 경로 end-to-end: 수동 승인 → consume → 실제 도구 실행(배선 회귀) ──
+
+_RUN_APPROVAL_CODE = r'''
+import asyncio, json, os, tempfile, uuid
+from app.runtime.agent import AgentRuntime
+from app.db import store
+from app.db.session import engine
+from app.db.models import Base
+
+class FakeAdapter:
+    requires_reasoning_replay = False
+    def __init__(self, path, content):
+        self.n = 0; self.path = path; self.content = content
+    async def stream_chat(self, messages, tools=None, thinking=False, reasoning_effort=None):
+        self.n += 1
+        if self.n == 1:  # write_file(승인형) 호출
+            yield {"tool_calls": [{"index": 0, "id": "call1", "function": {
+                "name": "write_file",
+                "arguments": json.dumps({"path": self.path, "content": self.content})}}]}
+        else:            # tool_call 없는 응답 → 스텝 종료
+            yield {"content": "완료했습니다."}
+
+async def _run_scenario():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    ws = tempfile.mkdtemp()
+    sid = "t-run-appr-" + uuid.uuid4().hex[:8]
+    await store.ensure_session(sid, "run-appr", ws)
+    try:
+        rt = AgentRuntime()
+        fake = FakeAdapter("out.txt", "HELLO_APPROVED")  # 인스턴스 재사용(스텝 간 n 누적)
+        rt._adapter_for = lambda m: fake
+        events = []
+        async def send(t, d): events.append((t, d))
+        state = {"files_changed": [], "errors": []}
+        # manual 세션(auto_approve 아님) → _request_approval이 Future로 대기하므로 task로 돌린다.
+        task = asyncio.create_task(
+            rt._run_role("developer", [{"role": "user", "content": "파일 써"}],
+                         send, sid, ws, state, [], 0))
+        aid = None
+        for _ in range(300):
+            await asyncio.sleep(0.02)
+            ar = [d for t, d in events if t == "approval_request"]
+            if ar:
+                aid = ar[0]["id"]; break
+        assert aid, "approval_request가 발생하지 않음"
+        # 승인: PG 전이(authoritative) + 메모리 Future 해소
+        assert await store.decide_approval(aid, sid, "approved") is True
+        rt.resolve_approval(aid, "approve")
+        await asyncio.wait_for(task, timeout=10)
+
+        # 검증 1: 승인된 도구가 실제 실행돼 파일이 작성됨
+        p = os.path.join(ws, "out.txt")
+        assert os.path.isfile(p) and open(p).read() == "HELLO_APPROVED", "승인 후 파일 미작성"
+        # 검증 2: 실행 직전 consume으로 approved→consumed 전이(중복 실행 방지 상태)
+        a = await store.get_approval(aid)
+        assert a["status"] == "consumed", f"consumed 아님: {a['status']}"
+        # 검증 3: approval_granted 이벤트 발행
+        assert any(t == "approval_granted" for t, _ in events), "approval_granted 없음"
+        print("RUN_APPROVAL_OK")
+    finally:
+        await store.delete_room(sid)
+
+asyncio.run(_run_scenario())
+'''
+
+
+def test_manual_approval_runs_and_consumes_end_to_end():
+    """수동 승인이 실제 run 경로에서 consume→도구 실행까지 이어지는지 검증(배선 회귀).
+    subprocess로 격리(모듈 전역 async engine의 이벤트 루프 얽힘 회피)."""
+    r = subprocess.run([sys.executable, "-c", _RUN_APPROVAL_CODE], cwd=str(_BACKEND),
+                       env=dict(os.environ), capture_output=True, text=True)
+    assert "RUN_APPROVAL_OK" in r.stdout, f"stdout={r.stdout}\nstderr={r.stderr[-2000:]}"
+    print("OK 수동 승인 end-to-end: 승인→consume→실제 write_file 실행")
