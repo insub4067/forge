@@ -557,15 +557,25 @@ def test_runtime_smoke_fails_on_dead_backend():
 class _StrictDeepSeekFake:
     """DeepSeek V4 thinking mode 계약을 강제하는 fake adapter.
 
-    실제 계약(codex #24500, opencode #24190, qwen-code #3658에서 확인):
-    thinking=True + tools 존재 상태에서 히스토리의 assistant(tool_calls 보유)에
-    reasoning_content가 없으면 400. 이전 코드/커밋 b01da1c가 정확히 이걸 유발했다.
+    실제 계약(codex #24500, opencode #24190, qwen-code #3658에서 확인): thinking=True +
+    실제 요청에 tools가 실리면, 히스토리의 **모든** assistant 산출물(tool_calls 또는 content
+    보유)에 reasoning_content가 있어야 한다. 가장 최근 하나만 정상이고 과거·중간 assistant의
+    reasoning이 누락되면 400. tool call이 없었던 중간 assistant의 reasoning도 보존돼야 한다.
+    (이전 fake는 역순으로 가장 최근 tool_calls assistant 하나만 검사해 계약보다 약했다.)
+
+    tools가 없거나 thinking이 꺼진 요청에서는 reasoning이 없어도 된다.
     """
     requires_reasoning_replay = True
 
     def __init__(self, fail_first: bool = False):
         self.calls: list[dict] = []
         self._fail_first = fail_first  # 첫 호출만 강제 400(폴백 경로 검증용)
+
+    @staticmethod
+    def _is_reasoning_bearing(m: dict) -> bool:
+        # thinking 산출물로 취급하는 assistant: tool_calls를 냈거나 실제 답변 content가 있는 것.
+        # 요약 checkpoint 같은 빈/보조 assistant는 대상이 아니다.
+        return m.get("role") == "assistant" and bool(m.get("tool_calls") or m.get("content"))
 
     async def stream_chat(self, messages, tools=None, thinking=False, reasoning_effort=None):
         self.calls.append({"thinking": thinking, "has_tools": bool(tools),
@@ -575,13 +585,11 @@ class _StrictDeepSeekFake:
                 "DeepSeek API 오류 400: The reasoning_content in the thinking mode "
                 "must be passed back to the API")
         if thinking and tools:
-            for m in reversed(messages):
-                if m.get("role") == "assistant" and m.get("tool_calls"):
-                    if "reasoning_content" not in m:
-                        raise RuntimeError(
-                            "DeepSeek API 오류 400: The reasoning_content in the "
-                            "thinking mode must be passed back to the API")
-                    break
+            for m in messages:
+                if self._is_reasoning_bearing(m) and "reasoning_content" not in m:
+                    raise RuntimeError(
+                        "DeepSeek API 오류 400: The reasoning_content in the "
+                        "thinking mode must be passed back to the API")
         yield {"content": "ok"}
 
 
@@ -922,3 +930,80 @@ def test_fold_duplicate_id_past_failure_not_folded():
     assert "PAST_FAIL_BODY" in dump, "과거 실패 write가 이후 성공 때문에 잘못 접혔다"
     assert "LATER_OK_BODY" not in dump, "이후 성공 write가 접히지 않았다"
     print("OK 중복 id에서 과거 실패는 보존, 이후 성공만 접힘(protocol 매칭)")
+
+
+def test_strict_fake_and_replay_over_full_history():
+    """강화된 계약: thinking+tools에서 모든 관련 assistant reasoning이 보존돼야 한다.
+
+    (a) 운영 코드는 keep_reasoning일 때 히스토리 전체를 유지하므로, tool_call 없는 중간
+        assistant를 포함한 다턴 히스토리도 400 없이 통과한다.
+    (b) 과거/중간 assistant의 reasoning이 하나라도 누락되면 강화된 fake가 400을 잡는다
+        (가장 최근만 보던 약한 검사로는 못 잡던 경우).
+    (c) compaction 경계(요약 checkpoint + tail)에서도 tail assistant의 reasoning이 유지돼 통과.
+    """
+    import asyncio, copy
+    from app.runtime.agent import AgentRuntime
+    from app.tools.registry import TOOL_SCHEMAS
+
+    rt = AgentRuntime()
+
+    # tool_call 없는 중간 assistant를 포함한 다턴 히스토리(전부 reasoning 보유)
+    full = [
+        {"role": "user", "content": "작업"},
+        {"role": "assistant", "content": "", "reasoning_content": "R1",
+         "tool_calls": [{"id": "c1", "type": "function",
+                         "function": {"name": "read_file", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "파일"},
+        {"role": "assistant", "content": "중간 생각만", "reasoning_content": "R2"},  # tool call 없음
+        {"role": "user", "content": "계속"},
+        {"role": "assistant", "content": "", "reasoning_content": "R3",
+         "tool_calls": [{"id": "c2", "type": "function",
+                         "function": {"name": "grep", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c2", "content": "결과"},
+    ]
+    fake = _StrictDeepSeekFake()
+    rt._adapter_for = lambda model: fake
+    original = copy.deepcopy(full)
+
+    async def drive(hist):
+        async for _ in rt._stream_with_recovery(
+            "deepseek-v4-flash", hist, TOOL_SCHEMAS, True, "medium", "s-full", {"retries": 0}
+        ):
+            pass
+
+    asyncio.run(drive(full))  # (a) 400이면 예외
+    assert len(fake.calls) == 1, "약하지 않은 계약에서 재시도 발생"
+    assert full == original, "원본 history 변형(deep equality 실패)"
+
+    # (b) 중간 assistant reasoning 누락 → 강화 fake가 직접 잡는지(가장 최근은 정상)
+    async def call_fake_direct(msgs):
+        f = _StrictDeepSeekFake()
+        raised = False
+        try:
+            async for _ in f.stream_chat(msgs, TOOL_SCHEMAS, thinking=True):
+                pass
+        except RuntimeError:
+            raised = True
+        return raised
+
+    missing_mid = copy.deepcopy(full)
+    del missing_mid[3]["reasoning_content"]  # tool call 없는 중간 assistant reasoning 제거
+    assert asyncio.run(call_fake_direct(missing_mid)), "중간 assistant reasoning 누락을 못 잡음"
+
+    missing_past = copy.deepcopy(full)
+    del missing_past[1]["reasoning_content"]  # 과거 tool_call assistant reasoning 제거(최근은 정상)
+    assert asyncio.run(call_fake_direct(missing_past)), "과거 assistant reasoning 누락을 못 잡음"
+
+    # (c) compaction 경계: 요약 checkpoint(user) + tail. tail assistant reasoning 유지 → 통과
+    compacted = [
+        {"role": "user", "content": "[이전 작업 요약 — 컨텍스트 압축됨]\n...요약..."},
+        {"role": "assistant", "content": "", "reasoning_content": "R9",
+         "tool_calls": [{"id": "c9", "type": "function",
+                         "function": {"name": "read_file", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c9", "content": "tail"},
+    ]
+    fake2 = _StrictDeepSeekFake()
+    rt._adapter_for = lambda model: fake2
+    asyncio.run(drive(compacted))
+    assert len(fake2.calls) == 1, "compaction 경계에서 400/재시도 발생"
+    print("OK 강화 계약: 전체 assistant reasoning 보존·중간 누락 검출·compaction 경계 통과")
