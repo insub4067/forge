@@ -52,7 +52,8 @@ def _needs_token(path: str) -> bool:
     같은 출처 <img>·fetch는 forge_token 쿠키를 자동 전송하므로 클라이언트 변경은 없다."""
     if path.startswith("/uploads"):
         return True
-    return path.startswith("/api") and path != "/api/health"
+    # health/ready는 인증 없이 열어 로드밸런서·모니터링이 조회할 수 있게 한다.
+    return path.startswith("/api") and path not in ("/api/health", "/api/ready")
 
 
 class TokenAuthMiddleware:

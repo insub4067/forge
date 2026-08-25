@@ -76,3 +76,16 @@ def test_parse_allowed_origins():
     assert parse_allowed_origins("   ") == ["*"]
     assert parse_allowed_origins("https://a.com") == ["https://a.com"]
     assert parse_allowed_origins("https://a.com, https://b.com ,") == ["https://a.com", "https://b.com"]
+
+
+def test_ready_open_without_token_and_reports_readiness():
+    """/api/ready는 토큰 없이 열려 있고, DB 준비 시 200/ready=True를 준다."""
+    from app.auth import _needs_token
+    assert not _needs_token("/api/ready")
+    from fastapi.testclient import TestClient
+    from app.main import app
+    with TestClient(app) as client:  # lifespan 실행 → DB init → ready
+        r = client.get("/api/ready")
+        assert r.status_code == 200, r.text
+        assert r.json().get("ready") is True
+        assert client.get("/api/health").json() == {"ok": True}

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from sqlalchemy import text
@@ -15,6 +15,7 @@ from .config import settings
 from .db import store
 from .db.models import Base
 from .db.session import engine
+from . import errors as error_log
 
 # create_all은 기존 테이블에 새 컬럼을 추가하지 못하므로, 신규 컬럼은 idempotent ALTER로 보강한다.
 _COLUMN_PATCHES = [
@@ -67,27 +68,34 @@ async def lifespan(app: FastAPI):
         loop.slow_callback_duration = 1.0  # 1초 이상 루프를 잡은 콜백을 경고
     except Exception:
         pass
+    # ── 필수 초기화: DB schema. 실패하면 조용히 넘기지 않는다 — readiness를 false로 두고
+    #    구조화 로그를 남긴다. 프로세스를 즉시 죽여 무한 재시작에 빠지지 않게 하되, 준비 안 됨을
+    #    /api/ready로 정직하게 알린다. DB가 없으면 resume/scheduler도 시작하지 않는다.
+    app.state.ready = False
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
             for stmt in _COLUMN_PATCHES:
                 await conn.execute(text(stmt))
-        # 재시작으로 중단된 run 처리 — auto_resume면 저장된 history에서 이어서 완주,
-        # 아니면 안내 메시지만 남긴다.
+        app.state.ready = True
+    except Exception as err:
+        error_log.record("startup_db", f"DB 스키마 초기화 실패 — 서비스 not-ready: {err}", "")
+        yield
+        return  # DB 없이 resume/scheduler를 띄우지 않는다(치명 초기화 실패).
+
+    # ── 선택 기능: 하나 실패해도 서비스 전체를 죽이지 않는다. 다만 조용히 넘기지 않고 로그를 남긴다.
+    # 재시작으로 중단된 run 복구(auto_resume면 이어서 완주, 아니면 안내만).
+    try:
         interrupted = await store.take_interrupted_runs()
         if interrupted:
             if settings.auto_resume:
                 from .api.routes import resume_run
-
                 import os as _os
 
                 async def _resume_all(items):
                     for it in items:
                         ws = it["workspace_path"]
-                        # 재개하지 않는 조건(안내만 남김):
-                        # - resuming: 재개 중 또 죽은 것 → 재재개 금지(크래시 루프 가드).
-                        # - workspace가 없거나/루트("/")거나/실제 디렉터리가 아님 → 잘못된 세션.
-                        #   (ws="/"에서 전체 파일시스템 스캔 등으로 서버가 위험해지는 것을 막는다.)
+                        # 재개 금지: resuming(재개 중 또 죽음, 크래시 루프 가드) / 잘못된 workspace.
                         if (it["final_status"] == "resuming" or not ws
                                 or ws == "/" or not _os.path.isdir(ws)):
                             await store.mark_interrupted_note(it["id"])
@@ -98,16 +106,21 @@ async def lifespan(app: FastAPI):
             else:
                 for it in interrupted:
                     await store.mark_interrupted_note(it["id"])
-    except Exception:
-        pass
+    except Exception as err:
+        error_log.record("startup_resume", f"중단 run 복구 실패(서비스는 계속): {err}", "")
+
     # 크래시로 'running'에 갇힌 예약 잡을 되돌려 재선점 가능하게(세션 복구와 대칭).
     try:
         await store.reset_orphaned_running_jobs()
-    except Exception:
-        pass
-    # 예약 작업 스케줄러 시작(DB next_run_at이 authoritative → 재시작 복원).
-    from . import scheduler
-    scheduler.start()
+    except Exception as err:
+        error_log.record("startup_jobs", f"예약 잡 복구 실패(서비스는 계속): {err}", "")
+
+    # 예약 작업 스케줄러는 DB 준비 후에만 시작(DB next_run_at이 authoritative).
+    try:
+        from . import scheduler
+        scheduler.start()
+    except Exception as err:
+        error_log.record("startup_scheduler", f"스케줄러 시작 실패(서비스는 계속): {err}", "")
     yield
 
 
@@ -128,7 +141,15 @@ app.add_middleware(
 
 @app.get("/api/health")
 async def health():
+    # liveness — 프로세스가 떠 있으면 200(로드밸런서·모니터링용). DB 상태와 무관.
     return {"ok": True}
+
+
+@app.get("/api/ready")
+async def ready():
+    # readiness — 필수 초기화(DB schema)가 끝났을 때만 준비됨. 실패 시 503으로 정직히 알린다.
+    r = bool(getattr(app.state, "ready", False))
+    return JSONResponse({"ready": r}, status_code=200 if r else 503)
 
 
 app.include_router(router, prefix="/api")
