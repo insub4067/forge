@@ -306,8 +306,15 @@ async function pingHealth() {
     const res = await fetch('/api/health', { signal: ctrl.signal, cache: 'no-store' })
     clearTimeout(t)
     if (!res.ok) throw new Error('bad')
+    const wasDown = serverDown.value
     healthFails = 0
     serverDown.value = false
+    if (wasDown) {
+      // 서버가 방금 복구됨 — 방 목록을 다시 받아 랜딩을 보정한다. 최초 로드 실패로 지워졌거나
+      // 무효해진 현재 세션을 기존 방으로 되돌리고, 방이 새로 정해지면 이력을 불러온다.
+      await loadRooms()
+      if (reconcileCurrentRoom() && currentRoom()) loadMessages()
+    }
   } catch {
     healthFails += 1
     if (healthFails >= 2) serverDown.value = true   // 2회 연속(=최대 ~8s) 실패 시 down
@@ -468,6 +475,18 @@ async function loadRooms() {
       roomsLoaded.value = true // 서버가 방 목록을 확인해줬다 — 이후 "방 없음"은 진짜 미설정
     }
   } catch {}
+}
+
+// 서버에서 방 목록을 받은 뒤에만(roomsLoaded) 현재 세션 유효성을 보정한다. 로드 실패로
+// 목록을 못 받았을 땐 currentRoomId를 건드리지 않아(localStorage 값 보존), 서버 복구 후
+// 기존 방으로 되돌아갈 수 있게 한다 — 로드 실패 시 성급히 지워 방이 있는데도 '미설정'으로
+// 빠지던 회귀를 막는다. 유효한 방이 없으면 가장 최근 방으로, 0개면 빈 값. 변경 시 true.
+function reconcileCurrentRoom() {
+  if (!roomsLoaded.value) return false
+  if (rooms.value.some((r) => r.id === currentRoomId.value)) return false
+  currentRoomId.value = rooms.value.length ? rooms.value[0].id : ''
+  localStorage.setItem('forge_room', currentRoomId.value)
+  return true
 }
 
 async function loadMessages(isNew = false) {
@@ -1483,18 +1502,9 @@ onMounted(async () => {
   startHealthPoll() // 서버 도달성 상시 감시 — 먹통이면 배너로 알린다
   loadHomePath() // 워크스페이스 미설정(홈) 판별 기준
   await loadRooms()
-  // 유효한 현재 세션이 없으면 가장 최근 세션으로 랜딩
-  const valid = rooms.value.some((r) => r.id === currentRoomId.value)
-  if (!valid) {
-    if (rooms.value.length) {
-      currentRoomId.value = rooms.value[0].id
-    } else {
-      // 방이 하나도 없다 — 유령 id를 비운다(안 그러면 currentRoom()이 null이라
-      // 워크스페이스 미설정 배지가 뜨고, 선택해도 없는 방에 PATCH돼 계속 반복된다).
-      currentRoomId.value = ''
-    }
-    localStorage.setItem('forge_room', currentRoomId.value)
-  }
+  // 서버가 목록을 확인해준 경우에만 랜딩을 보정한다. 로드 실패면 currentRoomId를 보존해
+  // 서버 복구 후 기존 방으로 되돌아갈 수 있게 한다(pingHealth 복구 분기가 재동기화).
+  reconcileCurrentRoom()
   // 첫 랜딩도 방 전환과 같은 규칙으로 세션 설정을 복원한다(selectRoom을 거치지 않는 경로).
   const landed = currentRoom()
   if (landed && landed.model_tier) modelTier.value = landed.model_tier
