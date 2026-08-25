@@ -90,7 +90,7 @@ cd backend && .venv/bin/python gate_eval.py      → Gate 판정 정확도 100%(
 | API 재시작 후 예약 작업 보존 | **예** | `next_run_at`(DB, naive UTC)이 authoritative. 재시작 시 enabled 잡 복원. |
 | 중복 실행 방지 | **예** | `claim_job`: 원자적 `UPDATE ... WHERE status!='running' SET running`, rowcount>0만 실행. |
 | 여러 API 인스턴스에서 1회만 | **DB claim 한정 예 / 설계는 단일 인스턴스** | claim_job의 원자 UPDATE는 cross-instance 상호배제. 단 `runtime.is_running`은 in-memory(인스턴스별). 다중 인스턴스는 테스트·보장 대상 아님. |
-| 실행 중 장애 상태 | **부분 갭** | 세션은 재시작 시 `take_interrupted_runs`가 running=False로 정리. **그러나 크래시로 죽으면 job.status가 'running'에 갇혀 재선점 안 됨**(job 상태는 startup 복구 없음). |
+| 실행 중 장애 상태 | **개선됨(`d717095`)** | 세션은 `take_interrupted_runs`로 복구. 크래시로 job이 'running'에 갇히던 gap은 기동 시 `reset_orphaned_running_jobs`가 'scheduled'로 되돌려 재선점 가능하게 함(세션 복구와 대칭). 단일 인스턴스 전제. |
 | Auto Resume가 중단 지점을 이어가나 | **정확 프레임 재개 아님 — 저장 history로 새 run 재구성** | `resume_run`은 스텝별 저장 history로 `runtime.run()`을 재실행. 완료된 스텝은 history에 있어 재수행 안 하지만, 실행 프레임 체크포인트 복원은 아니다. |
 | 크래시 루프 방지 | **예** | 재개 시작 시 `final_status='resuming'`. 재개 중 또 죽으면 다음 기동에서 스킵(+잘못된 workspace 스킵, 20분 타임아웃). |
 
@@ -105,9 +105,10 @@ cd backend && .venv/bin/python gate_eval.py      → Gate 판정 정확도 100%(
 
 **남은 위험**
 - lint/typecheck 부재 → 정적 회귀 감지 없음(미검증 항목).
-- Gate F6/F7 구조적 gap(무관 파일·테스트 약화) → 잠재 false PASS.
-- 크래시로 'running' 갇힌 예약 job 미복구.
+- Gate F6 구조적 gap(무관 파일 변경) → 잠재 false PASS. (F7 테스트 약화는 감지·표면화됨, `d10b3f7`)
 - CORS `allow_origins=['*']` — fail-closed와 별개로 원격 모드에서 강화 필요.
+- 스케줄러 다중 인스턴스 exactly-once는 여전히 미보장(설계 단일 인스턴스). 크래시 복구는 기동
+  시점 전량 리셋 방식 — 실행 중 인스턴스가 있는 다중 배포에는 heartbeat 기반이 필요.
 
 **다음 작업 우선순위**
 1. Gate 강화: F7 감지 완료(비차단 표면화, `d10b3f7`). 남은 F6(무관 파일 범위 대조) 추가 — gate_eval로 회귀 고정. (선택) test_weakening을 verdict 차단으로 승격할지 정책 결정.
