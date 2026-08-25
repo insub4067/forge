@@ -329,12 +329,6 @@ async def mark_interrupted_note(session_id: str) -> None:
         await save_history(session_id, history)
 
 
-async def save_checkpoint(session_id: str, step_no: int, git_sha: str) -> None:
-    async with async_session() as s:
-        s.add(Checkpoint(session_id=session_id, step_no=step_no, git_sha=git_sha))
-        await s.commit()
-
-
 def task_key(title: str) -> str:
     """태스크 동일성 키. 모델이 같은 태스크의 제목에 괄호 주석을 덧붙이거나
     구두점을 바꿔도 같은 태스크로 본다("A" ↔ "A (이미 구현·테스트 완료)")."""

@@ -859,19 +859,6 @@ class AgentRuntime:
             if meta.get("session_id") == session_id:
                 self._pending_meta.pop(pid, None)
 
-    @staticmethod
-    async def _git_sha(workspace: str) -> str:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "git", "-C", workspace, "rev-parse", "HEAD",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            out, _ = await proc.communicate()
-            return out.decode().strip()
-        except Exception:
-            return ""
-
     def set_auto_approve(self, session_id: str, enabled: bool) -> None:
         if enabled:
             self._auto_approve_sessions.add(session_id)
@@ -1362,11 +1349,6 @@ class AgentRuntime:
                         )
                         continue
                     await send("approval_granted", {"name": name})
-
-                if name in APPROVAL_REQUIRED and session_id:
-                    sha = await self._git_sha(ws)
-                    await store.ensure_session(session_id)
-                    await store.save_checkpoint(session_id, step, sha)
 
                 diff = ""
                 try:
