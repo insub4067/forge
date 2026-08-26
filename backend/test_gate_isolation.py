@@ -10,7 +10,11 @@ import os
 import subprocess
 import tempfile
 
-from app.runtime.verification import _worktree_git_hash
+from app.runtime.verification import (
+    _worktree_git_hash,
+    make_prechange_worktree,
+    remove_prechange_worktree,
+)
 
 
 def _init_repo():
@@ -61,8 +65,29 @@ def test_hash_none_for_non_git_workspace():
     assert asyncio.run(_worktree_git_hash("")) is None
 
 
+# ── P0-A: pre-change probe 워크트리 ──────────────────────────────────────
+def test_prechange_worktree_is_head_excluding_run_changes():
+    """probe 워크트리는 HEAD(변경 이전) 상태 — 이번 run의 uncommitted 변경을 제외한다.
+    이 위에서 게이트를 돌려 '변경 전에도 통과 = trivial'을 판별한다(P0-A)."""
+    d = _init_repo()   # a.txt = "orig\n" 커밋됨
+    with open(os.path.join(d, "a.txt"), "w") as f:   # 이번 run의 변경(uncommitted)
+        f.write("run change\n")
+    tmp = asyncio.run(make_prechange_worktree(d))
+    assert tmp is not None
+    with open(os.path.join(tmp, "a.txt")) as f:
+        assert f.read() == "orig\n"    # run 변경이 빠진 HEAD 상태
+    asyncio.run(remove_prechange_worktree(d, tmp))
+    assert not os.path.exists(tmp)
+
+
+def test_prechange_worktree_none_for_non_git():
+    """git repo가 아니면 None → probe 생략(trivial 강등 안 함, 안전)."""
+    assert asyncio.run(make_prechange_worktree(tempfile.mkdtemp())) is None
+    assert asyncio.run(make_prechange_worktree("")) is None
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):
             fn()
-    print("PASS — gate verification isolation (P0-B)")
+    print("PASS — gate verification isolation (P0-A + P0-B)")

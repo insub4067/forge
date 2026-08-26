@@ -105,6 +105,45 @@ async def _worktree_git_hash(ws: str):
     return hashlib.sha1((porc + "\x00" + diff).encode("utf-8", "replace")).hexdigest()
 
 
+async def _git_ws(ws: str, *args, timeout=30):
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", ws, *args,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        return proc.returncode, out.decode(errors="replace")
+    except Exception:
+        return 1, ""
+
+
+async def make_prechange_worktree(ws: str):
+    """HEAD(이번 run 변경 이전 커밋) 워크트리를 임시 생성 — 게이트 명령을 여기서 먼저 돌려
+    'trivial 게이트'(변경 전에도 통과 = 판별력 없음)를 잡는다(P0-A). live 워크스페이스는 절대
+    건드리지 않는다(격리 워크트리). git repo 아니거나 실패면 None(probe 생략 → 강등 안 함)."""
+    import tempfile
+    if not ws:
+        return None
+    rc, inside = await _git_ws(ws, "rev-parse", "--is-inside-work-tree", timeout=8)
+    if rc != 0 or "true" not in inside:
+        return None
+    tmp = tempfile.mkdtemp(prefix="forge-prechange-")
+    rc, _ = await _git_ws(ws, "worktree", "add", "--detach", tmp, "HEAD", timeout=30)
+    if rc != 0:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+        return None
+    return tmp
+
+
+async def remove_prechange_worktree(ws: str, tmp) -> None:
+    """probe 워크트리 정리 — 등록 해제 + 디렉터리 삭제. 실패해도 조용히 넘어간다."""
+    if not tmp:
+        return
+    await _git_ws(ws, "worktree", "remove", "--force", tmp, timeout=20)
+    import shutil
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
 async def verify_gates(ws: str, session_id: str, send: EventSink) -> tuple[str, str]:
     """각 gate의 verification_method를 실제 실행해 (state, report) 반환.
 
@@ -128,44 +167,70 @@ async def verify_gates(ws: str, session_id: str, send: EventSink) -> tuple[str, 
         except Exception as err:
             return -1, f"실행 오류: {err}"
 
+    # P0-A: 변경 이전(HEAD) 코드에서 게이트를 먼저 실행해 'trivial 게이트'(변경 없이도 통과 =
+    # 판별력 없음)를 잡는다. 격리 워크트리 — live 워크스페이스는 건드리지 않는다.
+    probe_dir = await make_prechange_worktree(ws)
+    probe_sandbox = DockerSandbox(workspace=probe_dir) if probe_dir else None
+
+    async def _probe(command: str, timeout: int = 120):
+        if not probe_sandbox:
+            return None
+        try:
+            return await probe_sandbox.run_verify(command, timeout=timeout)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return None
+
     labels: list[str] = []
     resolved: list[str] = []
-    for g in gates:
-        status = g.get("status", "pending")
-        # blocked/abandoned는 모델이 사유와 함께 남긴 정직한 미완료 — 강제 실행하지 않는다.
-        if status in ("blocked", "abandoned"):
-            labels.append(f"{g['title']}({status})")
-            resolved.append(status)
-            continue
-        method = (g.get("verification_method") or "").strip()
-        expected = (g.get("expected_result") or "").strip()
-        if not method:
-            # 실행 가능한 검증이 없으면 passed로 만들지 않고 unavailable로 확정(숨기지 않음).
-            await store.save_gate_result(
-                session_id, g["id"], "unavailable", "{}",
-                g.get("failure_reason") or "검증 방법 없음 — 실행 가능한 verification_method가 없다")
-            labels.append(f"{g['title']}(unavailable)")
-            resolved.append("unavailable")
-            await send("gates_update", {"gates": await store.list_gates(session_id)})
-            continue
-        _wt_before = await _worktree_git_hash(ws)
-        rc, out = await _sh(method, ws)
-        _wt_after = await _worktree_git_hash(ws)
-        evidence = json.dumps({
-            "command": method, "exit_code": rc,
-            "output_tail": out[-1500:], "expected": expected,
-        }, ensure_ascii=False)
-        # P0-B: 검증 명령이 워크스페이스 소스를 바꿨으면(게이트 A가 게이트 B의 통과 조건을 만드는
-        # 자기충족 경로) passed로 인정하지 않고 unavailable로 강등한다 — 검증은 대상을 관찰만 해야 한다.
-        if (_wt_before is not None and _wt_after is not None and _wt_before != _wt_after):
-            verdict, reason = "unavailable", "검증 명령이 워크스페이스를 변경함 — 대상을 관찰만 해야 하므로 판정 보류"
-        else:
-            verdict, reason = classify_gate(rc, out, expected)
-        await store.save_gate_result(session_id, g["id"], verdict, evidence, reason)
-        labels.append(f"{g['title']}({verdict})")
-        resolved.append(verdict)
-        await send("gates_update", {"gates": await store.list_gates(session_id)})
+    try:
+      for g in gates:
+          status = g.get("status", "pending")
+          # blocked/abandoned는 모델이 사유와 함께 남긴 정직한 미완료 — 강제 실행하지 않는다.
+          if status in ("blocked", "abandoned"):
+              labels.append(f"{g['title']}({status})")
+              resolved.append(status)
+              continue
+          method = (g.get("verification_method") or "").strip()
+          expected = (g.get("expected_result") or "").strip()
+          if not method:
+              # 실행 가능한 검증이 없으면 passed로 만들지 않고 unavailable로 확정(숨기지 않음).
+              await store.save_gate_result(
+                  session_id, g["id"], "unavailable", "{}",
+                  g.get("failure_reason") or "검증 방법 없음 — 실행 가능한 verification_method가 없다")
+              labels.append(f"{g['title']}(unavailable)")
+              resolved.append("unavailable")
+              await send("gates_update", {"gates": await store.list_gates(session_id)})
+              continue
+          # P0-A: 변경 이전(HEAD) 코드에서 먼저 실행 — 여기서도 passed면 이 게이트는 변경을 판별하지
+          # 못하는 trivial 게이트다(예: echo hello/expected hello). probe 불가(None)면 판정 안 함.
+          probe_res = await _probe(method)
+          trivial = probe_res is not None and classify_gate(probe_res[0], probe_res[1], expected)[0] == "passed"
 
+          _wt_before = await _worktree_git_hash(ws)
+          rc, out = await _sh(method, ws)
+          _wt_after = await _worktree_git_hash(ws)
+          evidence = json.dumps({
+              "command": method, "exit_code": rc,
+              "output_tail": out[-1500:], "expected": expected, "gate_validity": "trivial" if trivial else "valid",
+          }, ensure_ascii=False)
+          # 판정 우선순위: trivial → 검증이 대상 변경(P0-B) → 정상 classify.
+          if trivial:
+              verdict, reason = "unavailable", "trivial 게이트 — 변경 이전 코드에서도 통과(판별력 없음). 검증으로 인정하지 않는다"
+          elif (_wt_before is not None and _wt_after is not None and _wt_before != _wt_after):
+              # P0-B: 검증 명령이 워크스페이스 소스를 바꿨으면(게이트 A가 게이트 B의 통과 조건을 만드는
+              # 자기충족 경로) passed로 인정하지 않고 unavailable로 강등한다 — 검증은 대상을 관찰만 해야 한다.
+              verdict, reason = "unavailable", "검증 명령이 워크스페이스를 변경함 — 대상을 관찰만 해야 하므로 판정 보류"
+          else:
+              verdict, reason = classify_gate(rc, out, expected)
+          await store.save_gate_result(session_id, g["id"], verdict, evidence, reason)
+          labels.append(f"{g['title']}({verdict})")
+          resolved.append(verdict)
+          await send("gates_update", {"gates": await store.list_gates(session_id)})
+
+    finally:
+      await remove_prechange_worktree(ws, probe_dir)
     report = "요구사항 게이트 검증: " + ", ".join(labels)
     if "failed" in resolved:
         return "failed", report
