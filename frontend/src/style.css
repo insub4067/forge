@@ -4704,3 +4704,24 @@ button {
   cursor: pointer;
 }
 .path-chip:active { background: var(--border); }
+
+/* ── 답변 우선 정보구조 (spec 2) — 최종 답변 primary, 상태·Activity는 compact secondary. ── */
+.answer { margin: 2px 0 6px; }
+.activity { margin-top: 2px; }
+.activity-line {
+  display: flex; align-items: center; gap: 4px; width: 100%;
+  min-height: 34px; padding: 6px 2px;
+  background: none; border: none; cursor: pointer;
+  font-size: 12.5px; text-align: left; color: var(--muted);
+}
+.al-status { font-weight: 600; color: var(--text); flex-shrink: 0; }
+.al-glyph { margin-right: 3px; color: var(--muted); }
+.al-status.done .al-glyph { color: var(--accent); }
+.al-status.warn, .al-status.warn .al-glyph { color: #f59e0b; }
+.al-status.error, .al-status.error .al-glyph { color: #f87171; }
+.al-status.muted, .al-status.muted .al-glyph { color: var(--muted); }
+.al-counts { color: var(--muted); flex: 1; min-width: 0; }
+.al-chevron { color: var(--muted); transition: transform 0.15s ease; flex-shrink: 0; }
+.al-chevron.open { transform: rotate(90deg); }
+.activity-body { margin-top: 2px; }
+.activity-body .result-warn:first-child { margin-top: 2px; }

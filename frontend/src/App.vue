@@ -13,7 +13,6 @@ import MenuPanel from './components/MenuPanel.vue'
 import SessionDetailPanel from './components/SessionDetailPanel.vue'
 import FileBrowserPanel from './components/FileBrowserPanel.vue'
 import AgentCrewPanel from './components/AgentCrewPanel.vue'
-import FinalResultCard from './components/FinalResultCard.vue'
 import ActivityDetailPanel from './components/ActivityDetailPanel.vue'
 import FsIcon from './components/FsIcon.vue'
 import { balance as adminBalance, loadBalance } from './store'
@@ -1138,32 +1137,29 @@ function logCounts(m) {
   for (const p of ph) { if (p.thinking) think++; tools += (p.tools?.length || 0) }
   return { steps: ph.length, think, tools }
 }
-// 카드 요약 — 긴 응답 대신 두괄식 한 문장(없으면 goal). 140자 넘으면 말줄임.
-function resultSummary(m) {
-  let t = (m.doneMessage || m.state?.goal || '').trim()
-  if (!t) {  // 재구성엔 doneMessage가 없다 — 마지막 phase 텍스트로 보완.
-    const ph = (m.phases || []).filter((p) => p.text)
-    if (ph.length) t = ph[ph.length - 1].text.trim()
-  }
-  if (!t) return ''
-  const s = _firstSentence(t)
-  return s.length > 140 ? s.slice(0, 140) + '…' : s
+// 사용자-facing 최종 답변 — 개발자의 마지막 텍스트 phase(실제 결과). 없으면 doneMessage(프로세스
+// 요약) fallback. 이것을 채팅 본문 primary로 승격한다(Activity 로그에 묻지 않는다). 문자열 파싱이
+// 아니라 구조화된 phase 데이터를 쓴다(spec §6).
+function finalAnswer(m) {
+  const withText = (m.phases || []).filter((p) => p.text && p.text.trim())
+  if (withText.length) return withText[withText.length - 1].text
+  return m.doneMessage || ''
 }
-// 진행률(task n/전체) — 상태와 별도 값. 현재 세션 task 기준.
-function taskProgress() {
-  const t = tasks.value || []
-  if (!t.length) return null
-  return { done: t.filter((x) => x.status === 'done').length, total: t.length }
+// 검증이 NOT_APPLICABLE인가(read-only 성공) — completed인데 gate 0개면 read-only로 추론한다.
+// (mutation completed는 반드시 gate passed>0이므로 gate 0 + completed = read-only.)
+function isVerificationNA(m, i) {
+  const s = resolveFinalStatus(m, i)
+  return s === 'completed' && verifyCounts().total === 0
 }
-// 카드는 activity(agent 작업)이고 done이며 마지막 메시지일 때만 — 순수 대화엔 안 띄운다.
-function showResultCard(m, i) {
-  return hasActivity(m) && !!finalStatusInfo(m, i) && i === messages.value.length - 1
-}
-// 경고 카드 '검증 상세' — 마지막 phase의 Detail Surface(검증 섹션 포함)를 연다.
-function openResultDetail(m) {
-  const ph = (m.phases || []).filter(phaseHasDetail)
-  if (ph.length) openDetail(m, ph[ph.length - 1])
-  else showGit.value = true
+// compact 상태줄에 붙는 검증 요약(NOT_APPLICABLE·검증 없음이면 빈 문자열).
+function verifySummary(m, i) {
+  if (isVerificationNA(m, i)) return ''
+  const v = verifyCounts()
+  if (!v.total) return ''
+  let s = `검증 ${v.passed} 통과`
+  if (v.failed) s += ` · ${v.failed} 실패`
+  if (v.unverified) s += ` · ${v.unverified} 미검증`
+  return s
 }
 
 // 완료 semantic을 타임라인 터미널 노드로 — backend 실제 상태를 왜곡하지 않는다.
@@ -1866,17 +1862,6 @@ document.addEventListener('visibilitychange', () => {
           </template>
 
           <template v-if="m.role === 'assistant'">
-            <!-- 최종 결과 카드 — 긴 응답보다 먼저 상태·검증을 빠르게. 실패·미검증은 별도 경고 카드. -->
-            <FinalResultCard
-              v-if="showResultCard(m, i)"
-              :status="finalStatusInfo(m, i)"
-              :summary="resultSummary(m)"
-              :files-count="m.state?.files_changed?.length || 0"
-              :verify="verifyCounts()"
-              :progress="taskProgress()"
-              :warnings="resultWarnings(m)"
-              @action="openResultDetail(m)"
-            />
             <!-- 순수 대화 답변(도구·추론 없음) — 상태 기호 없이 본문만. ✓는 Agent Activity 전용. -->
             <template v-if="!hasActivity(m)">
               <template v-for="(p, pi) in m.phases" :key="'txt' + pi">
@@ -1886,18 +1871,24 @@ document.addEventListener('visibilitychange', () => {
             <!-- Activity 메시지: 응답을 먼저, 실행 로그(타임라인)는 아래로 · 완료 후 기본 접힘(정보밀도↓).
                  헤더에 종류·개수(실행 N · 추론 N · 도구 N). 실행 중엔 접기 없이 라이브로 펼쳐 둔다. -->
             <template v-else>
-            <div v-if="m.doneMessage" class="done-msg">{{ m.doneMessage }}</div>
-            <div v-if="m.phases.length" class="logs">
-              <button
-                v-if="!isLiveTurn(i)"
-                class="logs-toggle"
-                :aria-expanded="m.logsOpen ? 'true' : 'false'"
-                @click="m.logsOpen = !m.logsOpen"
-              >
-                <span class="logs-label">실행 {{ logCounts(m).steps }}<span v-if="logCounts(m).think"> · 추론 {{ logCounts(m).think }}</span><span v-if="logCounts(m).tools"> · 도구 {{ logCounts(m).tools }}</span></span>
-                <svg class="logs-chevron" :class="{ open: m.logsOpen }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+            <!-- 1. 최종 답변(primary) — 개발자의 실제 결과를 채팅 본문으로 승격(Activity에 묻지 않는다). -->
+            <div v-if="finalAnswer(m)" class="text answer" v-html="renderMarkdown(finalAnswer(m))"></div>
+            <!-- 2. compact 상태 + Activity 토글 — 상태·검증요약·개수는 secondary. 탭하면 로그 펼침. -->
+            <div v-if="m.phases.length" class="activity">
+              <button class="activity-line" :aria-expanded="m.logsOpen ? 'true' : 'false'" @click="m.logsOpen = !m.logsOpen">
+                <span v-if="finalStatusInfo(m, i)" class="al-status" :class="finalStatusInfo(m, i).cls">
+                  <span class="al-glyph" aria-hidden="true">{{ finalStatusInfo(m, i).glyph }}</span>{{ finalStatusInfo(m, i).label }}<span v-if="verifySummary(m, i)"> · {{ verifySummary(m, i) }}</span>
+                </span>
+                <span class="al-counts"><span v-if="finalStatusInfo(m, i)"> · </span>실행 {{ logCounts(m).steps }}<span v-if="logCounts(m).think"> · 추론 {{ logCounts(m).think }}</span><span v-if="logCounts(m).tools"> · 도구 {{ logCounts(m).tools }}</span></span>
+                <svg class="al-chevron" :class="{ open: m.logsOpen }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
               </button>
-              <div v-if="isLiveTurn(i) || m.logsOpen" class="timeline">
+              <div v-if="isLiveTurn(i) || m.logsOpen" class="activity-body">
+              <!-- 검증 경고(미검증·실패)는 기본 숨김 — Activity 펼침(상세)에서만 노출. -->
+              <div v-for="(w, wi) in resultWarnings(m)" :key="'w' + wi" class="result-warn" :class="w.kind === '실패' ? 'error' : 'warn'">
+                <div class="rw-head"><span class="rw-kind">{{ w.kind }}</span><span v-if="w.title" class="rw-title">· {{ w.title }}</span></div>
+                <div class="rw-reason">{{ w.reason }}</div>
+              </div>
+              <div class="timeline">
             <div v-for="(p, pi) in m.phases" :key="pi" class="tl-node" :class="phaseStatus(p)">
               <span class="tl-marker" :class="phaseStatus(p)" aria-hidden="true">{{ phaseGlyph(p) }}</span>
               <div class="tl-content">
@@ -1934,11 +1925,12 @@ document.addEventListener('visibilitychange', () => {
             </div>
             <!-- 완료 터미널 노드 — backend 실제 completion semantic. completed_unverified를
                  ✓로 위장하지 않는다(검증 불완전은 !). live done 이벤트에서만(재구성 시엔 요약 본문). -->
-            <div v-if="completionNode(m.finalStatus) && !showResultCard(m, i)" class="tl-node tl-terminal" :class="completionNode(m.finalStatus).cls">
+            <div v-if="completionNode(m.finalStatus)" class="tl-node tl-terminal" :class="completionNode(m.finalStatus).cls">
               <span class="tl-marker" :class="completionNode(m.finalStatus).cls" aria-hidden="true">{{ completionNode(m.finalStatus).glyph }}</span>
               <div class="tl-content">
                 <div class="tl-head"><span class="tl-agent">{{ completionNode(m.finalStatus).label }}</span></div>
               </div>
+            </div>
             </div>
             </div>
             </div>
