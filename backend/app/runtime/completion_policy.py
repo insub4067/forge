@@ -50,6 +50,25 @@ def _blocking_reason(status: str, gstate: str, vstate: str) -> str:
     return "일부 요구사항 미검증"
 
 
+# Task IR intent 중 조회·설명·리뷰·대화(비-mutation). 이 작업들은 독립 verification이
+# NOT_APPLICABLE이다 — 조회 자체가 evidence다. code_change·other(모호)는 제외(mutation 정책 유지).
+READ_ONLY_INTENTS = frozenset({"question", "conversation", "investigation", "review"})
+
+
+def is_read_only_completion(intent: str, files_changed: list) -> bool:
+    """이 run이 'verification 불필요한 read-only 성공'인가 — NOT_APPLICABLE 판정.
+
+    intent가 조회·설명·리뷰이고 **실제 파일 변경이 없으면** True. read-only 요청은 성공한 tool
+    실행 자체가 evidence라 독립 verification이 필요 없다(completed).
+
+    핵심 안전장치: intent가 read-only여도 files_changed가 있으면(intent 오분류로 실제 mutation
+    발생) False를 돌려 mutation 검증 정책으로 폴백한다 — '완료라 말했지만 실제로 코드를 바꿨는데
+    검증 안 함'이라는 false_completion을 막는다. NOT_APPLICABLE ≠ UNAVAILABLE:
+    전자는 검증이 필요 없는 성공, 후자는 검증이 필요했으나 못 한 것(completed_unverified).
+    """
+    return intent in READ_ONLY_INTENTS and not files_changed
+
+
 def resolve_completion_verification(gstate: str, vstate: str,
                                     requirement_gap: bool = False) -> str:
     """최종 완료 상태를 결정한다(순수 함수 — 이 프로젝트의 핵심 invariant).

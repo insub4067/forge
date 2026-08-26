@@ -31,6 +31,8 @@ from .completion_policy import (  # noqa: F401
     _coverage_kind,
     _blocking_reason,
     resolve_completion_verification,
+    is_read_only_completion,
+    READ_ONLY_INTENTS,
     _clamp_task_status,
     _clamp_gate_status,
 )
@@ -162,6 +164,7 @@ class AgentRuntime:
         # 세션별 Task IR 요구사항(관찰용) — 완료 시 gate와 대조해 traceability를 낸다.
         # ponytail: in-memory, resume 시 유실 허용(완료 시 gate 대조에 쓰고 pop, 영속 불요).
         self._task_ir_reqs: dict[str, list] = {}
+        self._task_ir_intent: dict[str, str] = {}   # session_id → Task IR intent(read-only 판정용)
         # 세션별 라이브 상태 — 스트림이 끊겨도 언제나 조회 가능해야 한다.
         # {role, last_event, ts(monotonic), waiting_for, pending}
         self._status: dict[str, dict] = {}
@@ -743,6 +746,7 @@ class AgentRuntime:
             d = ir.to_dict()
             if session_id:
                 self._task_ir_reqs[session_id] = d.get("requirements", [])
+                self._task_ir_intent[session_id] = str(d.get("intent", ""))
             await send("task_ir", {"task_ir": d})
         return ir
 
@@ -2212,6 +2216,7 @@ class AgentRuntime:
                 # Task IR requirement ↔ gate 대조. Task IR이 있을 때만(완료 판정에도 반영됨).
                 # false_completion(요구사항을 놓친 채 완료) 후보를 드러낸다.
                 _reqs = self._task_ir_reqs.pop(session_id, None)
+                self._task_ir_intent.pop(session_id, None)
                 if _reqs:
                     await send("traceability", traceability.compute_traceability(_reqs, _gates))
             # done 이벤트를 보내면서 세션 final_status를 영속화(성공 정의·집계 기준).
@@ -2292,7 +2297,10 @@ class AgentRuntime:
         # 얻는 게 없고, 대화를 억지 requirement로 뽑아 traceability를 false_completion 후보로
         # 오염시켰다(실측: chat 세션 4턴 전부). 여기(route_kind=="code" 확정)서만 돌린다.
         await self._maybe_interpret(full_request, send, session_id)
-        req_block = _requirements_block(
+        # read-only 조회·설명·리뷰(mutation 아님)는 verification gate가 필요 없다 — req_block을
+        # 주입하지 않아 모델이 gate를 만들지 않게 한다(불필요한 '미검증' 게이트 방지).
+        _ir_intent = (self._task_ir_intent.get(session_id, "") if session_id else "")
+        req_block = "" if _ir_intent in READ_ONLY_INTENTS else _requirements_block(
             self._task_ir_reqs.get(session_id) if session_id else None)
 
         # 1. 에이전트 모드 결정 — 사용자 명시(multi/single)가 최우선, auto는 복잡도 기반 자동.
@@ -2488,10 +2496,19 @@ class AgentRuntime:
         _reqs = self._task_ir_reqs.get(session_id) if session_id else None
         _trace = (traceability.compute_traceability(_reqs, await store.list_gates(session_id))
                   if _reqs else None)
-        final = resolve_completion_verification(
-            gstate, vstate, bool(_trace and _trace["false_completion_candidate"]))
-        if gstate == "none" and vstate != "passed":
-            await send("verify_unavailable", {"report": report[:400]})
+        # Read-only 조회·설명·리뷰(mutation 아님)는 독립 verification이 NOT_APPLICABLE이다.
+        # 이 지점까지 왔다는 것 = developer가 정상 종료 + verify/gate가 failed 아님(위에서 early-return).
+        # 성공한 tool 실행 자체가 evidence이므로 completed로 본다. 단 실제 파일 변경(files_changed)이
+        # 있으면 intent 오분류로 판단해 mutation 정책으로 폴백한다(false_completion 방지 — 핵심 불변식).
+        _ir_intent = (self._task_ir_intent.get(session_id, "") if session_id else "")
+        _read_only = is_read_only_completion(_ir_intent, state["files_changed"])
+        if _read_only:
+            final = "completed"
+        else:
+            final = resolve_completion_verification(
+                gstate, vstate, bool(_trace and _trace["false_completion_candidate"]))
+            if gstate == "none" and vstate != "passed":
+                await send("verify_unavailable", {"report": report[:400]})
         summary = await self._completion_summary(
             session_id, final, gstate, vstate, istate, len(state["files_changed"]),
             _untraced_requirements(_reqs, _trace))
