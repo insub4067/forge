@@ -13,6 +13,7 @@ import MenuPanel from './components/MenuPanel.vue'
 import SessionDetailPanel from './components/SessionDetailPanel.vue'
 import FileBrowserPanel from './components/FileBrowserPanel.vue'
 import AgentCrewPanel from './components/AgentCrewPanel.vue'
+import ActivityDetailPanel from './components/ActivityDetailPanel.vue'
 import FsIcon from './components/FsIcon.vue'
 import { balance as adminBalance, loadBalance } from './store'
 import { isOpenSwipe } from './lib/drawerDrag.js'
@@ -994,12 +995,6 @@ function startPhase(m, role = '', model = '') {
 
 // 도구 항목의 안정 key — 최근 N개만 보여줄 때 인덱스 key로는 DOM이 잘못 재사용된다.
 let toolSeq = 0
-// 기본 노출 개수. 실행 중인 도구는 항상 마지막이라 이 창에 들어온다.
-const ACTIVITY_LIMIT = 4
-
-function visibleTools(p) {
-  return p.showAll || p.tools.length <= ACTIVITY_LIMIT ? p.tools : p.tools.slice(-ACTIVITY_LIMIT)
-}
 
 function activePhase(m) {
   if (!m.phases.length) return startPhase(m)
@@ -1021,16 +1016,15 @@ function phaseStatus(p) {
   return 'done'
 }
 
+// Timeline 노드에 "문제 N" — 실패한 도구 수. 실패를 상세에만 숨기지 않는다.
+function phaseErrorCount(p) {
+  return (p.tools || []).filter((t) => t.status === 'error').length
+}
+
 // 상태를 색이 아니라 '형태'로 — 다크모드 가독성. ● 진행 / ✓ 성공 / ! 실패.
 function phaseGlyph(p) {
   const s = phaseStatus(p)
   return s === 'running' ? '●' : s === 'error' ? '!' : '✓'
-}
-
-// 추론 disclosure 헤더에 "· N단락" — 빈 줄로 구분된 블록 수(없으면 0 → 표기 생략).
-function paraCount(t) {
-  if (!t) return 0
-  return String(t).split(/\n\s*\n/).filter((s) => s.trim()).length
 }
 
 // 이 assistant 메시지가 Agent 활동(도구·추론)을 포함하는가. ✓ 등 상태 기호는 Agent Activity
@@ -1120,16 +1114,29 @@ function approvalBody(args) {
   return ''
 }
 
-function diffLines(diff) {
-  return diff.split('\n')
+// Timeline 항목을 탭하면 여는 Detail Surface. 상세(추론·도구 결과·검증)는 여기서만 렌더한다.
+// detail = { phase, message, gates } 스냅샷. gates는 최신 메시지일 때만 실어 과거 메시지에 현재
+// 세션 게이트가 잘못 붙는 것을 막는다.
+const detail = ref(null)
+let detailReturnEl = null
+function phaseHasDetail(p) {
+  return !!((p.tools && p.tools.length) || p.thinking)
 }
+function openDetail(m, p) {
+  if (!phaseHasDetail(p)) return
+  detailReturnEl = document.activeElement
+  const isLast = messages.value[messages.value.length - 1] === m
+  detail.value = { phase: p, message: m, gates: isLast ? gates.value : [] }
+  nextTick(() => detailPanelEl.value?.focus())
+}
+function closeDetail() {
+  detail.value = null
+  const el = detailReturnEl
+  detailReturnEl = null
+  if (el && typeof el.focus === 'function') el.focus()
+}
+const detailPanelEl = ref(null)
 
-function diffClass(line) {
-  if (line.startsWith('+') && !line.startsWith('+++')) return 'add'
-  if (line.startsWith('-') && !line.startsWith('---')) return 'del'
-  if (line.startsWith('@@')) return 'hunk'
-  return ''
-}
 function handleEvent(evt, assistant) {
   // seq dedup: SSE와 폴링이 같은 seq를 쓰므로, 이미 적용한 seq 이하는 무시한다.
   // text_delta는 content를 누적하므로 중복 적용 시 텍스트가 두 배가 된다.
@@ -1566,6 +1573,10 @@ onMounted(async () => {
   const applyWide = () => { isWide.value = mq.matches }
   applyWide()
   mq.addEventListener('change', applyWide)
+  // Detail Surface: Escape로 닫기(dialog 접근성).
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && detail.value) { e.preventDefault(); closeDetail() }
+  })
   loadBalance() // 앱 실행 시 잔액 최초 1회 fetch(전역 상태로 공유)
   startHealthPoll() // 서버 도달성 상시 감시 — 먹통이면 배너로 알린다
   loadHomePath() // 워크스페이스 미설정(홈) 판별 기준
@@ -1724,62 +1735,34 @@ document.addEventListener('visibilitychange', () => {
             <div v-for="(p, pi) in m.phases" :key="pi" class="tl-node" :class="phaseStatus(p)">
               <span class="tl-marker" :class="phaseStatus(p)" aria-hidden="true">{{ phaseGlyph(p) }}</span>
               <div class="tl-content">
+              <!-- phase 헤더 — 상세(추론·도구 호출·결과)가 있으면 탭해서 Detail Surface를 연다.
+                   Timeline엔 흐름·요약만: 긴 추론·도구 결과는 여기서 펼치지 않는다. -->
               <div
-                v-if="p.tools.length || p.thinking"
-                class="tl-head"
-                @click="p.collapsed = !p.collapsed"
+                v-if="phaseHasDetail(p)"
+                class="tl-head tappable"
+                role="button"
+                tabindex="0"
+                aria-haspopup="dialog"
+                @click="openDetail(m, p)"
+                @keydown.enter.prevent="openDetail(m, p)"
+                @keydown.space.prevent="openDetail(m, p)"
               >
                 <span class="tl-agent">{{ phaseLabel(p) }}</span>
                 <span v-if="p.model" class="tl-model">{{ shortModel(p.model) }}</span>
                 <span v-if="p.running && runningTool(p)" class="tl-state">{{ runningTool(p).name }} 실행 중…</span>
                 <!-- 검증 단계(테스트/요구사항/회귀/복구)는 프로세스가 보낸 이벤트로만 표시한다. -->
                 <span v-else-if="m.verifyPhase && pi === m.phases.length - 1" class="tl-state">{{ m.verifyPhase }}<span class="typing-dots"><i></i><i></i><i></i></span></span>
-                <span v-else-if="p.tools.length" class="tl-count">도구 {{ p.tools.length }}</span>
-                <svg class="tl-chevron" :class="{ open: p.collapsed }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                <span v-else-if="p.running" class="tl-state">생각 중<span class="typing-dots"><i></i><i></i><i></i></span></span>
+                <template v-else>
+                  <span v-if="phaseErrorCount(p)" class="tl-problem">문제 {{ phaseErrorCount(p) }}</span>
+                  <span v-if="p.thinking" class="tl-count">추론</span>
+                  <span v-if="p.tools.length" class="tl-count">도구 {{ p.tools.length }}</span>
+                </template>
+                <svg class="tl-open" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
               </div>
 
+              <!-- 핵심 결과 요약 — phase의 응답 본문은 Timeline에 남긴다(상세로 숨기지 않는다). -->
               <div v-if="p.text" class="text" v-html="renderMarkdown(p.text)"></div>
-
-              <!-- 추론 disclosure — 기본 접힘(실행 중이어도 자동으로 펼치지 않는다). 헤더가
-                   클릭 가능한 disclosure control임을 chevron·aria-expanded로 명확히 한다. -->
-              <div v-if="p.thinking" class="reasoning">
-                <button
-                  class="reasoning-toggle"
-                  :aria-expanded="p.thinkOpen ? 'true' : 'false'"
-                  @click="p.thinkOpen = !p.thinkOpen"
-                >
-                  <svg class="reasoning-chevron" :class="{ open: p.thinkOpen }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
-                  <span class="reasoning-label">추론<span v-if="paraCount(p.thinking)" class="reasoning-count"> · {{ paraCount(p.thinking) }}단락</span></span>
-                  <span v-if="p.running && !p.text && !p.tools.length" class="reasoning-live">작성 중<span class="typing-dots"><i></i><i></i><i></i></span></span>
-                </button>
-                <div v-if="p.thinkOpen" class="reasoning-body text" v-html="renderMarkdown(p.thinking)"></div>
-              </div>
-
-              <template v-if="!p.collapsed">
-                <button
-                  v-if="!p.showAll && p.tools.length > ACTIVITY_LIMIT"
-                  class="activity-more"
-                  @click.stop="p.showAll = true"
-                >이전 활동 {{ p.tools.length - ACTIVITY_LIMIT }}개 보기</button>
-
-                <details
-                  v-for="t in visibleTools(p)"
-                  :key="t.id"
-                  class="tool"
-                  :class="t.status"
-                  :open="t.status === 'running'"
-                >
-                  <summary>
-                    <span class="tool-dot" :class="t.status"></span>
-                    <span class="tname">{{ t.name }}</span>
-                    <span class="targs">{{ summarizeArgs(t.args) }}</span>
-                  </summary>
-                  <div v-if="t.diff" class="diff">
-                    <div v-for="(line, li) in diffLines(t.diff)" :key="li" :class="diffClass(line)">{{ line || ' ' }}</div>
-                  </div>
-                  <pre v-else>{{ t.status === 'running' ? '실행 중…' : (t.result || '(출력 없음)') }}</pre>
-                </details>
-              </template>
               </div>
             </div>
             <!-- 완료 터미널 노드 — backend 실제 completion semantic. completed_unverified를
@@ -1937,6 +1920,28 @@ document.addEventListener('visibilitychange', () => {
       </div>
       </div>
     </footer>
+
+    <!-- Agent 활동 Detail Surface — 모바일=bottom sheet / 데스크톱=우측 side panel.
+         내용은 ActivityDetailPanel 하나를 공유(두 번 구현 금지). Escape·overlay 클릭으로 닫힘. -->
+    <div v-if="detail" class="detail-surface" :class="{ wide: isWide }" @click="closeDetail">
+      <div
+        ref="detailPanelEl"
+        class="detail-dock"
+        role="dialog"
+        aria-modal="true"
+        aria-label="활동 상세"
+        tabindex="-1"
+        @click.stop
+      >
+        <ActivityDetailPanel
+          :phase="detail.phase"
+          :message="detail.message"
+          :gates="detail.gates"
+          :render-markdown="renderMarkdown"
+          @close="closeDetail"
+        />
+      </div>
+    </div>
 
     <!-- 모델 선택 시트(클로드식) -->
     <div v-if="showModelPick" class="sheet-overlay" @click="showModelPick = false">
