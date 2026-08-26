@@ -1602,46 +1602,7 @@ watch(showRooms, (v) => {
 
 applyTheme(theme.value)
 
-// ── safe-area / 키보드 디버그 오버레이(임시) — 실기기 실제 값을 화면에 띄워 추측 없이 진단.
-// localStorage.forge_sa_debug='1'이면 표시. 해결되면 제거한다.
-const saDebug = ref(true)  // 임시 geometry 진단 — 확인 후 제거
-const saInfo = ref({ top: 0, bottom: 0, innerH: 0, vvH: 0, vvTop: 0, kbd: false })
-function measureSafeArea() {
-  const probe = document.createElement('div')
-  probe.style.cssText = 'position:fixed;top:0;left:0;visibility:hidden;'
-    + 'padding:env(safe-area-inset-top) env(safe-area-inset-right) '
-    + 'env(safe-area-inset-bottom) env(safe-area-inset-left);'
-  document.body.appendChild(probe)
-  const cs = getComputedStyle(probe)
-  const top = parseFloat(cs.paddingTop) || 0
-  const bottom = parseFloat(cs.paddingBottom) || 0
-  probe.remove()
-  const vv = window.visualViewport
-  const rb = (sel) => {
-    const el = document.querySelector(sel)
-    return el ? Math.round(el.getBoundingClientRect().bottom) : -1
-  }
-  saInfo.value = {
-    top: Math.round(top), bottom: Math.round(bottom),
-    innerH: window.innerHeight,
-    vvH: vv ? Math.round(vv.height) : 0,
-    vvTop: vv ? Math.round(vv.offsetTop) : 0,
-    kbd: vv ? (window.innerHeight - vv.height) > 80 : false,
-    footerB: rb('footer'),
-    wrapB: rb('.composer-wrap'),
-    cardB: rb('.composer'),
-  }
-}
-
 onMounted(async () => {
-  if (saDebug.value) {
-    measureSafeArea()
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', measureSafeArea)
-      window.visualViewport.addEventListener('scroll', measureSafeArea)
-    }
-    window.addEventListener('resize', measureSafeArea)
-  }
   // 넓은 화면(맥)에선 사이드바를 상시 렌더(고정 또는 hover 노출). 좁으면 오버레이 드로어.
   const mq = window.matchMedia('(min-width: 900px)')
   const applyWide = () => { isWide.value = mq.matches }
@@ -1923,12 +1884,6 @@ document.addEventListener('visibilitychange', () => {
       <button v-if="!isAtBottom" class="jump-bottom" @click="jumpToBottom" aria-label="맨 아래로">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
       </button>
-    </div>
-
-    <div v-if="saDebug" class="sa-debug" @click="saDebug = false">
-      SA bottom {{ saInfo.bottom }} · innerH {{ saInfo.innerH }} · vvH {{ saInfo.vvH }}<br>
-      footer.b {{ saInfo.footerB }} · wrap.b {{ saInfo.wrapB }} · card.b {{ saInfo.cardB }}<br>
-      footer==innerH? {{ saInfo.footerB === saInfo.innerH ? 'Y' : 'N' }} · card→bottom {{ saInfo.innerH - saInfo.cardB }} · kbd {{ saInfo.kbd ? 'Y' : 'N' }}
     </div>
 
     <div v-if="viewerImages.length" class="image-viewer" @click="closeViewer"

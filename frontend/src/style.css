@@ -4615,17 +4615,3 @@ button {
   .crew-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .crew-body { padding: 20px 28px 32px; }
 }
-
-/* safe-area 진단 오버레이(임시) — 실기기 값 확인용. 해결 후 제거. */
-.sa-debug {
-  position: fixed;
-  top: calc(4px + env(safe-area-inset-top));
-  left: 8px;
-  z-index: 9999;
-  background: rgba(0, 0, 0, 0.82);
-  color: #7CFC98;
-  font: 11px/1.5 ui-monospace, Menlo, monospace;
-  padding: 6px 9px;
-  border-radius: 8px;
-  pointer-events: auto;
-}
