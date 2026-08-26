@@ -88,8 +88,8 @@ def test_other_runs_failure_is_not_mine():
 
 
 def test_decision_mapping_is_closed():
-    from app.db import store
-    assert store._DECISIONS == {"approve": "approved", "ignore": "ignored", "rollback": "pending"}
+    from app.db import approvals
+    assert approvals._DECISIONS == {"approve": "approved", "ignore": "ignored", "rollback": "pending"}
 
 
 if __name__ == "__main__":
