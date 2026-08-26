@@ -1027,6 +1027,18 @@ function phaseGlyph(p) {
   return s === 'running' ? '●' : s === 'error' ? '!' : '✓'
 }
 
+// 추론 disclosure 헤더에 "· N단락" — 빈 줄로 구분된 블록 수(없으면 0 → 표기 생략).
+function paraCount(t) {
+  if (!t) return 0
+  return String(t).split(/\n\s*\n/).filter((s) => s.trim()).length
+}
+
+// 이 assistant 메시지가 Agent 활동(도구·추론)을 포함하는가. ✓ 등 상태 기호는 Agent Activity
+// 전용이다 — 순수 대화 답변(도구 없는 텍스트)은 상태 기호 없이 본문만 보여준다.
+function hasActivity(m) {
+  return (m.phases || []).some((p) => (p.tools && p.tools.length) || p.thinking)
+}
+
 // 작성 중 어떤 모델이 답하는지 한눈에 — 모델명을 짧은 배지로.
 function shortModel(m) {
   if (!m) return ''
@@ -1684,9 +1696,15 @@ document.addEventListener('visibilitychange', () => {
           </template>
 
           <template v-if="m.role === 'assistant'">
+            <!-- 순수 대화 답변(도구·추론 없음) — 상태 기호 없이 본문만. ✓는 Agent Activity 전용. -->
+            <template v-if="!hasActivity(m)">
+              <template v-for="(p, pi) in m.phases" :key="'txt' + pi">
+                <div v-if="p.text" class="text" v-html="renderMarkdown(p.text)"></div>
+              </template>
+            </template>
             <!-- Agent Activity Timeline — 세로 rail이 시간축+인과를 나타낸다. 각 phase가 노드,
                  상태는 형태(● 진행 / ✓ 성공 / ! 실패)로 구별한다(색은 보조). -->
-            <div v-if="m.phases.length" class="timeline">
+            <div v-else-if="m.phases.length" class="timeline">
             <div v-for="(p, pi) in m.phases" :key="pi" class="tl-node" :class="phaseStatus(p)">
               <span class="tl-marker" :class="phaseStatus(p)" aria-hidden="true">{{ phaseGlyph(p) }}</span>
               <div class="tl-content">
@@ -1706,12 +1724,19 @@ document.addEventListener('visibilitychange', () => {
 
               <div v-if="p.text" class="text" v-html="renderMarkdown(p.text)"></div>
 
-              <!-- 추론 영역은 phase collapse와 무관하게 항상 노출(닫힌 상태). 클릭하면 펼침. -->
-              <div v-if="p.thinking" class="thinking" :class="{ open: p.thinkOpen }" @click="p.thinkOpen = !p.thinkOpen">
-                <div class="thinking-summary">
-                  추론<template v-if="p.running && !p.text && !p.tools.length"> 작성 중<span class="typing-dots"><i></i><i></i><i></i></span></template>
-                </div>
-                <div v-if="p.thinkOpen" class="thinking-body">{{ p.thinking }}</div>
+              <!-- 추론 disclosure — 기본 접힘(실행 중이어도 자동으로 펼치지 않는다). 헤더가
+                   클릭 가능한 disclosure control임을 chevron·aria-expanded로 명확히 한다. -->
+              <div v-if="p.thinking" class="reasoning">
+                <button
+                  class="reasoning-toggle"
+                  :aria-expanded="p.thinkOpen ? 'true' : 'false'"
+                  @click="p.thinkOpen = !p.thinkOpen"
+                >
+                  <svg class="reasoning-chevron" :class="{ open: p.thinkOpen }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                  <span class="reasoning-label">추론<span v-if="paraCount(p.thinking)" class="reasoning-count"> · {{ paraCount(p.thinking) }}단락</span></span>
+                  <span v-if="p.running && !p.text && !p.tools.length" class="reasoning-live">작성 중<span class="typing-dots"><i></i><i></i><i></i></span></span>
+                </button>
+                <div v-if="p.thinkOpen" class="reasoning-body text" v-html="renderMarkdown(p.thinking)"></div>
               </div>
 
               <template v-if="!p.collapsed">
@@ -1790,10 +1815,9 @@ document.addEventListener('visibilitychange', () => {
             </div>
 
             <div v-if="hasAssistantText(m) && !isLiveTurn(i)" class="msg-actions">
-              <button class="msg-action" @click="copyMessage(m)">
+              <button class="msg-action icon-only" @click="copyMessage(m)" :aria-label="m.copied ? '복사됨' : '복사'" :title="m.copied ? '복사됨' : '복사'">
                 <svg v-if="!m.copied" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-                {{ m.copied ? '복사됨' : '복사' }}
               </button>
             </div>
           </template>

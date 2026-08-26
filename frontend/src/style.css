@@ -3224,9 +3224,11 @@ button {
 }
 .text pre code { color: var(--text); font-size: 13px; line-height: 1.6; }
 .text code {
-  background: var(--panel-2);
-  color: #f2c9b8;
-  font-size: 13.5px;
+  background: var(--accent-soft);   /* 테마 무관 은은한 warm 틴트 */
+  color: var(--text);               /* 항상 충분한 대비 — 라이트모드에서 disabled처럼 안 보임 */
+  padding: 1.5px 6px;
+  border-radius: 5px;
+  font-size: 13px;
 }
 .text a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .text hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
@@ -3250,6 +3252,8 @@ button {
   font-weight: 500;
 }
 .msg-action:active { background: var(--panel); }
+/* 아이콘 전용 — 텍스트 없이 정사각 버튼(복사됨은 체크 아이콘으로 피드백). */
+.msg-action.icon-only { gap: 0; padding: 8px; width: 36px; height: 36px; justify-content: center; }
 
 .running-banner {
   display: flex;
@@ -3933,6 +3937,40 @@ button {
   .tl-marker.running { animation: none; }
   .tl-chevron { transition: none; }
 }
+
+/* 추론(reasoning) disclosure — Phase summary보다 낮은 hierarchy. 기본 접힘, 헤더가 명확한
+   disclosure control(chevron + aria-expanded). 원문은 markdown 유지하되 secondary typography. */
+.reasoning { margin: 5px 0 2px; }
+.reasoning-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  padding: 3px 2px;
+  margin: 0;
+  min-height: 26px;      /* 터치 타깃 */
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.reasoning-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.reasoning-chevron { flex-shrink: 0; color: var(--muted); transition: transform 0.15s ease; }
+.reasoning-chevron.open { transform: rotate(90deg); }
+.reasoning-count { opacity: 0.72; }
+.reasoning-live { color: var(--accent); margin-left: 4px; }
+.reasoning-body.text {
+  margin: 2px 0 4px 5px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+  color: var(--muted);   /* 채팅 본문보다 낮은 hierarchy */
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.reasoning-body.text p { margin: 6px 0; }
+.reasoning-body.text p:first-child { margin-top: 0; }
+@media (prefers-reduced-motion: reduce) { .reasoning-chevron { transition: none; } }
 
 /* 헤더 방 모드 세그먼트 — 작업(work) / 채팅(chat) */
 .mode-seg {
