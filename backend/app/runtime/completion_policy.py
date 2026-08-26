@@ -135,7 +135,12 @@ def resolve_completion_verification(gstate: str, vstate: str,
         return "completed_unverified"
     if gstate == "none":
         return "completed_unverified"
-    if gstate == "passed" and vstate == "passed":
+    # 요구사항 게이트가 전부 통과했으면 완료다. generic test/build가 'unavailable'(돌릴 테스트가
+    # 없음)이라고 강등하지 않는다 — 요구사항은 게이트로 이미 검증됐고, 없는 테스트로 확인할 회귀도
+    # 없다. generic이 'failed'면 caller가 그 전에 verification_failed로 빠지므로 여기 도달 시
+    # vstate ∈ {passed, unavailable}뿐이다(agent.run의 strict 게이트 흐름). gstate가 passed가
+    # 아니면(unavailable/partial 등) 아래에서 강등 — false_completion 방어는 그대로다.
+    if gstate == "passed":
         return "completed"
     return "completed_unverified"
 

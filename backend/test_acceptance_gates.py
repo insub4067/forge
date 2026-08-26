@@ -391,7 +391,9 @@ def test_resolve_completion_verification_invariant():
     assert r("none", "passed") == "completed_unverified"
     assert r("none", "unavailable") == "completed_unverified"
     assert r("passed", "passed") == "completed"
-    assert r("passed", "unavailable") == "completed_unverified"
+    # 요구사항 게이트 전부 통과 + generic 없음(돌릴 test/build 없음) → 완료. 요구사항은
+    # 게이트로 검증됐고 없는 테스트로 확인할 회귀도 없다(vstate failed는 상위에서 차단됨).
+    assert r("passed", "unavailable") == "completed"
     assert r("partial", "passed") == "completed_unverified"
     assert r("unavailable", "passed") == "completed_unverified"
     # gate 없음은 실패가 아니다
