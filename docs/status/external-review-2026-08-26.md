@@ -177,3 +177,22 @@ README는 backend 테스트 116개 통과라고 적고 있으나, 저장소의 �
 - 런타임 프롬프트(`docs/agents/*.md`)의 내용.
 
 우선 `gate_coverage.py`를 최근 로그에 돌려 실측치를 이 문서에 덧붙이는 것을 권한다. 그 숫자 없이는 P0-A가 "이론적 구멍"인지 "현재 진행 중인 오염"인지 구분되지 않는다.
+
+---
+
+## 대응 현황 (2026-08-26, 코드가 authority)
+
+리뷰 후 착수 결과. 각 항목의 근거는 커밋·테스트다.
+
+| 항목 | 상태 | 근거 |
+|---|---|---|
+| **P0-A** trivial 게이트 탐지 | ✅ | `verification.make_prechange_worktree` — HEAD 격리 워크트리에서 게이트를 먼저 실행, 변경 전에도 passed면 `unavailable` 강등. `test_gate_isolation` |
+| **P0-B** 검증 격리(임시조치) | ✅ | 게이트 명령 전후 `_worktree_git_hash` 비교 → 검증이 소스 바꾸면 `unavailable`. 본체(사본 검증)는 후속 |
+| **P0-C** bind/README | ✅(부분) | README·실행 서버 `127.0.0.1`. `require_auth` 기본 반전은 운영자(Cloudflare Access 앞단) 결정으로 False 유지. #3(경로 화이트리스트)·#4(신뢰경계 문서) 후속 |
+| **P1-D** RSI 통계 유의성 | ✅ | `rsi.wilson_lower`·`HOLDOUT_CODES`·`min_samples`. `bench.aggregate`가 promotion/holdout 분리. `test_rsi_promotion` |
+| **P1-E** 벤치/운영 모드 대조 | ✅ | `bench --json`에 `sandbox_mode` 기록, `promotion_gate`가 모드 다르면 REJECT. config 기본 docker vs 운영 host 일치는 배포 결정으로 별도 |
+| **P1-F** Reviewer 검출력 harness | ✅ | `reviewer_eval.py`(R 시리즈) — `--self-test` 무료, `--run` LLM 실측. 실제 검출률 수치는 `--run` 후 존치/승급/제거 결정 |
+| **P2-H** 문서 수치 | ✅ | README→리포트 링크, `work-status.md` 287 passed |
+
+**후속(미착수)**: P0-A/B 본체(`gate_validity` telemetry 지표·사본 기반 검증), P0-C #3·4, P2-G(`run()` 분해).
+**실측 대기**: `reviewer_eval.py --run`(검출률), `gate_coverage` trivial 비율(P0-A 도입 후 관측).
