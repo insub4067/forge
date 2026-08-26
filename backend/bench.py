@@ -135,6 +135,25 @@ def aggregate(results: list[dict]) -> dict:
         "cost_per_task": round(tot_cost / tot_n, 6) if tot_n else None,
     }
 
+    # ── 게이트 false-negative 진단(P0 #1) ──
+    # "약한 게이트(맹점)" vs "게이트 없음"을 구분한다: false_completion(완료 주장·checker 실패)이
+    # gate 전부 PASS면 게이트가 요구사항을 못 잡은 맹점, gate 0이면 검증 자체가 없던 것.
+    # Developer 자기 맹점 가설의 크기를 계량 — pro 게이트 설계 분리 여부를 데이터로 판단하기 위함.
+    fc = [r for r in results if not r["success"] and fs(r) in _COMPLETED_STATES]
+    blind_pass = sum(1 for r in fc if (r.get("gates_total") or 0) > 0
+                     and r.get("gates_passed") == r.get("gates_total"))
+    no_gate = sum(1 for r in fc if not (r.get("gates_total") or 0))
+    g_total = sum(r.get("gates_total", 0) for r in results)
+    g_traced = sum(r.get("gates_traced", 0) for r in results)
+    out["gate_diagnosis"] = {
+        "false_completion": len(fc),
+        "blind_pass": blind_pass,                  # gate 전부 통과했는데 실제 실패 = 게이트 맹점
+        "no_gate": no_gate,                        # gate 없이 완료 주장
+        "other": len(fc) - blind_pass - no_gate,   # 일부 gate만 통과 등
+        "gate_coverage": _pct(g_traced, g_total),  # 요구사항에 추적된 gate 비율
+        "gates_total": g_total,
+    }
+
     # ── RSI 승격 판정용 분리 집계(P1-D): promotion set(판정용)과 holdout(판정에 절대 안 씀) ──
     # overall은 하위호환으로 전체(25태스크) 유지. promotion_gate는 아래 promotion/holdout을 쓴다.
     from rsi import is_holdout
@@ -175,6 +194,10 @@ def _print_report(agg: dict, variant: str):
           f"({o['verified_success']}/{o['total_tasks']})")
     print(f"false_completion_rate = {o['false_completion_rate']}  "
           f"(완료 주장했으나 checker 실패 {o['false_completion']}건 — 가장 위험)")
+    gd = agg.get("gate_diagnosis") or {}
+    print(f"게이트 진단           = false_completion {gd.get('false_completion', 0)}건 중 "
+          f"맹점(gate 전부 통과) {gd.get('blind_pass', 0)} · gate없음 {gd.get('no_gate', 0)} · "
+          f"기타 {gd.get('other', 0)}  | gate 추적률 {gd.get('gate_coverage', 0)}")
     print(f"cost_per_verified_task = {cpv}")
     print(f"false_failure_rate    = {o['false_failure_rate']}  (실제로 됐는데 실패로 판정 {o['false_failure']}건)")
     print(f"\n상태: completed={o['completed']} completed_unverified={o['completed_unverified']} "
@@ -244,6 +267,12 @@ async def _run_one(task: dict, idx: int, keep: bool, tier: str = "auto") -> dict
             success = False
         rows = await store.session_agent_runs(sid)
         cost, priced, _ = sum_cost(rows)
+        # 게이트 false-negative 진단용: 완료를 주장했는데 checker가 실패했을 때(false_completion)
+        # gate가 전부 PASS(맹점)였는지 / 아예 없었는지 구분한다.
+        gate_rows = await store.list_gates(sid)
+        gates_total = len(gate_rows)
+        gates_passed = sum(1 for g in gate_rows if g["status"] == "passed")
+        gates_traced = sum(1 for g in gate_rows if g.get("requirement_id"))
         planner_tok = sum(r["prompt_tokens"] + r["completion_tokens"] for r in rows if r["role"] == "planner")
         total_tok = sum(r["prompt_tokens"] + r["completion_tokens"] for r in rows)
         prompt_tok = sum(r.get("prompt_tokens", 0) for r in rows)
@@ -260,6 +289,7 @@ async def _run_one(task: dict, idx: int, keep: bool, tier: str = "auto") -> dict
                   "prompt_tok": prompt_tok, "completion_tok": completion_tok,
                   "cache_hit": cache_hit, "cache_miss": cache_miss,
                   "tool_calls": tool_calls, "pro_escalated": pro_escalated,
+                  "gates_total": gates_total, "gates_passed": gates_passed, "gates_traced": gates_traced,
                   "session_id": sid}  # keep=True일 때 실패 chain을 이 세션에서 조회한다.
     if not keep:
         await _cleanup_session(sid)
@@ -315,9 +345,10 @@ def _self_test():
         # checker PASS + FORGE completed → verified success
         {"code": "T", "category": "c", "success": True, "cost": 0.01, "elapsed_s": 5.0,
          "forge_status": "completed", "prompt_tok": 10, "completion_tok": 2, "tool_calls": 3},
-        # checker FAIL + FORGE completed → FALSE COMPLETION(gate가 잘못 통과 — 최악)
+        # checker FAIL + FORGE completed → FALSE COMPLETION(gate 전부 통과 = 맹점 — 최악)
         {"code": "T", "category": "c", "success": False, "cost": 0.02, "elapsed_s": 6.0,
-         "forge_status": "completed", "pro_escalated": True},
+         "forge_status": "completed", "pro_escalated": True,
+         "gates_total": 2, "gates_passed": 2, "gates_traced": 2},
         # checker PASS + FORGE verification_failed → false failure(과소평가)
         {"code": "T", "category": "c", "success": True, "cost": 0.03, "elapsed_s": 7.0,
          "forge_status": "verification_failed"},
@@ -331,6 +362,10 @@ def _self_test():
     assert o["false_completion"] == 1 and o["false_completion_rate"] == 0.25, o
     assert o["false_failure"] == 1 and o["false_failure_rate"] == 0.25, o
     assert o["completed"] == 2 and o["completed_unverified"] == 1 and o["verification_failed"] == 1, o
+    # 게이트 진단: 유일한 false_completion이 gate 전부 통과 = 맹점 1건, gate없음 0건.
+    gd = conf["gate_diagnosis"]
+    assert gd["false_completion"] == 1 and gd["blind_pass"] == 1 and gd["no_gate"] == 0, gd
+    assert gd["gate_coverage"] == 1.0, gd   # 추적 2 / 총 2
     # cost_per_verified_task = 총비용 / verified success 수 = 0.10 / 2
     assert abs(o["cost_per_verified_task"] - (0.10 / 2)) < 1e-9, o
     assert o["pro_escalation_rate"] == 0.25 and o["human_interventions_per_task"] == 0.25, o
