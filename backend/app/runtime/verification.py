@@ -80,6 +80,31 @@ def classify_gate(rc: int, output: str, expected: str) -> tuple[str, str]:
     return "failed", reason
 
 
+async def _worktree_git_hash(ws: str):
+    """워크스페이스 현재 변경 상태 해시(porcelain + diff HEAD). git repo 아니거나 실패면 None.
+    gate 검증 명령 전후 비교로 '검증이 대상 소스를 바꿨는지'를 잡는다(P0-B: self-grading 우회 차단)."""
+    import hashlib
+
+    async def _g(*args, timeout=15):
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", ws, *args,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            return proc.returncode, out.decode(errors="replace")
+        except Exception:
+            return 1, ""
+
+    if not ws:
+        return None
+    rc, inside = await _g("rev-parse", "--is-inside-work-tree", timeout=8)
+    if rc != 0 or "true" not in inside:
+        return None
+    _, porc = await _g("status", "--porcelain")
+    _, diff = await _g("diff", "HEAD")
+    return hashlib.sha1((porc + "\x00" + diff).encode("utf-8", "replace")).hexdigest()
+
+
 async def verify_gates(ws: str, session_id: str, send: EventSink) -> tuple[str, str]:
     """각 gate의 verification_method를 실제 실행해 (state, report) 반환.
 
@@ -123,12 +148,19 @@ async def verify_gates(ws: str, session_id: str, send: EventSink) -> tuple[str, 
             resolved.append("unavailable")
             await send("gates_update", {"gates": await store.list_gates(session_id)})
             continue
+        _wt_before = await _worktree_git_hash(ws)
         rc, out = await _sh(method, ws)
+        _wt_after = await _worktree_git_hash(ws)
         evidence = json.dumps({
             "command": method, "exit_code": rc,
             "output_tail": out[-1500:], "expected": expected,
         }, ensure_ascii=False)
-        verdict, reason = classify_gate(rc, out, expected)
+        # P0-B: 검증 명령이 워크스페이스 소스를 바꿨으면(게이트 A가 게이트 B의 통과 조건을 만드는
+        # 자기충족 경로) passed로 인정하지 않고 unavailable로 강등한다 — 검증은 대상을 관찰만 해야 한다.
+        if (_wt_before is not None and _wt_after is not None and _wt_before != _wt_after):
+            verdict, reason = "unavailable", "검증 명령이 워크스페이스를 변경함 — 대상을 관찰만 해야 하므로 판정 보류"
+        else:
+            verdict, reason = classify_gate(rc, out, expected)
         await store.save_gate_result(session_id, g["id"], verdict, evidence, reason)
         labels.append(f"{g['title']}({verdict})")
         resolved.append(verdict)

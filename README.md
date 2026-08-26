@@ -75,7 +75,8 @@ Complexity is selected automatically today. `multi/single` override rules exist 
 - Mac host PTY terminal over WebSocket, screen polling, pointer/keyboard remote input, camera PoC
 - `FORGE_AUTH_TOKEN` protection for `/api/*` and `/uploads/*` when enabled
 
-The latest memory-hardening source commit reported **116 backend tests passing**.
+Backend test counts change often; see the authority doc for current numbers instead of a hardcoded
+value here: [`docs/status/work-status.md`](docs/status/work-status.md).
 
 ## Next Priorities
 
@@ -97,8 +98,13 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cp ../.env.example ../.env
-.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8790
+# 기본은 로컬 전용 바인딩(127.0.0.1) — LAN·외부 노출 없음.
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8790
 ```
+
+> ⚠️ `--host 0.0.0.0`(모든 인터페이스 노출)은 **인증을 켠 상태에서만** 쓴다(`FORGE_REQUIRE_AUTH=1`).
+> host 모드 셸/화면/카메라에 인증 없이 도달할 수 있으므로, 기본은 `127.0.0.1` + 필요 시 Cloudflare
+> Access 같은 앞단 인증을 둔다.
 
 Frontend:
 

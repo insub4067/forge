@@ -1,0 +1,68 @@
+"""P0-B: 게이트 검증 명령이 워크스페이스를 변경하면(자기충족 우회) 감지해 unavailable 강등한다.
+
+_worktree_git_hash가 검증 전후 워크스페이스 변경을 잡는지 검증한다(무LLM·무샌드박스). git repo가
+아니거나 실패하면 None(감지 불가). 실제 강등은 verify_gates에서 이 해시 비교로 이뤄진다.
+
+실행: cd backend && python -m pytest test_gate_isolation.py -q
+"""
+import asyncio
+import os
+import subprocess
+import tempfile
+
+from app.runtime.verification import _worktree_git_hash
+
+
+def _init_repo():
+    d = tempfile.mkdtemp()
+    subprocess.run(["git", "-C", d, "init", "-q"], check=True)
+    subprocess.run(["git", "-C", d, "config", "user.email", "t@t"], check=True)
+    subprocess.run(["git", "-C", d, "config", "user.name", "t"], check=True)
+    with open(os.path.join(d, "a.txt"), "w") as f:
+        f.write("orig\n")
+    subprocess.run(["git", "-C", d, "add", "."], check=True)
+    subprocess.run(["git", "-C", d, "commit", "-qm", "init"], check=True)
+    return d
+
+
+def test_hash_detects_verification_modifying_source():
+    """검증 명령이 기존 소스를 수정하면(게이트 A가 B의 통과조건을 만드는 경로) 해시가 바뀐다."""
+    d = _init_repo()
+    h1 = asyncio.run(_worktree_git_hash(d))
+    with open(os.path.join(d, "a.txt"), "w") as f:   # 검증 명령이 파일을 바꾼 상황
+        f.write("modified by verify\n")
+    h2 = asyncio.run(_worktree_git_hash(d))
+    assert h1 is not None and h2 is not None and h1 != h2
+
+
+def test_hash_detects_new_file_creation():
+    """검증 명령이 새 파일을 만든 경우도 감지."""
+    d = _init_repo()
+    h1 = asyncio.run(_worktree_git_hash(d))
+    with open(os.path.join(d, "planted.txt"), "w") as f:
+        f.write("x\n")
+    h2 = asyncio.run(_worktree_git_hash(d))
+    assert h1 != h2
+
+
+def test_hash_stable_when_verification_only_reads():
+    """검증이 관찰만 하면(파일 변경 없음) 해시는 그대로 → passed 판정을 막지 않는다."""
+    d = _init_repo()
+    h1 = asyncio.run(_worktree_git_hash(d))
+    subprocess.run(["git", "-C", d, "status"], capture_output=True)   # read-only
+    h2 = asyncio.run(_worktree_git_hash(d))
+    assert h1 == h2
+
+
+def test_hash_none_for_non_git_workspace():
+    """git repo가 아니면 None(감지 불가) — verify_gates는 이때 강등하지 않고 classify_gate로."""
+    d = tempfile.mkdtemp()
+    assert asyncio.run(_worktree_git_hash(d)) is None
+    assert asyncio.run(_worktree_git_hash("")) is None
+
+
+if __name__ == "__main__":
+    for name, fn in list(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            fn()
+    print("PASS — gate verification isolation (P0-B)")
