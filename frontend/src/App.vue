@@ -1604,7 +1604,7 @@ applyTheme(theme.value)
 
 // ── safe-area / 키보드 디버그 오버레이(임시) — 실기기 실제 값을 화면에 띄워 추측 없이 진단.
 // localStorage.forge_sa_debug='1'이면 표시. 해결되면 제거한다.
-const saDebug = ref(localStorage.getItem('forge_sa_debug') === '1')  // 진단용(기본 off, localStorage로 켬)
+const saDebug = ref(true)  // 임시 geometry 진단 — 확인 후 제거
 const saInfo = ref({ top: 0, bottom: 0, innerH: 0, vvH: 0, vvTop: 0, kbd: false })
 function measureSafeArea() {
   const probe = document.createElement('div')
@@ -1617,12 +1617,19 @@ function measureSafeArea() {
   const bottom = parseFloat(cs.paddingBottom) || 0
   probe.remove()
   const vv = window.visualViewport
+  const rb = (sel) => {
+    const el = document.querySelector(sel)
+    return el ? Math.round(el.getBoundingClientRect().bottom) : -1
+  }
   saInfo.value = {
     top: Math.round(top), bottom: Math.round(bottom),
     innerH: window.innerHeight,
     vvH: vv ? Math.round(vv.height) : 0,
     vvTop: vv ? Math.round(vv.offsetTop) : 0,
     kbd: vv ? (window.innerHeight - vv.height) > 80 : false,
+    footerB: rb('footer'),
+    wrapB: rb('.composer-wrap'),
+    cardB: rb('.composer'),
   }
 }
 
@@ -1919,9 +1926,9 @@ document.addEventListener('visibilitychange', () => {
     </div>
 
     <div v-if="saDebug" class="sa-debug" @click="saDebug = false">
-      SA top {{ saInfo.top }} · bottom {{ saInfo.bottom }}<br>
-      innerH {{ saInfo.innerH }} · vvH {{ saInfo.vvH }} · vvTop {{ saInfo.vvTop }}<br>
-      gap(innerH-vvH) {{ saInfo.innerH - saInfo.vvH }} · kbd {{ saInfo.kbd ? 'Y' : 'N' }}
+      SA bottom {{ saInfo.bottom }} · innerH {{ saInfo.innerH }} · vvH {{ saInfo.vvH }}<br>
+      footer.b {{ saInfo.footerB }} · wrap.b {{ saInfo.wrapB }} · card.b {{ saInfo.cardB }}<br>
+      footer==innerH? {{ saInfo.footerB === saInfo.innerH ? 'Y' : 'N' }} · card→bottom {{ saInfo.innerH - saInfo.cardB }} · kbd {{ saInfo.kbd ? 'Y' : 'N' }}
     </div>
 
     <div v-if="viewerImages.length" class="image-viewer" @click="closeViewer"
