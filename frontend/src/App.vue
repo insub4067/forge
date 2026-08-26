@@ -1044,16 +1044,26 @@ function phaseGlyph(p) {
   return s === 'running' ? '●' : s === 'error' ? '!' : '✓'
 }
 
-// 완료된 Activity의 요약을 결과형으로 — "확인하겠습니다" → "확인"(시제 일치). 새 LLM 호출 없이
-// 기존 phase 텍스트의 미래·의도 종결만 결정적으로 벗긴다. running은 그대로(진행 중 문장 유지).
+// 첫 문장(두괄식 lead)만 — 마침표(.。!?)가 문장 끝일 때만 자른다(agent.py 같은 파일명 오분할 방지:
+// 마침표 뒤가 공백·끝·한글일 때만 문장 종료로 본다). 종료 못 찾으면(스트리밍 중 등) 원문.
+function _firstSentence(t) {
+  const m = t.match(/[.!?。](?=\s|$|[가-힣])/u)
+  return m ? t.slice(0, m.index + 1).trim() : t.trim()
+}
+// Timeline은 '흐름·요약만' — 상세(추론·도구)가 있는 phase는 두괄식 첫 문장만 보여주고 전문은
+// Detail Surface에서(탭). 장황한 진행 narration이 Timeline을 잠식하지 않게. running도 짧게 유지.
+// 순수 텍스트 phase(탭 상세 없음=최종 답변 등)는 자르지 않는다(전문 회수 경로가 없으므로).
+// 완료 phase는 미래·의도 종결("…하겠습니다")을 결과형으로 벗긴다(새 LLM 호출 없이).
 function phaseSummary(p) {
   const t = (p.text || '').trim()
-  if (!t || p.running) return t
-  const stripped = t
+  if (!t) return t
+  const lead = phaseHasDetail(p) ? _firstSentence(t) : t
+  if (p.running) return lead
+  const stripped = lead
     .replace(/(하겠습니다|하겠어요|하려고\s*합니다|해\s*보겠습니다|아?\s*보겠습니다|겠습니다)\s*[.。]?\s*$/u, '')
     .replace(/[.。\s]+$/u, '')
     .trim()
-  return stripped || t   // 통째로 비면(예: 문장 전체가 종결어미) 원문 유지
+  return stripped || lead   // 통째로 비면(예: 문장 전체가 종결어미) lead 유지
 }
 
 // 이 assistant 메시지가 Agent 활동(도구·추론)을 포함하는가. ✓ 등 상태 기호는 Agent Activity
