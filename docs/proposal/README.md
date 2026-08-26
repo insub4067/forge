@@ -27,6 +27,7 @@
 | `remote-terminal.md` | implemented/diverged | 현재 host PTY + WebSocket/xterm. proposal의 Docker-only/durable reconnect session 모델과 다름. |
 | `scheduled-condition-jobs.md` | partial | one-shot/daily/interval, timezone, next_run_at, atomic claim/retry 구현. Deferred/Condition watcher는 미구현. |
 | `task-boundary-project-memory.md` | implemented/hardened | completed evidence에서 Project Memory 추출 + provenance/memory_guard 구현. 자유 LLM memory 방식은 오염 사례 후 폐기. |
+| `superpowers-process-adoption.md` | implemented | 짓기 전 계획·생각을 Planner/Reviewer 프롬프트 + `~/.forge/skills` 전역 스킬(plan-before-build·adversarial-review)로 이식. 대화형 브레인스토밍·TDD는 자율성·게이트 철학 충돌로 범위 밖. |
 | `tauri-desktop-host.md` | proposal | Tauri host 미구현. PWA/FastAPI 구조 유지. |
 | `token-cost-reduction.md` | living analysis | 과거 planner 비용 실측은 역사 데이터. 현재 adaptive Planner, compaction persistence 등으로 runtime 가정이 달라짐. |
 | `vision-agent.md` | superseded/absorbed | vision은 별도 Agent/table이 아니라 이미지 turn의 Developer model route로 통합. |
