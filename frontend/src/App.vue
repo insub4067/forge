@@ -2074,11 +2074,16 @@ document.addEventListener('visibilitychange', () => {
           <div class="composer-chips">
             <button class="mode-chip ghost" @click="showModelPick = true" aria-label="모델 선택">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-4 12.7V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.3A7 7 0 0 0 12 2z"/><path d="M9 22h6"/></svg>
-              {{ tierLabel() }}
+              모델 {{ tierLabel() }}
             </button>
-            <button class="mode-chip" :class="{ on: autoApprove }" @click="toggleAutoApprove">
+            <button
+              class="mode-chip"
+              :class="{ on: autoApprove }"
+              @click="toggleAutoApprove"
+              :title="autoApprove ? '자동: 위험 명령도 확인 없이 실행됩니다' : '요청: 실행 전 승인을 요청합니다'"
+            >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
-              {{ autoApprove ? '자동 승인' : '수동 승인' }}
+              승인 {{ autoApprove ? '자동' : '요청' }}
             </button>
             <button v-if="busy || sessionRunning" class="mode-chip small ghost" @click="toggleSteerMode">
               {{ steerMode === 'queue' ? '작업 대기' : '계획 수정' }}
