@@ -10,14 +10,67 @@
 app 모듈이 import되기 **전에** env를 세팅해야 LOG_DIR 상수에 반영된다.
 """
 import os
+import re
 import tempfile
+from pathlib import Path
 
 _TMP_LOGS = os.environ.setdefault(
     "FORGE_LOG_DIR", tempfile.mkdtemp(prefix="forge-test-logs-"))
 
 
+# ── 테스트 DB 격리 ──────────────────────────────────────────────────────
+# 라이브 서버가 쓰는 프로덕션 DB(forge)와 절대 공유하지 않는다. 예전엔 테스트가 같은
+# forge DB에 DDL·락을 걸어, pytest를 돌리는 동안 라이브 서버의 세션 생성(쓰기)이
+# 멈추는 outage가 났다. app import 전에 DATABASE_URL을 <db>_test로 돌려 격리한다.
+# (pydantic settings와 engine은 첫 import 시점에 고정되므로 반드시 그 전에 세팅한다.)
+def _isolate_test_db() -> str:
+    explicit = os.environ.get("TEST_DATABASE_URL")
+    if explicit:
+        os.environ["DATABASE_URL"] = explicit
+        return explicit
+    base = os.environ.get("DATABASE_URL")
+    if not base:  # .env(forge/.env)에서 읽기 — pydantic과 같은 소스
+        env_path = Path(__file__).resolve().parent.parent / ".env"
+        if env_path.is_file():
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                s = line.strip()
+                if s.lower().startswith("database_url") and "=" in s:
+                    base = s.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+    if not base:
+        base = "postgresql+psycopg://forge:forge@localhost:5432/forge"
+    # 경로 마지막 세그먼트(db 이름)에 _test 접미. 쿼리스트링 보존.
+    m = re.match(r"^(.*/)([^/?]+)(\?.*)?$", base)
+    test_url = f"{m.group(1)}{m.group(2)}_test{m.group(3) or ''}" if m else f"{base}_test"
+    os.environ["DATABASE_URL"] = test_url
+    return test_url
+
+
+_TEST_DB_URL = _isolate_test_db()
+
+
+def _ensure_database_exists(url: str) -> None:
+    """테스트 DB가 없으면 만든다(유지 DB 'postgres'에 붙어 CREATE DATABASE). 이미 있으면 무시.
+    못 만들면(권한 없음 등) 명확히 실패시킨다 — 조용히 프로덕션으로 폴백하지 않는다."""
+    import psycopg
+    from sqlalchemy.engine import make_url
+    u = make_url(url)
+    if not u.database:
+        return
+    try:
+        with psycopg.connect(host=u.host or "localhost", port=u.port or 5432,
+                             user=u.username, password=u.password, dbname="postgres",
+                             autocommit=True) as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM pg_database WHERE datname=%s", (u.database,)).fetchone()
+            if not exists:
+                conn.execute(f'CREATE DATABASE "{u.database}"')
+    except Exception as e:
+        raise RuntimeError(f"테스트 DB 준비 실패({u.database}): {e}") from e
+
+
 def pytest_report_header(config):
-    return f"eventlog → {_TMP_LOGS} (운영 logs/ 격리)"
+    return f"eventlog → {_TMP_LOGS} (운영 logs/ 격리) · DB → {_TEST_DB_URL}"
 
 
 import pytest
@@ -36,6 +89,7 @@ def _ensure_schema():
     """
     import asyncio
     from sqlalchemy import text
+    _ensure_database_exists(_TEST_DB_URL)   # 격리 DB(forge_test)가 없으면 먼저 생성
     from app.db.models import Base
     from app.db.session import engine
     from app.main import _COLUMN_PATCHES
