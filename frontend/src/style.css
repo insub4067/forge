@@ -4196,16 +4196,12 @@ button {
 
 /* 실행 배너 — 헤더 아래 오버레이(레이아웃 미점유 → 나타나고 사라져도 스크롤 안 튐) */
 .running-banner {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  z-index: 20;
-  /* 존재감을 낮춘다 — 반투명 배경 + 블러로 뒤가 살짝 비치고, 그림자는 옅게. 텍스트는 선명. */
+  /* header 아래 in-flow — 자리를 차지해 첫 메시지가 밑으로 파고들어 겹치지 않게 한다.
+     (예전엔 absolute로 떠서 반투명 배경 밑으로 콘텐츠가 비쳐 겹쳐 보였다.) */
+  flex-shrink: 0;
   background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border-bottom-color: transparent;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
 

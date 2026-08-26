@@ -420,9 +420,16 @@ function liveActivityText() {
   return (s && s.activity) || 'Mac에서 작업 중'
 }
 
-// 실행 중(로컬 스트림 또는 서버 run)이며 마지막 메시지인가 — 복사/context 등 '끝난' UI를 숨기는 기준.
+// 실행 중이며 '진행 중인 사용자 요청'의 응답인가 — 복사/context 등 '끝난' UI를 숨기는 기준.
+// 한 요청이 여러 어시스턴트 턴(분류→개발→…)으로 이어지는 동안, 중간 턴이 끝나 다음 턴이
+// 시작되면 그 중간 턴에 copy가 조기 노출됐다. → 마지막 사용자 메시지 이후의 어시스턴트는
+// 전부 '진행 중인 응답'으로 보고 숨긴다(실행이 끝나면 전부 노출). 이전 요청의 응답은 유지.
 function isLiveTurn(i) {
-  return (busy.value || sessionRunning.value) && i === messages.value.length - 1
+  if (!(busy.value || sessionRunning.value)) return false
+  for (let j = i + 1; j < messages.value.length; j++) {
+    if (messages.value[j].role === 'user') return false  // 뒤에 또 다른 사용자 요청 → 이건 과거 응답
+  }
+  return true
 }
 let mainStartX = 0
 let mainStartY = 0
@@ -1660,10 +1667,11 @@ document.addEventListener('visibilitychange', () => {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
         </button>
       </div>
+    </header>
+
     <div v-if="busy || sessionRunning" class="running-banner" :class="{ waiting: agentStatus && agentStatus.waiting_for }">
       <span class="running-dot"></span>{{ runningBannerText() }}
     </div>
-    </header>
 
     <MenuPanel
       v-if="showMenu"
