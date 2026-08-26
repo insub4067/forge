@@ -13,7 +13,8 @@
   resume이 '실행 여부 불명'(started 잔존) 부작용을 자동 재실행하지 않는다(1회 경고 후 진행).
 - **CI 상시 실패 해소**: pytest용 스키마 초기화(conftest) + gate 검증 `SANDBOX_MODE=host`.
   이전엔 fresh postgres 스키마 없음 + docker 이미지 없음으로 계속 빨간색이었다. 지금 초록.
-- pytest **242 passed**(host mode), ruff 통과.
+- pytest **272 passed**(host mode, forge_test 격리 DB), ruff `.` 통과, bench self-test 통과 —
+  기준 SHA `32efec6`(2026-08-26). read-only 완료(Git evidence)·게이트 검증 격리(P0-B) 반영.
 - **다음 큰 건**: Persistent execution(independent durable worker/queue) — `durable-worker-resume`
   partial. Provider independence는 index상 deferred/rejected-experiment이지 다음 P0가 아니다.
 
@@ -190,4 +191,6 @@ Tool Script/RPC, Local/Docker/SSH ExecutionBackend는 현재 architecture 의무
 
 ## Test snapshot
 
-Memory hardening commit에서 `pytest` **116 passed**가 보고됐다. 이후 코드 변경 시 이 수치는 다시 검증해야 한다.
+기준 SHA `32efec6`(2026-08-26): `SANDBOX_MODE=host pytest -q` **272 passed**(forge_test 격리 DB),
+`ruff check .` 통과, `bench.py --self-test` 통과, frontend `npm test` 24/0 · `npm run build` OK.
+수치는 코드 변경 시 재검증한다(자동화 전까지 hardcode된 값은 낡을 수 있음).
