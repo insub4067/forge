@@ -337,7 +337,12 @@ def _t_long_running_restart():
           "assert counter.bump() == 1, counter.bump()\n"
           "assert counter.bump() == 2, counter.bump()\n"
           "print('ok')\n")
-    def check(d): return run_py(d, "test_counter.py")
+    def check(d):
+        # FORGE의 검증 단계가 test_counter.py를 돌리면 state.json에 count가 남아, 같은
+        # 테스트를 다시 실행하는 checker에서 bump()==1이 깨진다(비멱등 → 거짓 false_completion).
+        # checker는 "fresh 프로세스 시작"을 재므로 잔존 상태를 지우고 실행한다.
+        (d / "state.json").unlink(missing_ok=True)
+        return run_py(d, "test_counter.py")
     def fix(d):
         W(d, "counter.py",
           "import json\nfrom pathlib import Path\n\n"
