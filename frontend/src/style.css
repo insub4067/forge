@@ -1676,7 +1676,8 @@ footer .image-preview-row {
   border: 1px solid var(--border);
   border-radius: 20px;
   padding: 8px 12px;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+  /* 옅은 위쪽 그림자만 — 위 콘텐츠와 구분만 하고 '떠 있는' 느낌은 없앤다(바닥에 붙게). */
+  box-shadow: 0 -1px 10px rgba(0, 0, 0, 0.08);
 }
 
 /* composer surface — 카드 아래 safe-area 여백을 담당한다.
@@ -4613,4 +4614,18 @@ button {
 @media (min-width: 720px) {
   .crew-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .crew-body { padding: 20px 28px 32px; }
+}
+
+/* safe-area 진단 오버레이(임시) — 실기기 값 확인용. 해결 후 제거. */
+.sa-debug {
+  position: fixed;
+  top: calc(4px + env(safe-area-inset-top));
+  left: 8px;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.82);
+  color: #7CFC98;
+  font: 11px/1.5 ui-monospace, Menlo, monospace;
+  padding: 6px 9px;
+  border-radius: 8px;
+  pointer-events: auto;
 }
