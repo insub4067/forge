@@ -138,7 +138,12 @@ def test_end_to_end_traceability_event_on_completion():
     d = tr[-1]["data"]
     assert d["requirements_total"] == 2 and d["requirements_verified"] == 1
     assert d["false_completion_candidate"] is True and d["unverified_ids"] == ["R2"]
-    # flag OFF면 이 경로가 전혀 없어야 한다(관찰 전용·기본 불변) — 대조.
+    # flag OFF면 이 경로가 전혀 없어야 한다(관찰 전용) — 대조. 기본값이 이제 ON이므로
+    # 명시적으로 꺼서 확인한다(기본값 의존 금지).
     events.clear()
-    asyncio.run(rt.run([{"role": "user", "content": "A와 B를 해줘"}], emit, "s1", "/tmp"))
+    A.settings.task_ir_enabled = False
+    try:
+        asyncio.run(rt.run([{"role": "user", "content": "A와 B를 해줘"}], emit, "s1", "/tmp"))
+    finally:
+        A.settings.task_ir_enabled = old
     assert not any(e["type"] == "traceability" for e in events)

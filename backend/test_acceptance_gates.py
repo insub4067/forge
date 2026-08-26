@@ -178,6 +178,9 @@ def _make_run_rt(gates, verify_states, recovery_gates=None, recovery_raises=Fals
     rt._finalize_tasks = noop
     rt._mark_testing = noop
     rt._reflect = noop
+    # task_ir 기본값이 ON이어도 이 런타임 테스트는 인터프리터를 타지 않는다 — 테스트가
+    # 직접 주입한 _task_ir_reqs가 authoritative여야 하고, 실제 adapter 호출도 막는다.
+    rt._maybe_interpret = noop
 
     async def fake_list_gates(sid):
         return [dict(g) for g in gates_state]

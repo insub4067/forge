@@ -66,9 +66,11 @@ class Settings(BaseSettings):
     # 계산기 안내). 실제 provider usage(measured)가 최종 권위이며, breakdown엔 이미지 개수·bytes
     # 같은 raw 값도 함께 남겨 추후 usage와 보정한다. 다른 vision 모델을 쓰면 이 값을 조정한다.
     image_input_token_estimate: int = 384
-    # Task IR 인터프리터(Phase 1) 활성화. 기본 False — off면 완전 스킵(동작·비용 불변). A/B로
-    # 켜서 관찰한다(현재는 관찰 전용: task_ir 이벤트만 발행하고 라우팅 결정을 바꾸지 않는다).
-    task_ir_enabled: bool = False
+    # Task IR 인터프리터(Phase 1) 활성화. 기본 True — 실측 벤치(n=3, 75 run)에서 verified_success
+    # 0.92→0.973, false_completion 0.04→0.027, 완전검증 완료 0→10, verified당 비용 +6%로
+    # 신뢰성 순증·비용 미미 확인(docs/status/bench-baseline-2026-08-26.md). requirement를 gate와
+    # 대조해 미검증이면 completed→completed_unverified로 강등한다. TASK_IR_ENABLED=0로 끈다.
+    task_ir_enabled: bool = True
     # Developer를 항상 pro로(실험용). 기본 False — 평소 flash+think-medium, 실패 시에만 pro 승격.
     developer_pro: bool = False
     # 작업(run) 1회 비용 상한(USD). 누적 비용이 넘으면 안전하게 중단한다 — 무인/자동승인

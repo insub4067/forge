@@ -59,6 +59,22 @@ run-to-run 변동일 수 있다. 방향은 "해치지 않고 개선", 대가는 
 사용자 북극성이 신뢰성 우선·비용 후순위이므로 켤 근거는 있으나, 기본값을 뒤집기 전에
 `--repeat 3`로 재확인하는 게 안전하다. `TASK_IR_ENABLED`는 아직 off(config·서버 불변).
 
+## Task IR ON `--repeat 3` (75 run) — n=1 노이즈 제거 후 확정
+| 지표 | baseline(off, n=1) | ON n=1 | **ON n=3** |
+|---|---|---|---|
+| verified_success_rate | 0.92 | 1.0 | **0.973 (73/75)** |
+| false_completion_rate | 0.04 | 0 | **0.027 (2/75)** |
+| false_failure_rate | 0.04 | 0 | 0 |
+| completed(완전검증) | 0 | 3 | **10** |
+| cost_per_verified_task | $0.00642 | $0.00937 | **$0.00683 (+6%)** |
+
+- verified_success 0.973 > baseline 0.92 — rollback 게이트 통과(회귀 아님).
+- false_completion은 n=1의 "0"이 운이었고 n=3에서 0.027(2건). 그래도 baseline 0.04보다 낮다.
+- **비용 +46%는 n=1의 Q outlier($0.06) 착시**. n=3에서 verified당 +6%뿐 — 큰 작업에서
+  고정 오버헤드(인터프리터 호출, 4000자 캡)가 amortize된다.
+
+**결정: `TASK_IR_ENABLED` 기본 True로 전환**(config.py, 2026-08-26). 신뢰성 순증·비용 미미.
+`TASK_IR_ENABLED=0`로 끌 수 있다. 관련 [[forge-reliability-over-cost]].
+
 ## 다음 비교 대상
-- Task IR ON `--repeat 3` — n=1 노이즈 제거 후 개선이 유지되는지.
 - reasoning/write-folding variant — 최적화 ON이 성공률을 깎지 않는지.
