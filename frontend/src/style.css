@@ -1795,10 +1795,11 @@ footer .image-preview-row {
 }
 .jump-bottom {
   /* chat-area 바닥에 고정 — footer 바깥이라 task-bar 유무·footer 높이와 무관하게 항상
-     입력창 바로 위에 뜬다. 본문 중앙을 가리지 않게 우측 하단으로(req 7). */
+     입력창 바로 위에 뜬다. 가로 중앙 고정(사용자 지정). */
   position: absolute;
   bottom: 8px;
-  right: 12px;
+  left: 50%;
+  transform: translateX(-50%);
   width: 40px;
   height: 40px;
   border-radius: 50%;
