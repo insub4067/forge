@@ -18,3 +18,33 @@ _TMP_LOGS = os.environ.setdefault(
 
 def pytest_report_header(config):
     return f"eventlog → {_TMP_LOGS} (운영 logs/ 격리)"
+
+
+import pytest
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _ensure_schema():
+    """테스트 시작 전에 DB 스키마를 생성한다 — 서버 lifespan을 거치지 않는 pytest가
+    스키마 사전 존재에 의존하지 않게.
+
+    실제로 일어난 일: CI의 fresh postgres에는 테이블이 없어 DB를 건드리는 테스트가
+    `relation "sessions" does not exist`로 무더기 실패했다. 로컬은 dev 서버가 한 번
+    만들어놔서 통과하던 착시. 프로덕션과 같은 초기화(create_all + _COLUMN_PATCHES)를
+    여기서 한 번 돌려 테스트를 환경-독립적으로 만든다. import는 fixture 안에서 —
+    위의 FORGE_LOG_DIR env가 app import 전에 반영되도록.
+    """
+    import asyncio
+    from sqlalchemy import text
+    from app.db.models import Base
+    from app.db.session import engine
+    from app.main import _COLUMN_PATCHES
+
+    async def _init():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            for stmt in _COLUMN_PATCHES:
+                await conn.execute(text(stmt))
+
+    asyncio.run(_init())
+    yield

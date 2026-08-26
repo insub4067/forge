@@ -43,6 +43,9 @@ jobs:
         working-directory: backend
         env:
           DATABASE_URL: postgresql+psycopg://forge:forge@localhost:5432/forge
+          # CI에는 forge-sandbox 이미지가 없다 — gate 검증을 host에서 실제 실행한다
+          # (docker 기본값이면 `docker run forge-sandbox`가 실패해 gate가 거짓 failed).
+          SANDBOX_MODE: host
         run: python -m pytest -q
 
   frontend:
