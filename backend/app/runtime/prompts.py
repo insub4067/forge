@@ -29,12 +29,6 @@ GLOBAL_MEMORY_PATH = _REPO_ROOT / "GLOBAL_MEMORY.md"
 UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"  # backend/app/uploads(정상)
 
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-AGENTS_DIR = _REPO_ROOT / "docs" / "agents"
-GLOBAL_MEMORY_PATH = _REPO_ROOT / "GLOBAL_MEMORY.md"
-UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"  # backend/app/uploads(정상)
-
-
 def _has_image(msg: dict) -> bool:
     content = msg.get("content", "")
     if isinstance(content, list):
