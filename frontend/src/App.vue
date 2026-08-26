@@ -541,10 +541,21 @@ function reconcileCurrentRoom() {
   return true
 }
 
+// messages 세대 — 재구성 중 로컬 메시지가 추가되거나 더 새 로딩이 시작되면 세대가 올라간다.
+// 진행 중이던(=낡은) 재구성 결과는 그때 폐기한다.
+let msgGen = 0
+let loadedRoomId = ''   // 현재 messages가 어느 방 것인지 — 방이 바뀔 때만 즉시 비운다
+
 async function loadMessages(isNew = false) {
   const id = currentRoomId.value
   if (!id) return
-  messages.value = []
+  const gen = ++msgGen
+  // 같은 방을 다시 읽을 땐 배열을 비우지 않는다. 예전엔 여기서 비우고 fetch를 기다려,
+  // 그 사이 사용자가 보낸 말풍선이 반쯤 조립된 목록에 섞여 순서가 뒤집히거나 유령으로 남았다.
+  if (loadedRoomId !== id) {
+    messages.value = []
+    loadedRoomId = id
+  }
   // 기존 방은 이력 로딩 동안 skeleton, 새 방은 곧장 welcome placeholder.
   if (!isNew) loadingMessages.value = true
   try {
@@ -557,6 +568,7 @@ async function loadMessages(isNew = false) {
     for (const m of data) {
       if (m.role === 'tool') toolById[m.tool_call_id] = m.content || ''
     }
+    const out = []          // 서버 히스토리를 별도 배열에 조립 — 조립 중 화면 배열은 건드리지 않는다
     let bubble = null
     for (const m of data) {
       if (m.role === 'user') {
@@ -568,12 +580,12 @@ async function loadMessages(isNew = false) {
           const txt = uContent.find((c) => c && c.type === 'text')
           uContent = (txt && txt.text) || '[이미지]'
         }
-        messages.value.push({ role: 'user', content: uContent, images: uImages })
+        out.push({ role: 'user', content: uContent, images: uImages })
         bubble = null
       } else if (m.role === 'assistant') {
         if (!bubble) {
           bubble = reactive({ role: 'assistant', phases: [], approval: null, context: null, state: null, doneMessage: '' })
-          messages.value.push(bubble)
+          out.push(bubble)
         }
         // 완료 보고(format_completion_summary)는 phase가 아니라 doneMessage로 — 라이브 done
         // 이벤트와 동일 취급. phase로 두면 마지막 텍스트 phase가 되어 실제 답변을 덮는다
@@ -601,6 +613,10 @@ async function loadMessages(isNew = false) {
         bubble.phases.push(phase)
       }
     }
+    // 조립하는 동안 로컬 메시지가 추가됐거나 더 새 로딩이 시작됐으면 이 결과는 낡았다 — 버린다.
+    // (덮어쓰면 방금 보낸 사용자 말풍선이 사라진다.)
+    if (gen !== msgGen) return
+    messages.value = out
     scrollBottom()
   } catch {
   } finally {
@@ -1011,10 +1027,12 @@ watch(() => messages.value.length, (n, old) => {
 })
 
 function newUser(text, images, queued = false) {
+  msgGen++            // 진행 중인 재구성이 이 말풍선을 덮어쓰지 않게
   messages.value.push({ role: 'user', content: text, images: images && images.length ? images : null, queued })
 }
 
 function newAssistant() {
+  msgGen++            // 진행 중인 재구성이 이 말풍선을 덮어쓰지 않게
   const m = reactive({ role: 'assistant', phases: [], approval: null, context: null, state: null, doneMessage: '', compacted: false, copied: false })
   messages.value.push(m)
   return m
