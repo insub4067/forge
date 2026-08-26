@@ -4686,8 +4686,8 @@ button {
 .activity-body { margin-top: 2px; }
 .activity-body .result-warn:first-child { margin-top: 2px; }
 
-/* jump-bottom 새 메시지 배지 (req 7) */
-.jump-bottom { position: relative; }
+/* jump-bottom 새 메시지 배지 (req 7) — .jump-bottom은 이미 position:absolute라
+   배지의 containing block이 된다(position 재선언 금지 — absolute 배치가 깨진다). */
 .jump-badge {
   position: absolute; top: -4px; right: -4px;
   min-width: 17px; height: 17px; padding: 0 4px;

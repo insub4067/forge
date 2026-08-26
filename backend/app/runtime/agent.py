@@ -1169,11 +1169,16 @@ class AgentRuntime:
                         if _r is None:  # 실행 중 사용자가 취소 — subprocess까지 종료됨
                             return "cancelled", total_prompt, total_completion, route
                         result, diff = _r
-                    if name in ("write_file", "edit_file") and not result.startswith("오류"):
-                        state["files_changed"].append(str(args.get("path")))
+                    if name in ("write_file", "edit_file"):
+                        # 편집·쓰기 도구 사용 = mutation 시도(성공 여부 무관). read-only 판정에서
+                        # 이 run을 mutation으로 분류하는 신호(false_completion 방지). bash는 제외.
+                        state["attempted_mutation"] = True
+                        if not result.startswith("오류"):
+                            state["files_changed"].append(str(args.get("path")))
                 except Exception as err:
                     result = f"오류: {err}"
                     state["errors"].append(f"{name}: {err}")
+                state["tool_count"] = state.get("tool_count", 0) + 1  # 도구 실행 evidence
 
                 await send("state_update", state)
                 await send(
@@ -2501,7 +2506,9 @@ class AgentRuntime:
         # 성공한 tool 실행 자체가 evidence이므로 completed로 본다. 단 실제 파일 변경(files_changed)이
         # 있으면 intent 오분류로 판단해 mutation 정책으로 폴백한다(false_completion 방지 — 핵심 불변식).
         _ir_intent = (self._task_ir_intent.get(session_id, "") if session_id else "")
-        _read_only = is_read_only_completion(_ir_intent, state["files_changed"])
+        _read_only = is_read_only_completion(
+            _ir_intent, state["files_changed"],
+            state.get("attempted_mutation", False), state.get("tool_count", 0) > 0)
         if _read_only:
             final = "completed"
         else:

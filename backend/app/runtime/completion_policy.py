@@ -50,23 +50,40 @@ def _blocking_reason(status: str, gstate: str, vstate: str) -> str:
     return "일부 요구사항 미검증"
 
 
-# Task IR intent 중 조회·설명·리뷰·대화(비-mutation). 이 작업들은 독립 verification이
-# NOT_APPLICABLE이다 — 조회 자체가 evidence다. code_change·other(모호)는 제외(mutation 정책 유지).
+# Task IR intent 중 조회·설명·리뷰·대화(비-mutation). 독립 verification이 NOT_APPLICABLE이다.
 READ_ONLY_INTENTS = frozenset({"question", "conversation", "investigation", "review"})
+# 명시적 mutation intent — 변경이 없어도 read-only 완료로 승격하지 않는다(요청이 수정이면 안전 우선).
+MUTATING_INTENTS = frozenset({"code_change"})
 
 
-def is_read_only_completion(intent: str, files_changed: list) -> bool:
+def is_read_only_completion(intent: str, files_changed: list,
+                            attempted_mutation: bool, used_tools: bool) -> bool:
     """이 run이 'verification 불필요한 read-only 성공'인가 — NOT_APPLICABLE 판정.
 
-    intent가 조회·설명·리뷰이고 **실제 파일 변경이 없으면** True. read-only 요청은 성공한 tool
-    실행 자체가 evidence라 독립 verification이 필요 없다(completed).
+    Task IR intent는 flaky할 수 있으므로(interpreter가 None을 반환하면 intent="") intent 단독에
+    의존하지 않고 **실행 evidence**로 판정한다:
 
-    핵심 안전장치: intent가 read-only여도 files_changed가 있으면(intent 오분류로 실제 mutation
-    발생) False를 돌려 mutation 검증 정책으로 폴백한다 — '완료라 말했지만 실제로 코드를 바꿨는데
-    검증 안 함'이라는 false_completion을 막는다. NOT_APPLICABLE ≠ UNAVAILABLE:
-    전자는 검증이 필요 없는 성공, 후자는 검증이 필요했으나 못 한 것(completed_unverified).
+    - files_changed 있음 or attempted_mutation(write/edit 도구 사용) → False. 실제/시도된 mutation은
+      mutation 검증 정책으로 폴백한다(false_completion 방지 — 핵심 불변식). bash(git status 등)는
+      mutation 신호로 치지 않는다.
+    - used_tools 없음 → False. 도구 실행 evidence 없이 LLM self-report만으론 completed로 안 본다.
+    - intent가 read-only(question/investigation/…) → True.
+    - intent가 명시적 mutation(code_change) → False. 요청이 수정인데 변경이 없으면 completed_unverified
+      로 남긴다(안전).
+    - intent 불명(interpreter 실패/other): 편집·변경이 전혀 없고 도구 evidence가 있으면 read-only
+      조회로 본다 — Task IR가 실패해도 read-only가 '부분 완료'로 떨어지지 않게 한다.
+
+    NOT_APPLICABLE ≠ UNAVAILABLE: 전자는 검증 불필요한 성공, 후자는 검증이 필요했으나 못 한 것.
     """
-    return intent in READ_ONLY_INTENTS and not files_changed
+    if files_changed or attempted_mutation:
+        return False
+    if not used_tools:
+        return False
+    if intent in READ_ONLY_INTENTS:
+        return True
+    if intent in MUTATING_INTENTS:
+        return False
+    return True
 
 
 def resolve_completion_verification(gstate: str, vstate: str,
