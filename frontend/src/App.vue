@@ -1039,6 +1039,21 @@ function hasActivity(m) {
   return (m.phases || []).some((p) => (p.tools && p.tools.length) || p.thinking)
 }
 
+// 완료 semantic을 타임라인 터미널 노드로 — backend 실제 상태를 왜곡하지 않는다.
+// completed_unverified를 ✓로 위장하지 않는다(검증 불완전은 !).
+const _COMPLETION_NODES = {
+  completed: { glyph: '✓', label: '완료', cls: 'done' },
+  completed_unverified: { glyph: '!', label: '검증 불완전', cls: 'warn' },
+  verification_failed: { glyph: '!', label: '검증 실패', cls: 'error' },
+  context_blocked: { glyph: '!', label: '컨텍스트 한도 도달', cls: 'warn' },
+  budget_exceeded: { glyph: '!', label: '예산 초과', cls: 'warn' },
+  failed: { glyph: '!', label: '실패', cls: 'error' },
+  cancelled: { glyph: '·', label: '중단됨', cls: 'muted' },
+}
+function completionNode(status) {
+  return _COMPLETION_NODES[status] || null
+}
+
 // 작성 중 어떤 모델이 답하는지 한눈에 — 모델명을 짧은 배지로.
 function shortModel(m) {
   if (!m) return ''
@@ -1202,6 +1217,7 @@ function handleEvent(evt, assistant) {
       break
     case 'done':
       assistant.verifyPhase = ''
+      assistant.finalStatus = d.status || ''   // 타임라인 터미널 노드용 — 실제 완료 semantic
       assistant.phases.forEach((p) => {
         p.running = false
         p.collapsed = true
@@ -1764,6 +1780,14 @@ document.addEventListener('visibilitychange', () => {
                   <pre v-else>{{ t.status === 'running' ? '실행 중…' : (t.result || '(출력 없음)') }}</pre>
                 </details>
               </template>
+              </div>
+            </div>
+            <!-- 완료 터미널 노드 — backend 실제 completion semantic. completed_unverified를
+                 ✓로 위장하지 않는다(검증 불완전은 !). live done 이벤트에서만(재구성 시엔 요약 본문). -->
+            <div v-if="completionNode(m.finalStatus)" class="tl-node tl-terminal" :class="completionNode(m.finalStatus).cls">
+              <span class="tl-marker" :class="completionNode(m.finalStatus).cls" aria-hidden="true">{{ completionNode(m.finalStatus).glyph }}</span>
+              <div class="tl-content">
+                <div class="tl-head"><span class="tl-agent">{{ completionNode(m.finalStatus).label }}</span></div>
               </div>
             </div>
             </div>

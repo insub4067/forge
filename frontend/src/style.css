@@ -3917,6 +3917,12 @@ button {
 }
 .tl-marker.running { color: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
 .tl-marker.error { color: #f87171; font-weight: 800; }
+.tl-marker.warn { color: #f59e0b; font-weight: 800; }
+.tl-marker.muted { color: var(--muted); }
+/* 완료 터미널 노드 — 실패·불완전은 라벨도 tone으로 강조(색만이 아니라 !/✓ 형태가 1차 신호). */
+.tl-terminal .tl-agent { font-size: 14px; }
+.tl-terminal.warn .tl-agent { color: #f59e0b; }
+.tl-terminal.error .tl-agent { color: #f87171; }
 .tl-content { flex: 1; min-width: 0; padding-bottom: 12px; }
 .tl-node:last-child .tl-content { padding-bottom: 2px; }
 .tl-head {
