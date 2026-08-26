@@ -2468,10 +2468,7 @@ class AgentRuntime:
             if saved and saved["covered"] <= len(all_messages):
                 self._compaction[session_id] = saved
         room_memory = _load_room_memory(ws)
-        await self._maybe_interpret(full_request, send, session_id)  # Task IR(Phase 1) — 기본 off, 관찰 전용
-        # requirement id를 gate 작성 role에 알려 준다(Task IR on일 때만 — off면 빈 문자열).
-        req_block = _requirements_block(
-            self._task_ir_reqs.get(session_id) if session_id else None)
+        req_block = ""   # Task IR requirement 블록 — 코드 경로 진입 후 채운다(대화 턴 제외).
         # Security preflight — 주입 설정 표면/추적 시크릿을 결정적 스캔. 관찰 전용(fail-open):
         # 실행을 막지 않고 findings가 있을 때만 이벤트 한 건 표면화한다. 어떤 예외도 run에
         # 영향을 주지 않는다. HIGH→approval 게이팅은 의도적으로 후속(벤치 재측정 필요).
@@ -2669,6 +2666,13 @@ class AgentRuntime:
                              "" if status == "done" else self._finish_message(status))
                 return all_messages
             # transitioned → 아래 작업(code) 경로로 계속 진행
+
+        # Task IR 해석은 코드 경로에서만 — 대화·질문 턴엔 gate도 완료 판정도 없어 인터프리터가
+        # 얻는 게 없고, 대화를 억지 requirement로 뽑아 traceability를 false_completion 후보로
+        # 오염시켰다(실측: chat 세션 4턴 전부). 여기(route_kind=="code" 확정)서만 돌린다.
+        await self._maybe_interpret(full_request, send, session_id)
+        req_block = _requirements_block(
+            self._task_ir_reqs.get(session_id) if session_id else None)
 
         # 1. 에이전트 모드 결정 — 사용자 명시(multi/single)가 최우선, auto는 복잡도 기반 자동.
         mode = self.get_agent_mode(session_id)
