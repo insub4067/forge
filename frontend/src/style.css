@@ -1680,11 +1680,11 @@ footer .image-preview-row {
   box-shadow: 0 -3px 14px rgba(0, 0, 0, 0.13);
 }
 
-/* composer surface — 카드 아래 safe-area 여백을 담당한다.
-   footer 배경(var--bg)이 화면 바닥까지 이어지고, 카드는 이 여백만큼
-   홈 인디케이터 위에 떠 있어 실제 컨트롤을 보호한다. */
+/* composer surface — 카드를 화면 바닥에 최대한 붙인다.
+   full safe-area(홈 인디케이터 34px)는 여백이 너무 커 보여서, 그만큼 빼되
+   최소 클리어런스(4px)만 남긴다. footer 배경(var--bg)은 화면 바닥까지 이어진다. */
 .composer-wrap {
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: max(4px, calc(env(safe-area-inset-bottom) - 26px));
 }
 
 .composer:focus-within {
