@@ -1044,7 +1044,11 @@ function phaseSummary(p) {
 // 이 assistant 메시지가 Agent 활동(도구·추론)을 포함하는가. ✓ 등 상태 기호는 Agent Activity
 // 전용이다 — 순수 대화 답변(도구 없는 텍스트)은 상태 기호 없이 본문만 보여준다.
 function hasActivity(m) {
-  return (m.phases || []).some((p) => (p.tools && p.tools.length) || p.thinking)
+  // 도구·추론이 있거나, agent 작업 role(chat 아님)이면 Activity. 후자를 포함해야 developer/
+  // planner 등 phase가 시작되자마자(첫 도구 전에도) 라이브 타임라인에 '● 실행 중'으로 뜬다.
+  // 순수 대화(role 'chat' 또는 '')는 도구가 없으면 상태 기호 없이 본문만.
+  return (m.phases || []).some(
+    (p) => (p.tools && p.tools.length) || p.thinking || (p.role && p.role !== 'chat'))
 }
 
 // 완료 semantic을 타임라인 터미널 노드로 — backend 실제 상태를 왜곡하지 않는다.
