@@ -1517,6 +1517,27 @@ class AgentRuntime:
                     checks.append((f"pytest{f' ({sub})' if sub else ''}",
                                    [interp, "-m", "pytest", "-q"], d, "pytest"))
 
+        # ruff — 설정 파일(ruff.toml/.ruff.toml/pyproject [tool.ruff])이 있는(=ruff를 채택한)
+        # 저장소에서만 린트 게이트. 미설정·미설치=검증대상 아님(거짓 failed 방지). 코드 이동으로
+        # 생기는 고아 import(F401) 등 CI가 잡는 결함을 '완료' 전에 잡는다. --fix 안 함(멱등 유지).
+        for sub in ("", "backend"):
+            d = os.path.join(ws, sub)
+            if not os.path.isdir(d):
+                continue
+            has_cfg = os.path.isfile(os.path.join(d, "ruff.toml")) or \
+                os.path.isfile(os.path.join(d, ".ruff.toml"))
+            if not has_cfg:
+                try:
+                    has_cfg = "[tool.ruff" in open(
+                        os.path.join(d, "pyproject.toml"), encoding="utf-8").read()
+                except OSError:
+                    has_cfg = False
+            venv_ruff = os.path.join(d, ".venv", "bin", "ruff")
+            ruff_bin = venv_ruff if os.path.isfile(venv_ruff) else shutil.which("ruff")
+            if has_cfg and ruff_bin:
+                checks.append((f"ruff{f' ({sub})' if sub else ''}",
+                               [ruff_bin, "check", "."], d, "ruff"))
+
         if not checks:
             return "unavailable", "검증 대상 없음(test/build 미검출 또는 실행 불가)"
         # 검증 실행이 만든 새 파일을 이 호출 종료 시 청소한다(멱등화) — generic·integration
@@ -1538,6 +1559,13 @@ class AgentRuntime:
                         # -1=timeout/실행 불가 — 조용히 건너뛰면 다른 passed check에 묻혀
                         # 전체가 PASS로 오판될 수 있다. unavailable로 남겨 승격을 막는다.
                         unavailable_reasons.append(f"[{label}] exit {rc} (실행/설정 오류 또는 테스트 없음)")
+                elif kind == "ruff":
+                    if rc == 0:
+                        any_passed = True
+                    elif rc == 1:  # 린트 위반(고아 import 등) → CI가 거부하는 결함. 완료 아님.
+                        return "failed", f"[{label}] 린트 실패 (미사용 import 등, exit 1):\n{out[-1500:]}"
+                    else:  # 2=설정/사용 오류, -1=실행 불가 → unavailable(거짓 failed 방지)
+                        unavailable_reasons.append(f"[{label}] exit {rc} (ruff 실행/설정 오류)")
                 else:  # build: 0=통과, 양수=실패(빌드/타입 깨짐), -1(실행 불가)=unavailable
                     if rc == 0:
                         any_passed = True

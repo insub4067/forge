@@ -188,6 +188,37 @@ async def main():
             os.environ.pop(k, None)
     print("verify pytest 3-state: OK — exit 0=passed / 1=failed / 2·미설치=unavailable, 설정오류+통과=PASS 오판 금지")
 
+    # ── _verify ruff 게이트: 설정 있는 repo만 · exit code별 3상태 ──
+    # 코드 이동으로 생기는 고아 import(F401) 등 CI가 잡는 결함을 '완료' 전에 차단한다.
+    # 가짜 .venv/bin/ruff로 exit code를 제어(0=passed / 1=failed / 2=unavailable).
+    with tempfile.TemporaryDirectory() as d:
+        ruff = os.path.join(d, ".venv", "bin", "ruff")
+        os.makedirs(os.path.dirname(ruff))
+        with open(ruff, "w") as f:
+            f.write("#!/usr/bin/env python3\n"
+                    "import os, sys\nsys.exit(int(os.environ.get('FAKE_RUFF_EXIT', '0')))\n")
+        os.chmod(ruff, 0o755)
+
+        # 설정 파일 없음 → 게이트 미활성(ruff 미채택 repo에 거짓 failed 금지) → 검증대상 없음
+        os.environ["FAKE_RUFF_EXIT"] = "1"
+        st, _ = await rt._verify(d, _ns)
+        assert st == "unavailable", st
+
+        open(os.path.join(d, "ruff.toml"), "w").write("")  # 설정 존재 = 게이트 활성
+        os.environ["FAKE_RUFF_EXIT"] = "1"  # 린트 위반(고아 import 등) → failed(완료 아님)
+        st, rep = await rt._verify(d, _ns)
+        assert st == "failed", (st, rep)
+
+        os.environ["FAKE_RUFF_EXIT"] = "0"  # 클린 → passed
+        st, rep = await rt._verify(d, _ns)
+        assert st == "passed", (st, rep)
+
+        os.environ["FAKE_RUFF_EXIT"] = "2"  # 설정/사용 오류 → unavailable(거짓 failed 방지)
+        st, rep = await rt._verify(d, _ns)
+        assert st == "unavailable", (st, rep)
+        os.environ.pop("FAKE_RUFF_EXIT", None)
+    print("verify ruff gate: OK — 설정 있는 repo만 · exit 1=failed(고아 import 차단) / 0=passed / 2=unavailable")
+
     # ── 검증 멱등화(regression): generic+integration 이중검증이 검증-생성 파일로 과차단하지 않는다 ──
     # root cause: run()이 _verify(generic)와 _verify_integration→_verify(integration)로
     # 동일 test/build를 두 번 실행. stateful 테스트가 1회차에 남긴 state.json이 2회차를 깨뜨림.
