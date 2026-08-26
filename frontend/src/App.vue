@@ -1362,6 +1362,7 @@ async function send() {
   const assistant = newAssistant()
   isAtBottom.value = true
   scrollBottom()
+  attachedImages.value.forEach(_revokePreview)
   attachedImages.value = []
   attachedText.value = null
 
@@ -1473,13 +1474,17 @@ watch(input, (v) => {
 async function handleFiles(files) {
   for (const file of files) {
     if (file.type.startsWith('image/')) {
-      // 이미지 → 업로드(여러 장 누적)
+      // 이미지 → 로컬 프리뷰를 즉시 붙이고(선택 즉시 표시), 서버 업로드는 뒤에서 진행한다.
+      // 예전엔 업로드→서버 URL을 <img>가 다시 fetch할 때까지 프리뷰가 안 떠 늦게 보였다.
+      const entry = reactive({ previewUrl: URL.createObjectURL(file), url: null, name: file.name })
+      attachedImages.value.push(entry)
       const formData = new FormData()
       formData.append('file', file)
       try {
         const res = await fetch('/api/upload', { method: 'POST', body: formData })
-        if (res.ok) attachedImages.value.push(await res.json())
-      } catch {}
+        if (res.ok) { const j = await res.json(); entry.url = j.url; entry.name = j.name }
+        else { _revokePreview(entry); attachedImages.value = attachedImages.value.filter((a) => a !== entry) }
+      } catch { _revokePreview(entry); attachedImages.value = attachedImages.value.filter((a) => a !== entry) }
     } else {
       // 텍스트/코드 파일 → 내용을 읽어 메시지에 포함(마지막 1개)
       try {
@@ -1523,7 +1528,11 @@ async function onDrop(e) {
   if (files.length) await handleFiles(files)
 }
 
+function _revokePreview(entry) {
+  if (entry && entry.previewUrl) { try { URL.revokeObjectURL(entry.previewUrl) } catch {} }
+}
 function removeImage(idx) {
+  _revokePreview(attachedImages.value[idx])
   attachedImages.value.splice(idx, 1)
 }
 
@@ -1895,7 +1904,7 @@ document.addEventListener('visibilitychange', () => {
 
     <div v-if="attachedImages.length" class="image-preview-row">
       <div v-for="(img, ii) in attachedImages" :key="ii" class="image-preview">
-        <img :src="img.url" alt="첨부 이미지" @click="openViewer(attachedImages.map((a) => a.url), ii)" />
+        <img :src="img.previewUrl || img.url" alt="첨부 이미지" @click="openViewer(attachedImages.map((a) => a.previewUrl || a.url), ii)" />
         <button class="image-remove" @click="removeImage(ii)" aria-label="제거">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
         </button>
