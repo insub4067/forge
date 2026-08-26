@@ -104,8 +104,8 @@ const errorCount = computed(() => (props.phase.tools || []).filter((t) => t.stat
           :aria-expanded="phase.thinkOpen ? 'true' : 'false'"
           @click="toggleThink"
         >
-          <svg class="adp-reason-chevron" :class="{ open: phase.thinkOpen }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
           <span>{{ phase.thinkOpen ? '추론 접기' : '추론 보기' }}</span>
+          <svg class="adp-reason-chevron" :class="{ open: phase.thinkOpen }" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
         </button>
         <div v-if="phase.thinkOpen" class="reasoning-body text" v-html="renderMarkdown(phase.thinking)"></div>
       </section>
