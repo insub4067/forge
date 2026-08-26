@@ -15,6 +15,70 @@ from ..sandbox.executor import DockerSandbox
 EventSink = Callable[[dict], Awaitable[None]]
 
 
+# gate 명령이 rc!=0로 실패했을 때, 그 실패가 '구현 오류'가 아니라 '명령 자체의 인프라
+# 오류'(문법·실행불가·quoting)임을 알리는 신호. 모델이 verification 명령을 직접 작성하므로
+# python3 -c에 여러 줄을 리터럴 \n으로 넣어 SyntaxError를 내는 등 명령 결함으로 실패하는 일이
+# 잦다. 그 경우 정답 코드가 gate 결함 때문에 verification_failed로 과차단된다.
+#
+# **중요(false_completion 방지)**: 파싱 오류(SyntaxError 등)는 gate 명령 자체(python3 -c/stdin
+# 인라인 스크립트)에서 날 수도 있고, **검사 대상 코드**(워크스페이스 .py 파일)에서 날 수도 있다.
+# 후자는 진짜 구현 실패다. 이를 infra로 오분류하면 깨진 코드가 completed_unverified로 새어
+# false_completion이 는다. 그래서 파싱 오류는 traceback이 `<string>`/`<stdin>`(=명령의 인라인
+# 스크립트)일 때만 infra로 보고, 워크스페이스 파일 경로면 failed로 남긴다.
+_GATE_SHELL_SIGNALS = (
+    "command not found",              # 셸이 실행 파일을 못 찾음 — 정상 코드 실행에선 안 남
+    "syntax error near",              # bash 파스 오류(syntax error near unexpected token)
+    "unexpected EOF while looking",   # bash quoting 미완결(...looking for matching quote)
+    "can't open file",                # python3 <script>가 스크립트 파일을 못 엶(명령 인자 오류)
+)
+_GATE_PARSE_SIGNALS = (
+    "SyntaxError",              # python -c에 여러 줄을 리터럴 \n으로 넣어 개행이 안 풀림
+    "IndentationError",
+    "invalid syntax",
+    "unexpected EOF while parsing",   # python 인라인 스크립트 미완결
+)
+
+
+def _gate_infra_error(rc: int, output: str) -> bool:
+    """gate 명령이 실패(rc!=0)했을 때, 그 실패가 구현 실패가 아니라 명령 자체의 인프라
+    오류인지 판정한다. rc==0(명령이 정상 실행됨)에는 적용하지 않는다.
+
+    - 셸 레벨 오류(command not found / bash 파스)는 정상 코드 실행에서 나올 수 없으므로 infra.
+    - 파싱 오류(SyntaxError 등)는 traceback이 `<string>`/`<stdin>`(명령의 인라인 스크립트)일
+      때만 infra. 워크스페이스 .py 파일에서 난 파싱 오류는 검사 대상 코드의 결함(failed 유지).
+    """
+    if rc == 0:
+        return False
+    if any(sig in output for sig in _GATE_SHELL_SIGNALS):
+        return True
+    if ("<string>" in output or "<stdin>" in output) \
+            and any(sig in output for sig in _GATE_PARSE_SIGNALS):
+        return True
+    return False
+
+
+def classify_gate(rc: int, output: str, expected: str) -> tuple[str, str]:
+    """gate 명령 실행 결과를 verdict로 판정한다(순수 함수 — 무LLM 결정적 테스트 대상).
+
+    passed      — exit 0 AND 기대 문자열이 출력에 존재
+    unavailable — 통과 증거 부족(expected 없음) 또는 명령 자체의 인프라 오류(GATE_EXECUTION_ERROR).
+                  둘 다 "검증 못 함"이라 완료 정책상 completed_unverified로 안전 강등된다
+                  (완료 주장 안 함 → false_completion 안 늘림).
+    failed      — 명령은 정상 실행됐으나 기대 미충족/로직 실패(AssertionError·기대값 불일치 등).
+                  검증 약화 금지 invariant를 지키려 인프라-오류 신호가 명확할 때만 unavailable로 뺀다.
+    """
+    if rc == 0 and expected and expected in output:
+        return "passed", ""
+    if rc == 0 and not expected:
+        # exit 0만으로는 기능 충족을 증명하지 못한다 — PASS 오판 금지.
+        return "unavailable", "expected_result 없음 — 통과 증거로 불충분"
+    if _gate_infra_error(rc, output):
+        return "unavailable", (
+            f"GATE_EXECUTION_ERROR: 명령 인프라 오류(exit {rc}) — 검증 불가, 구현 실패 아님")
+    reason = f"exit {rc}" + (f", 기대 결과 미발견: {expected[:80]}" if expected else "")
+    return "failed", reason
+
+
 async def verify_gates(ws: str, session_id: str, send: EventSink) -> tuple[str, str]:
     """각 gate의 verification_method를 실제 실행해 (state, report) 반환.
 
@@ -63,14 +127,7 @@ async def verify_gates(ws: str, session_id: str, send: EventSink) -> tuple[str, 
             "command": method, "exit_code": rc,
             "output_tail": out[-1500:], "expected": expected,
         }, ensure_ascii=False)
-        if rc == 0 and expected and expected in out:
-            verdict, reason = "passed", ""
-        elif rc == 0 and not expected:
-            # exit 0만으로는 기능 충족을 증명하지 못한다 — PASS 오판 금지.
-            verdict, reason = "unavailable", "expected_result 없음 — 통과 증거로 불충분"
-        else:
-            verdict = "failed"
-            reason = f"exit {rc}" + (f", 기대 결과 미발견: {expected[:80]}" if expected else "")
+        verdict, reason = classify_gate(rc, out, expected)
         await store.save_gate_result(session_id, g["id"], verdict, evidence, reason)
         labels.append(f"{g['title']}({verdict})")
         resolved.append(verdict)

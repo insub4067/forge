@@ -139,6 +139,35 @@ async def main():
             failures.append(await _extract_chain(r))
     (outdir / "failures.json").write_text(json.dumps(failures, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # 모든 run의 chain 추출 + completed_unverified 원인 분류(왜 completed가 아니라 U인가).
+    all_chains = [await _extract_chain(r) for r in results]
+
+    def _uv_category(c):
+        """completed_unverified 원인 — resolve_completion_verification 분기 그대로."""
+        if c["forge_status"] != "completed_unverified":
+            return None
+        gates = c["gates"]
+        n = len(gates)
+        n_passed = sum(1 for g in gates if g.get("status") == "passed")
+        tr = c.get("traceability") or {}
+        if tr.get("false_completion_candidate"):
+            return "REQUIREMENT_GAP"           # Task IR requirement가 passed gate로 미연결
+        if n == 0:
+            return "GATE_NONE"                 # acceptance gate 미등록 → generic만
+        if n_passed < n:
+            return "GATE_PARTIAL"              # 일부 gate만 passed(unavailable/blocked 등)
+        return "GENERIC_UNAVAILABLE"           # gate 전부 passed인데 vstate!=passed(generic 검증 대상 없음)
+
+    for c in all_chains:
+        c["uv_category"] = _uv_category(c)
+    (outdir / "all_chains.jsonl").write_text(
+        "\n".join(json.dumps(c, ensure_ascii=False) for c in all_chains), encoding="utf-8")
+
+    from collections import Counter
+    uv = Counter(c["uv_category"] for c in all_chains if c["uv_category"])
+    (outdir / "completed_unverified_breakdown.json").write_text(
+        json.dumps(dict(uv), ensure_ascii=False, indent=2), encoding="utf-8")
+
     def _ver(cmd):
         try:
             return subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout.strip()

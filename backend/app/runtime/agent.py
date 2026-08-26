@@ -1802,6 +1802,35 @@ class AgentRuntime:
         except Exception as err:  # 학습 실패가 run 결과를 바꾸면 안 된다.
             error_log.record("reflect", str(err))
 
+    # 검증(test/build)이 만든 잔존 파일이 이후 검증을 오염시키는 것을 막는다(멱등화).
+    # 예: state.json에 상태를 영속하는 stateful 테스트는 1회차 실행이 파일을 남기고,
+    # 2회차(integration)가 그 잔존 상태로 깨진다 — 코드는 정답인데 이중검증이 과차단.
+    # generic·integration이 모두 _verify를 타므로 여기 한 곳에서 막으면 전 경로가 멱등.
+    _VERIFY_SNAPSHOT_SKIP = {".git", ".venv", "node_modules",
+                             "__pycache__", ".pytest_cache", ".mypy_cache"}
+
+    @classmethod
+    def _verify_snapshot(cls, ws: str) -> set:
+        """검증 실행 직전 워크스페이스 파일 집합 스냅샷. 무겁고/건드리면 안 되는
+        디렉터리(.git/.venv/node_modules 등)는 제외 — 정리 대상도 아니다."""
+        seen = set()
+        for root, dirs, files in os.walk(ws):
+            dirs[:] = [d for d in dirs if d not in cls._VERIFY_SNAPSHOT_SKIP]
+            for f in files:
+                seen.add(os.path.join(root, f))
+        return seen
+
+    @classmethod
+    def _verify_cleanup(cls, ws: str, before: set) -> None:
+        """검증이 **새로 만든** 파일만 제거해 워크스페이스를 검증 전 상태로 되돌린다.
+        스냅샷에 이미 있던 파일(구현 산출물)은 건드리지 않는다 — 판정에는 관여 안 함
+        (state/report 확정 후 실행). 실제 실패 탐지도 약화되지 않는다(파일만 청소)."""
+        for path in cls._verify_snapshot(ws) - before:
+            try:
+                os.remove(path)
+            except OSError:  # 이미 없거나 권한 문제면 무시 — 청소 실패가 결과를 바꾸면 안 됨
+                pass
+
     async def _verify(self, ws: str, send: EventSink,
                       stage: str = "generic") -> tuple[str, str]:
         """3상태 검증 — 프로세스가 test/build를 직접 실행. 반환 (state, report),
@@ -1855,42 +1884,48 @@ class AgentRuntime:
 
         if not checks:
             return "unavailable", "검증 대상 없음(test/build 미검출 또는 실행 불가)"
-        await send("verify_start", {"checks": [c[0] for c in checks], "stage": stage})
-        any_passed = False
-        unavailable_reasons: list[str] = []
-        for label, args, cwd, kind in checks:
-            rc, out = await _sh(args, cwd)
-            if kind == "pytest":
-                if rc == 0:
-                    any_passed = True
-                elif rc == 1:
-                    return "failed", f"[{label}] 테스트 실패 (exit 1):\n{out[-1500:]}"
-                else:
-                    # 2=중단, 3=내부 오류, 4=설정/사용법 오류, 5=테스트 수집 0,
-                    # -1=timeout/실행 불가 — 조용히 건너뛰면 다른 passed check에 묻혀
-                    # 전체가 PASS로 오판될 수 있다. unavailable로 남겨 승격을 막는다.
-                    unavailable_reasons.append(f"[{label}] exit {rc} (실행/설정 오류 또는 테스트 없음)")
-            else:  # build: 0=통과, 양수=실패(빌드/타입 깨짐), -1(실행 불가)=unavailable
-                if rc == 0:
-                    any_passed = True
-                elif isinstance(rc, int) and rc > 0:
-                    return "failed", f"[{label}] 빌드 실패 (exit {rc}):\n{out[-1500:]}"
-                else:
-                    unavailable_reasons.append(f"[{label}] 실행 불가 (exit {rc})")
-        if unavailable_reasons:
-            # 실행/설정 오류가 하나라도 있으면 '검증 통과'로 기록하지 않는다 — PASS 오판 금지.
-            return "unavailable", "검증 일부 실행 불가: " + "; ".join(unavailable_reasons)
-        # self-repo 런타임 스모크 — build는 통과하지만 런타임에 앱이 깨지는 것을 잡는다
-        # (undefined ref로 크래시·핵심 UI 미렌더 등). build만으로는 못 잡던 사각.
-        labels = [c[0] for c in checks]
-        smoke_state, smoke_report = await self._runtime_smoke(ws, send)
-        if smoke_state == "failed":
-            return "failed", smoke_report
-        if smoke_state == "passed":
-            any_passed = True
-            labels.append("runtime smoke")
-        return ("passed", "검증 통과: " + ", ".join(labels)) if any_passed \
-            else ("unavailable", "검증 실행 불가(모든 check가 unavailable)")
+        # 검증 실행이 만든 새 파일을 이 호출 종료 시 청소한다(멱등화) — generic·integration
+        # 이중검증이 같은 초기 상태에서 돌게 해, stateful 테스트의 잔존 상태 오염을 막는다.
+        before = self._verify_snapshot(ws)
+        try:
+            await send("verify_start", {"checks": [c[0] for c in checks], "stage": stage})
+            any_passed = False
+            unavailable_reasons: list[str] = []
+            for label, args, cwd, kind in checks:
+                rc, out = await _sh(args, cwd)
+                if kind == "pytest":
+                    if rc == 0:
+                        any_passed = True
+                    elif rc == 1:
+                        return "failed", f"[{label}] 테스트 실패 (exit 1):\n{out[-1500:]}"
+                    else:
+                        # 2=중단, 3=내부 오류, 4=설정/사용법 오류, 5=테스트 수집 0,
+                        # -1=timeout/실행 불가 — 조용히 건너뛰면 다른 passed check에 묻혀
+                        # 전체가 PASS로 오판될 수 있다. unavailable로 남겨 승격을 막는다.
+                        unavailable_reasons.append(f"[{label}] exit {rc} (실행/설정 오류 또는 테스트 없음)")
+                else:  # build: 0=통과, 양수=실패(빌드/타입 깨짐), -1(실행 불가)=unavailable
+                    if rc == 0:
+                        any_passed = True
+                    elif isinstance(rc, int) and rc > 0:
+                        return "failed", f"[{label}] 빌드 실패 (exit {rc}):\n{out[-1500:]}"
+                    else:
+                        unavailable_reasons.append(f"[{label}] 실행 불가 (exit {rc})")
+            if unavailable_reasons:
+                # 실행/설정 오류가 하나라도 있으면 '검증 통과'로 기록하지 않는다 — PASS 오판 금지.
+                return "unavailable", "검증 일부 실행 불가: " + "; ".join(unavailable_reasons)
+            # self-repo 런타임 스모크 — build는 통과하지만 런타임에 앱이 깨지는 것을 잡는다
+            # (undefined ref로 크래시·핵심 UI 미렌더 등). build만으로는 못 잡던 사각.
+            labels = [c[0] for c in checks]
+            smoke_state, smoke_report = await self._runtime_smoke(ws, send)
+            if smoke_state == "failed":
+                return "failed", smoke_report
+            if smoke_state == "passed":
+                any_passed = True
+                labels.append("runtime smoke")
+            return ("passed", "검증 통과: " + ", ".join(labels)) if any_passed \
+                else ("unavailable", "검증 실행 불가(모든 check가 unavailable)")
+        finally:
+            self._verify_cleanup(ws, before)
 
     async def _verify_gates(self, ws: str, session_id: str, send: EventSink) -> tuple[str, str]:
         """Acceptance Gate 검증 — verification 모듈로 위임(로직 분리, 인터페이스 유지)."""

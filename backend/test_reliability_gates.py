@@ -188,6 +188,55 @@ async def main():
             os.environ.pop(k, None)
     print("verify pytest 3-state: OK — exit 0=passed / 1=failed / 2·미설치=unavailable, 설정오류+통과=PASS 오판 금지")
 
+    # ── 검증 멱등화(regression): generic+integration 이중검증이 검증-생성 파일로 과차단하지 않는다 ──
+    # root cause: run()이 _verify(generic)와 _verify_integration→_verify(integration)로
+    # 동일 test/build를 두 번 실행. stateful 테스트가 1회차에 남긴 state.json이 2회차를 깨뜨림.
+    import sys
+
+    # (a) stateful: state 파일을 남기는 테스트가 이중검증(재실행)에서도 통과해야 한다.
+    with tempfile.TemporaryDirectory() as d:
+        bd = os.path.join(d, "backend")
+        os.makedirs(os.path.join(bd, ".venv", "bin"))
+        os.symlink(sys.executable, os.path.join(bd, ".venv", "bin", "python"))  # 실제 pytest 실행
+        with open(os.path.join(bd, "test_stateful.py"), "w") as f:
+            f.write("import os\n"
+                    "STATE = os.path.join(os.path.dirname(__file__), 'state.json')\n"
+                    "def test_fresh_state():\n"
+                    "    assert not os.path.exists(STATE), '잔존 state 오염 — 첫 실행이 아님'\n"
+                    "    open(STATE, 'w').write('1')\n")
+        st1, rep1 = await rt._verify(d, _ns)                       # generic
+        assert st1 == "passed", (st1, rep1)
+        assert not os.path.exists(os.path.join(bd, "state.json")), "검증 후 잔존 파일 청소 실패"
+        st2, rep2 = await rt._verify(d, _ns, stage="integration")  # integration 재검증
+        assert st2 == "passed", (st2, rep2)  # 잔존 state 없이 다시 통과 = 멱등
+    print("verify 멱등화(stateful): OK — state.json 남기는 테스트가 이중검증에서도 통과")
+
+    # (b) 실제로 깨진 코드는 이중검증에서도 여전히 failed — 청소가 검증을 약화시키지 않는다.
+    with tempfile.TemporaryDirectory() as d:
+        bd = os.path.join(d, "backend")
+        os.makedirs(os.path.join(bd, ".venv", "bin"))
+        os.symlink(sys.executable, os.path.join(bd, ".venv", "bin", "python"))
+        with open(os.path.join(bd, "test_broken.py"), "w") as f:
+            f.write("def test_broken():\n    assert False, '실제 버그'\n")
+        st, rep = await rt._verify(d, _ns)
+        assert st == "failed", (st, rep)
+        st, rep = await rt._verify(d, _ns, stage="integration")
+        assert st == "failed", (st, rep)  # false_completion 안 늘림 — 여전히 실패로 잡힘
+    print("verify 멱등화(약화 없음): OK — 실제로 깨진 테스트는 이중검증에서도 failed")
+
+    # (c) 스냅샷/청소 단위: 검증-생성 파일만 제거, 구현 산출물(기존·수정 포함) 보존.
+    with tempfile.TemporaryDirectory() as d:
+        keep = os.path.join(d, "solution.py")
+        open(keep, "w").write("x = 1\n")
+        before = A.AgentRuntime._verify_snapshot(d)
+        made = os.path.join(d, "state.json")
+        open(made, "w").write("runtime artifact")
+        open(keep, "a").write("y = 2\n")  # 기존 파일 수정 — 삭제 대상 아님(생성만 제거)
+        A.AgentRuntime._verify_cleanup(d, before)
+        assert not os.path.exists(made), "검증-생성 파일이 청소돼야 함"
+        assert os.path.exists(keep), "구현 산출물(기존 파일)은 보존돼야 함"
+    print("verify 멱등화(스냅샷/청소): OK — 새 파일만 제거, 기존 파일 보존")
+
     # ── 승인 경계: auto_approve 세션만 자동 승인, 그 외는 approval_request ──
     from app.tools import registry as R
 

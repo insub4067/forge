@@ -1,0 +1,14 @@
+{
+  "commit_sha": "after-p1p2",
+  "timestamp": "2026-08-26T03:36:33.778337+00:00",
+  "python_version": "3.14.7",
+  "node_version": "v26.7.0",
+  "model": "deepseek-v4 (flash/pro auto)",
+  "model_tier": "auto",
+  "task_ir_enabled": true,
+  "sandbox_mode": "host",
+  "auto_approve": true,
+  "benchmark_version": "R0-25tasks",
+  "repeat": 3,
+  "total_runs": 75
+}
