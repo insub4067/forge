@@ -72,10 +72,12 @@ function toolOpen(t) {
   return !t.diff && r.length <= 200 && r.split('\n').length <= 4
 }
 
-// 추론이 열린 상태에서 배경(버튼·도구·추론 자체가 아닌 빈 영역)을 탭하면 추론을 접는다.
+// 추론이 열린 상태에서 시트 본문(추론 텍스트 영역 포함)을 탭하면 접는다. 펼치면 reasoning-body가
+// 영역을 채워 '빈 배경'이 없으므로, 추론 영역 탭도 닫기로 친다. 버튼·도구·링크만 제외(오작동 방지).
+// 텍스트 드래그 선택은 click을 안 내므로 선택은 그대로 가능.
 function onBodyTap(e) {
   if (!props.phase.thinkOpen) return
-  if (e.target.closest('button, summary, details, a, .reasoning-body, .adp-reason-toggle')) return
+  if (e.target.closest('button, summary, details, a')) return
   props.phase.thinkOpen = false
 }
 function toggleThink() {
