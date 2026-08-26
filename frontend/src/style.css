@@ -3886,6 +3886,54 @@ button {
   text-align: left;
 }
 
+/* ── Agent Activity Timeline ──────────────────────────────────────────────
+   세로 rail = 시간축 + 인과. 각 phase가 노드. 상태는 형태(● 진행 / ✓ 성공 / ! 실패)로
+   구별하고 색은 보조로만 쓴다(다크모드 가독성). */
+.timeline { margin: 2px 0; }
+.tl-node { display: flex; gap: 10px; position: relative; }
+/* rail — 이 노드 마커에서 다음 노드로 잇는 선(마지막 노드는 잇지 않는다) */
+.tl-node:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 20px;
+  bottom: -2px;
+  width: 1.5px;
+  background: var(--border);
+}
+.tl-marker {
+  flex: 0 0 17px;
+  display: flex;
+  justify-content: center;
+  padding-top: 3px;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--muted);
+  z-index: 1;
+}
+.tl-marker.running { color: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+.tl-marker.error { color: #f87171; font-weight: 800; }
+.tl-content { flex: 1; min-width: 0; padding-bottom: 12px; }
+.tl-node:last-child .tl-content { padding-bottom: 2px; }
+.tl-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;      /* 터치 타깃 */
+  cursor: pointer;
+}
+.tl-agent { font-weight: 600; color: var(--text); font-size: 13.5px; }
+.tl-model { font-size: 11px; color: var(--muted); }
+.tl-state { font-size: 12px; color: var(--accent); }
+.tl-count { font-size: 12px; color: var(--muted); }
+.tl-chevron { margin-left: auto; color: var(--muted); transition: transform 0.15s ease; }
+.tl-chevron.open { transform: rotate(-90deg); }
+.tl-content .text { padding: 2px 0 0; }
+@media (prefers-reduced-motion: reduce) {
+  .tl-marker.running { animation: none; }
+  .tl-chevron { transition: none; }
+}
+
 /* 헤더 방 모드 세그먼트 — 작업(work) / 채팅(chat) */
 .mode-seg {
   display: inline-flex;

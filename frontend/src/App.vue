@@ -1021,6 +1021,12 @@ function phaseStatus(p) {
   return 'done'
 }
 
+// 상태를 색이 아니라 '형태'로 — 다크모드 가독성. ● 진행 / ✓ 성공 / ! 실패.
+function phaseGlyph(p) {
+  const s = phaseStatus(p)
+  return s === 'running' ? '●' : s === 'error' ? '!' : '✓'
+}
+
 // 작성 중 어떤 모델이 답하는지 한눈에 — 모델명을 짧은 배지로.
 function shortModel(m) {
   if (!m) return ''
@@ -1678,21 +1684,24 @@ document.addEventListener('visibilitychange', () => {
           </template>
 
           <template v-if="m.role === 'assistant'">
-            <div v-for="(p, pi) in m.phases" :key="pi" class="activity" :class="[phaseStatus(p), { card: p.tools.length || p.thinking }]">
+            <!-- Agent Activity Timeline — 세로 rail이 시간축+인과를 나타낸다. 각 phase가 노드,
+                 상태는 형태(● 진행 / ✓ 성공 / ! 실패)로 구별한다(색은 보조). -->
+            <div v-if="m.phases.length" class="timeline">
+            <div v-for="(p, pi) in m.phases" :key="pi" class="tl-node" :class="phaseStatus(p)">
+              <span class="tl-marker" :class="phaseStatus(p)" aria-hidden="true">{{ phaseGlyph(p) }}</span>
+              <div class="tl-content">
               <div
                 v-if="p.tools.length || p.thinking"
-                class="activity-head"
+                class="tl-head"
                 @click="p.collapsed = !p.collapsed"
               >
-                <span class="activity-dot" :class="phaseStatus(p)"></span>
-                <span class="activity-label">{{ phaseLabel(p) }}</span>
-                <span v-if="p.model" class="activity-model">{{ shortModel(p.model) }}</span>
-                <span v-if="p.running && runningTool(p)" class="activity-live">{{ runningTool(p).name }} 실행 중…</span>
-                <!-- 검증 단계(테스트/요구사항/회귀/복구)는 프로세스가 보낸 이벤트로만 표시한다.
-                     하단 표시기를 없앴으므로 이 자리가 유일한 노출 지점이다. -->
-                <span v-else-if="m.verifyPhase && pi === m.phases.length - 1" class="activity-live">{{ m.verifyPhase }}<span class="typing-dots"><i></i><i></i><i></i></span></span>
-                <span v-else-if="p.tools.length" class="activity-count">도구 {{ p.tools.length }}</span>
-                <svg class="activity-chevron" :class="{ open: p.collapsed }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                <span class="tl-agent">{{ phaseLabel(p) }}</span>
+                <span v-if="p.model" class="tl-model">{{ shortModel(p.model) }}</span>
+                <span v-if="p.running && runningTool(p)" class="tl-state">{{ runningTool(p).name }} 실행 중…</span>
+                <!-- 검증 단계(테스트/요구사항/회귀/복구)는 프로세스가 보낸 이벤트로만 표시한다. -->
+                <span v-else-if="m.verifyPhase && pi === m.phases.length - 1" class="tl-state">{{ m.verifyPhase }}<span class="typing-dots"><i></i><i></i><i></i></span></span>
+                <span v-else-if="p.tools.length" class="tl-count">도구 {{ p.tools.length }}</span>
+                <svg class="tl-chevron" :class="{ open: p.collapsed }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
               </div>
 
               <div v-if="p.text" class="text" v-html="renderMarkdown(p.text)"></div>
@@ -1730,6 +1739,8 @@ document.addEventListener('visibilitychange', () => {
                   <pre v-else>{{ t.status === 'running' ? '실행 중…' : (t.result || '(출력 없음)') }}</pre>
                 </details>
               </template>
+              </div>
+            </div>
             </div>
 
             <div v-if="(m.state && (m.state.files_changed?.length || m.state.errors?.length)) || m.compacted" class="state-summary">
