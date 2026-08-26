@@ -1676,8 +1676,8 @@ footer .image-preview-row {
   border: 1px solid var(--border);
   border-radius: 20px;
   padding: 8px 12px;
-  /* 옅은 위쪽 그림자만 — 위 콘텐츠와 구분만 하고 '떠 있는' 느낌은 없앤다(바닥에 붙게). */
-  box-shadow: 0 -1px 10px rgba(0, 0, 0, 0.08);
+  /* 위쪽으로만 은은한 그림자 — 위 콘텐츠와 카드 경계는 보이되 '떠 있는' 느낌은 없앤다. */
+  box-shadow: 0 -3px 14px rgba(0, 0, 0, 0.13);
 }
 
 /* composer surface — 카드 아래 safe-area 여백을 담당한다.

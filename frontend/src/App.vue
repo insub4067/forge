@@ -1604,7 +1604,7 @@ applyTheme(theme.value)
 
 // ── safe-area / 키보드 디버그 오버레이(임시) — 실기기 실제 값을 화면에 띄워 추측 없이 진단.
 // localStorage.forge_sa_debug='1'이면 표시. 해결되면 제거한다.
-const saDebug = ref(true)  // 임시 진단 — 해결 후 false·제거
+const saDebug = ref(localStorage.getItem('forge_sa_debug') === '1')  // 진단용(기본 off, localStorage로 켬)
 const saInfo = ref({ top: 0, bottom: 0, innerH: 0, vvH: 0, vvTop: 0, kbd: false })
 function measureSafeArea() {
   const probe = document.createElement('div')
