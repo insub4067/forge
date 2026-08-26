@@ -212,6 +212,11 @@ function closeViewer() { viewerImages.value = [] }
 function viewerNext() { if (viewerIndex.value < viewerImages.value.length - 1) { viewerIndex.value++; resetImgZoom() } }
 function viewerPrev() { if (viewerIndex.value > 0) { viewerIndex.value--; resetImgZoom() } }
 let viewerTouchX = 0
+// 두 손가락 사이 거리(핀치 배율 계산용) — 정의가 없어 핀치 시 ReferenceError로 뷰어 줌이
+// 통째로 깨져 있었다. PdfViewer.vue에 같은 헬퍼가 있다(각자 로컬 유지).
+function _touchDist(t) {
+  return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+}
 let _imgPinchDist = 0, _imgPinchScale = 1
 let _imgPanX = 0, _imgPanY = 0, _imgStartTx = 0, _imgStartTy = 0
 function viewerTouchStart(e) {
