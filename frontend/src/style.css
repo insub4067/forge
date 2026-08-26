@@ -3982,7 +3982,7 @@ button {
 .tl-head.tappable { cursor: pointer; border-radius: 6px; padding: 0 4px; margin: 0 -4px; }
 .tl-head.tappable:hover { background: var(--panel-2); }
 .tl-head.tappable:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.tl-problem { font-size: 12px; font-weight: 600; color: #f87171; }
+.tl-problem { font-size: 12px; font-weight: 600; color: #f59e0b; }  /* 도구 실패 통계 — 경보성 빨강 아님(Activity는 성공) */
 .tl-open { margin-left: auto; color: var(--muted); flex-shrink: 0; }
 
 /* ── Agent 활동 Detail Surface — 모바일 bottom sheet / 데스크톱 우측 side panel ── */
@@ -4037,7 +4037,7 @@ button {
 .adp-glyph.error { color: #f87171; font-weight: 800; }
 .adp-title { font-size: 15px; font-weight: 700; color: var(--text); }
 .adp-model { font-size: 11px; color: var(--muted); }
-.adp-problem { font-size: 12px; font-weight: 600; color: #f87171; }
+.adp-problem { font-size: 12px; font-weight: 600; color: #f59e0b; }
 .adp-x {
   margin-left: auto;
   background: var(--panel-2);
@@ -4093,6 +4093,10 @@ button {
 .adp-tool-mark.error { color: #f87171; font-weight: 800; }
 .adp-tool-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: var(--text); flex-shrink: 0; }
 .adp-tool-args { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 도구 결과 여닫힘 상태 화살표 — 펼치면 아래로 회전. */
+.adp-tool-chevron { flex-shrink: 0; margin-left: auto; color: var(--muted); transition: transform 0.15s ease; align-self: center; }
+.adp-tool[open] > summary .adp-tool-chevron { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .adp-tool-chevron { transition: none; } }
 .adp-tool.error > summary { color: #f0a3a3; }
 .adp-result {
   margin: 0 0 8px;

@@ -23,8 +23,8 @@ function phaseLabel(p) {
   return '응답'
 }
 function phaseStatus(p) {
+  // Tool Failure ≠ Activity Failure — 도구 실패는 탐색 과정. Activity 실패(!)로 만들지 않는다.
   if (p.running) return 'running'
-  if ((p.tools || []).some((t) => t.status === 'error')) return 'error'
   return 'done'
 }
 // 상태를 색이 아니라 형태로 — ● 진행 / ✓ 성공 / ! 실패.
@@ -85,7 +85,7 @@ const errorCount = computed(() => (props.phase.tools || []).filter((t) => t.stat
       <span class="adp-glyph" :class="phaseStatus(phase)" aria-hidden="true">{{ phaseGlyph(phase) }}</span>
       <span class="adp-title">{{ phaseLabel(phase) }}</span>
       <span v-if="phase.model" class="adp-model">{{ shortModel(phase.model) }}</span>
-      <span v-if="errorCount" class="adp-problem">문제 {{ errorCount }}</span>
+      <span v-if="errorCount" class="adp-problem">실패 {{ errorCount }}</span>
       <button class="adp-x" @click="$emit('close')" aria-label="닫기">✕</button>
     </header>
 
@@ -124,6 +124,7 @@ const errorCount = computed(() => (props.phase.tools || []).filter((t) => t.stat
             <span class="adp-tool-mark" :class="t.status" aria-hidden="true">{{ t.status === 'error' ? '!' : t.status === 'running' ? '●' : '✓' }}</span>
             <span class="adp-tool-name">{{ t.name }}</span>
             <span class="adp-tool-args">{{ summarizeArgs(t.args) }}</span>
+            <svg class="adp-tool-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
           </summary>
           <div v-if="t.diff" class="diff adp-diff">
             <div v-for="(line, li) in diffLines(t.diff)" :key="li" :class="diffClass(line)">{{ line || ' ' }}</div>

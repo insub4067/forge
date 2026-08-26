@@ -1011,12 +1011,14 @@ function phaseLabel(p) {
 }
 
 function phaseStatus(p) {
+  // Tool Failure ≠ Activity Failure. 코딩 에이전트에게 read_file ENOENT·grep no-match 등은
+  // 탐색의 정상 과정이다. 도구 하나가 실패했다고 Activity 전체를 '!'로 만들지 않는다.
+  // Activity 실패(!)는 검증 실패/완료 터미널(completionNode)에서만 온다. 도구 실패는 통계로.
   if (p.running) return 'running'
-  if (p.tools.some((t) => t.status === 'error')) return 'error'
   return 'done'
 }
 
-// Timeline 노드에 "문제 N" — 실패한 도구 수. 실패를 상세에만 숨기지 않는다.
+// Timeline 노드에 "실패 N" — 실패한 도구 수(Activity 실패가 아니라 도구 통계). 상세는 Sheet.
 function phaseErrorCount(p) {
   return (p.tools || []).filter((t) => t.status === 'error').length
 }
@@ -1025,6 +1027,18 @@ function phaseErrorCount(p) {
 function phaseGlyph(p) {
   const s = phaseStatus(p)
   return s === 'running' ? '●' : s === 'error' ? '!' : '✓'
+}
+
+// 완료된 Activity의 요약을 결과형으로 — "확인하겠습니다" → "확인"(시제 일치). 새 LLM 호출 없이
+// 기존 phase 텍스트의 미래·의도 종결만 결정적으로 벗긴다. running은 그대로(진행 중 문장 유지).
+function phaseSummary(p) {
+  const t = (p.text || '').trim()
+  if (!t || p.running) return t
+  const stripped = t
+    .replace(/(하겠습니다|하겠어요|하려고\s*합니다|해\s*보겠습니다|아?\s*보겠습니다|겠습니다)\s*[.。]?\s*$/u, '')
+    .replace(/[.。\s]+$/u, '')
+    .trim()
+  return stripped || t   // 통째로 비면(예: 문장 전체가 종결어미) 원문 유지
 }
 
 // 이 assistant 메시지가 Agent 활동(도구·추론)을 포함하는가. ✓ 등 상태 기호는 Agent Activity
@@ -1754,15 +1768,16 @@ document.addEventListener('visibilitychange', () => {
                 <span v-else-if="m.verifyPhase && pi === m.phases.length - 1" class="tl-state">{{ m.verifyPhase }}<span class="typing-dots"><i></i><i></i><i></i></span></span>
                 <span v-else-if="p.running" class="tl-state">생각 중<span class="typing-dots"><i></i><i></i><i></i></span></span>
                 <template v-else>
-                  <span v-if="phaseErrorCount(p)" class="tl-problem">문제 {{ phaseErrorCount(p) }}</span>
                   <span v-if="p.thinking" class="tl-count">추론</span>
                   <span v-if="p.tools.length" class="tl-count">도구 {{ p.tools.length }}</span>
+                  <!-- 도구 실패 통계(Activity 실패 아님) — "문제 N"은 모호해 "실패 N"으로. -->
+                  <span v-if="phaseErrorCount(p)" class="tl-problem">실패 {{ phaseErrorCount(p) }}</span>
                 </template>
                 <svg class="tl-open" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
               </div>
 
-              <!-- 핵심 결과 요약 — phase의 응답 본문은 Timeline에 남긴다(상세로 숨기지 않는다). -->
-              <div v-if="p.text" class="text" v-html="renderMarkdown(p.text)"></div>
+              <!-- 핵심 결과 요약 — 완료 phase는 결과형 시제로(미래형 "…하겠습니다" 제거). -->
+              <div v-if="p.text" class="text" v-html="renderMarkdown(phaseSummary(p))"></div>
               </div>
             </div>
             <!-- 완료 터미널 노드 — backend 실제 completion semantic. completed_unverified를
