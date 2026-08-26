@@ -56,31 +56,57 @@ READ_ONLY_INTENTS = frozenset({"question", "conversation", "investigation", "rev
 MUTATING_INTENTS = frozenset({"code_change"})
 
 
-def is_read_only_completion(intent: str, files_changed: list,
-                            attempted_mutation: bool, used_tools: bool) -> bool:
+def worktree_run_changes(before, after):
+    """이번 run이 실제로 워크스페이스를 바꿨는지 Git signature(before/after)로 판정(순수 함수).
+
+    signature = {"porcelain": <git status --porcelain>, "hash": <porcelain+diff 해시>} 또는 None.
+    명령 문자열이 아니라 filesystem/Git evidence가 authority다 — write/edit뿐 아니라 bash sed·rm·
+    mv·스크립트·포맷터 변경까지 잡고, git status·log 같은 조회는 변경으로 치지 않는다.
+
+    반환 (changed, files):
+    - changed: True(변경 확인) / False(변경 없음 확인) / None(git repo 아님·감지 불가 → 안전 강등).
+    - files: 이번 run에서 새로 생기거나 status가 바뀌거나 삭제된 경로(표시·autocommit용). 기존 dirty
+      (before에 이미 있던 동일 상태)는 제외 — 사용자의 기존 변경을 이번 run 것으로 오인하지 않는다.
+    """
+    if before is None or after is None:
+        return None, []
+    changed = before.get("hash") != after.get("hash")
+
+    def _parse(porc):
+        out = {}
+        for line in (porc or "").splitlines():
+            if len(line) >= 4:
+                out[line[3:]] = line[:2]
+        return out
+
+    b, a = _parse(before.get("porcelain", "")), _parse(after.get("porcelain", ""))
+    files = {x for x, st in a.items() if b.get(x) != st}
+    files |= {x for x in b if x not in a}
+    return changed, sorted(files)
+
+
+def is_read_only_completion(intent, run_changed, attempted_mutation, used_tools):
     """이 run이 'verification 불필요한 read-only 성공'인가 — NOT_APPLICABLE 판정.
 
-    Task IR intent는 flaky할 수 있으므로(interpreter가 None을 반환하면 intent="") intent 단독에
-    의존하지 않고 **실행 evidence**로 판정한다:
+    판정 authority는 **실제 Git/filesystem 변경(run_changed)**이다(명령 문자열 분류 아님):
 
-    - files_changed 있음 or attempted_mutation(write/edit 도구 사용) → False. 실제/시도된 mutation은
-      mutation 검증 정책으로 폴백한다(false_completion 방지 — 핵심 불변식). bash(git status 등)는
-      mutation 신호로 치지 않는다.
-    - used_tools 없음 → False. 도구 실행 evidence 없이 LLM self-report만으론 completed로 안 본다.
-    - intent가 read-only(question/investigation/…) → True.
-    - intent가 명시적 mutation(code_change) → False. 요청이 수정인데 변경이 없으면 completed_unverified
-      로 남긴다(안전).
-    - intent 불명(interpreter 실패/other): 편집·변경이 전혀 없고 도구 evidence가 있으면 read-only
-      조회로 본다 — Task IR가 실패해도 read-only가 '부분 완료'로 떨어지지 않게 한다.
+    - run_changed가 False(변경 없음 확인)가 아니면 False. 변경이 있거나(True) 감지 불가(None)면
+      read-only로 승격하지 않는다 — bash sed·rm·git commit 등 어떤 경로의 변경도 놓치지 않고,
+      감지 불가는 안전하게 mutation 정책으로(false_completion 방지, 핵심 불변식).
+    - attempted_mutation(write/edit 호출)이면 False. 썼다가 원복해 net 변경이 없어도 안전하게
+      mutation 정책으로(원복 케이스 명시적 처리).
+    - used_tools 없으면 False. 도구 실행 evidence 없이 self-report만으론 completed로 안 본다.
+    - intent가 명시적 mutation(code_change)이면 False(수정 요청인데 변경 없음 → completed_unverified).
+    - 그 외(intent read-only 또는 interpreter 실패/other)이고 변경 없음 확인 + 도구 evidence → True.
 
-    NOT_APPLICABLE ≠ UNAVAILABLE: 전자는 검증 불필요한 성공, 후자는 검증이 필요했으나 못 한 것.
+    NOT_APPLICABLE ≠ UNAVAILABLE.
     """
-    if files_changed or attempted_mutation:
+    if run_changed is not False:
+        return False
+    if attempted_mutation:
         return False
     if not used_tools:
         return False
-    if intent in READ_ONLY_INTENTS:
-        return True
     if intent in MUTATING_INTENTS:
         return False
     return True

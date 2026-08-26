@@ -32,6 +32,7 @@ from .completion_policy import (  # noqa: F401
     _blocking_reason,
     resolve_completion_verification,
     is_read_only_completion,
+    worktree_run_changes,
     READ_ONLY_INTENTS,
     _clamp_task_status,
     _clamp_gate_status,
@@ -1328,6 +1329,32 @@ class AgentRuntime:
         except Exception as err:
             error_log.record("mark_verifying", str(err), session_id)
 
+    async def _worktree_signature(self, ws: str) -> dict | None:
+        """워크스페이스의 현재 Git 변경 상태 signature — run 전/후 비교로 실제 변경을 판정한다.
+        git repo가 아니거나 실패하면 None(감지 불가 → 안전 강등). 사용자의 기존 dirty도 그대로
+        담아 before/after 비교에서 제외되게 한다(절대 덮어쓰지 않는다)."""
+        import hashlib
+
+        async def _g(*args, timeout=15):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "-C", ws, *args,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+                return proc.returncode, out.decode(errors="replace")
+            except Exception:
+                return 1, ""
+
+        if not ws:
+            return None
+        rc, inside = await _g("rev-parse", "--is-inside-work-tree", timeout=8)
+        if rc != 0 or "true" not in inside:
+            return None
+        _, porcelain = await _g("status", "--porcelain")
+        _, diff = await _g("diff", "HEAD")  # 같은 status(예: ' M')의 추가 수정 내용까지 잡는다
+        h = hashlib.sha1((porcelain + "\x00" + diff).encode("utf-8", "replace")).hexdigest()
+        return {"porcelain": porcelain, "hash": h}
+
     async def _autocommit(self, ws: str, goal: str, send: EventSink,
                           paths: list[str] | None = None, push: bool = True) -> tuple[bool, bool]:
         """성공 완료 시 git 워크스페이스면 자동 commit(+선택적 push) — 커밋 누락 방지.
@@ -2308,6 +2335,11 @@ class AgentRuntime:
         req_block = "" if _ir_intent in READ_ONLY_INTENTS else _requirements_block(
             self._task_ir_reqs.get(session_id) if session_id else None)
 
+        # run 시작 시점 워크스페이스 Git signature — 개발자 실행 후와 비교해 이번 run이 실제로
+        # 무엇을 바꿨는지(write/edit뿐 아니라 bash sed·rm·git commit 등 모든 경로) 판정한다.
+        # 사용자의 기존 dirty는 이 before에 담겨 이후 비교에서 제외된다.
+        wt_before = await self._worktree_signature(ws)
+
         # 1. 에이전트 모드 결정 — 사용자 명시(multi/single)가 최우선, auto는 복잡도 기반 자동.
         mode = self.get_agent_mode(session_id)
         complexity = _estimate_complexity(goal, all_messages)
@@ -2414,11 +2446,27 @@ class AgentRuntime:
             await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
             return all_messages
 
-        # 변경 0건 — build/test가 통과해도 그건 이번 run이 검증된 게 아니라 아무것도 안 한 것이다.
-        # "작업 완료 — 검증 통과"로 보고하면 모델이 하겠다고만 하고 끝낸 run이 성공으로 둔갑한다.
-        if not state["files_changed"]:
-            await finish("completed_unverified",
-                         "코드 변경 없이 종료했습니다(검증 대상 없음). 수정이 필요한 요청이었다면 다시 지시해 주세요.")
+        # 이번 run의 실제 워크스페이스 변경을 Git evidence로 판정 — write/edit뿐 아니라 bash
+        # sed·rm·mv·스크립트·포맷터 변경까지 잡는다(명령 문자열 분류 아님). 표시·autocommit용
+        # files_changed를 이 evidence로 통일한다(req 9).
+        wt_after = await self._worktree_signature(ws)
+        run_changed, run_files = worktree_run_changes(wt_before, wt_after)
+        for _f in run_files:
+            if _f not in state["files_changed"]:
+                state["files_changed"].append(_f)
+
+        # 검증할 실제 변경이 없으면 여기서 마감한다. read-only 조회(변경 없음 확인 + 도구 evidence
+        # + write/edit 미시도)면 completed(NOT_APPLICABLE), 아니면 completed_unverified.
+        # run_changed is None(git repo 아님·감지 불가) + 변경 파일 없음도 여기서 안전 강등.
+        if run_changed is False or (run_changed is None and not state["files_changed"]):
+            if is_read_only_completion(_ir_intent, run_changed,
+                                       state.get("attempted_mutation", False),
+                                       state.get("tool_count", 0) > 0):
+                await finish("completed",
+                             "요청하신 내용을 확인해 알려드렸습니다(조회 작업 — 별도 검증이 필요 없습니다).")
+            else:
+                await finish("completed_unverified",
+                             "코드 변경 없이 종료했습니다(검증 대상 없음). 수정이 필요한 요청이었다면 다시 지시해 주세요.")
             return all_messages
 
         # ── Gate coverage 복구 — gate 0인 코드 변경 run은 완전 검증 완료가 될 수 없다 ──
@@ -2501,21 +2549,12 @@ class AgentRuntime:
         _reqs = self._task_ir_reqs.get(session_id) if session_id else None
         _trace = (traceability.compute_traceability(_reqs, await store.list_gates(session_id))
                   if _reqs else None)
-        # Read-only 조회·설명·리뷰(mutation 아님)는 독립 verification이 NOT_APPLICABLE이다.
-        # 이 지점까지 왔다는 것 = developer가 정상 종료 + verify/gate가 failed 아님(위에서 early-return).
-        # 성공한 tool 실행 자체가 evidence이므로 completed로 본다. 단 실제 파일 변경(files_changed)이
-        # 있으면 intent 오분류로 판단해 mutation 정책으로 폴백한다(false_completion 방지 — 핵심 불변식).
-        _ir_intent = (self._task_ir_intent.get(session_id, "") if session_id else "")
-        _read_only = is_read_only_completion(
-            _ir_intent, state["files_changed"],
-            state.get("attempted_mutation", False), state.get("tool_count", 0) > 0)
-        if _read_only:
-            final = "completed"
-        else:
-            final = resolve_completion_verification(
-                gstate, vstate, bool(_trace and _trace["false_completion_candidate"]))
-            if gstate == "none" and vstate != "passed":
-                await send("verify_unavailable", {"report": report[:400]})
+        # 이 지점은 실제 변경이 있는 mutation run만 도달한다(변경 없음·read-only 조회는 위에서
+        # Git evidence로 판정해 early-return). mutation 완료 정책 그대로 — gate·generic 검증으로 판정.
+        final = resolve_completion_verification(
+            gstate, vstate, bool(_trace and _trace["false_completion_candidate"]))
+        if gstate == "none" and vstate != "passed":
+            await send("verify_unavailable", {"report": report[:400]})
         summary = await self._completion_summary(
             session_id, final, gstate, vstate, istate, len(state["files_changed"]),
             _untraced_requirements(_reqs, _trace))
