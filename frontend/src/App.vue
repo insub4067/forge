@@ -388,19 +388,21 @@ function runningBannerText() {
 // 모델 컨텍스트에는 원문이 남지만, 화면엔 회원님 말풍선 대신 흐린 한 줄로 보인다.
 // 하네스가 all_messages에 넣는 프로세스 메시지(role:user)의 접두사 → 뱃지 라벨.
 // [작업 중 사용자 메시지]는 실제 사용자 발화라 제외한다(주입 아님).
+// Agent Activity 라벨 — 무엇이 일어났나(action)와 상태(state)를 담고, tone으로 의미를 색에
+// 싣는다(전부 accent 금지). tone은 기존 FORGE 상태색을 재사용한다(warn/error/accent/muted).
 const PROCESS_NOTES = [
-  ['[검증 실패', '검증 실패 · 수리'],
-  ['[요구사항 게이트 검증 실패', '요구사항 게이트 실패 · 수리'],
-  ['[Reviewer 지적', '리뷰 지적 · 수정'],
-  ['[이전 작업 요약', '컨텍스트 압축'],
-  ['[구현은 끝났다', '요구사항 게이트 등록 요청'],
+  ['[검증 실패', { label: '검증 실패', state: '수리 중', tone: 'warn' }],
+  ['[요구사항 게이트 검증 실패', { label: '요구사항 게이트 실패', state: '수리 중', tone: 'warn' }],
+  ['[Reviewer 지적', { label: 'Reviewer 지적', state: '반영 중', tone: 'accent' }],
+  ['[이전 작업 요약', { label: '컨텍스트 압축', state: '', tone: 'muted' }],
+  ['[구현은 끝났다', { label: '요구사항 게이트 등록', state: '', tone: 'muted' }],
 ]
 function processNote(content) {
   const t = typeof content === 'string' ? content : ''
-  for (const [prefix, label] of PROCESS_NOTES) {
-    if (t.startsWith(prefix)) return label
+  for (const [prefix, meta] of PROCESS_NOTES) {
+    if (t.startsWith(prefix)) return meta
   }
-  return ''
+  return null
 }
 
 // 상세 화면 없이도 "지금 무엇을" 한 줄로. 스트림 끊겨도 폴링으로 갱신.
@@ -1655,8 +1657,13 @@ document.addEventListener('visibilitychange', () => {
       <div v-for="(m, i) in messages" :key="i" :data-msg-idx="i" class="msg" :class="m.role">
         <div class="bubble">
           <template v-if="m.role === 'user'">
-            <details v-if="processNote(m.content)" class="process-note">
-              <summary><span class="process-badge">프로세스</span>{{ processNote(m.content) }}</summary>
+            <details v-if="processNote(m.content)" class="process-note" :class="'tone-' + processNote(m.content).tone">
+              <summary>
+                <span class="proc-icon" aria-hidden="true">⚙</span>
+                <span class="proc-label">{{ processNote(m.content).label }}</span>
+                <span v-if="processNote(m.content).state" class="proc-state">{{ processNote(m.content).state }}</span>
+                <svg class="proc-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+              </summary>
               <div class="process-note-body">{{ m.content }}</div>
             </details>
             <div v-else-if="m.queued" class="queue-badge">
