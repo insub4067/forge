@@ -134,6 +134,23 @@ def aggregate(results: list[dict]) -> dict:
         "total_cost": round(tot_cost, 6),
         "cost_per_task": round(tot_cost / tot_n, 6) if tot_n else None,
     }
+
+    # ── RSI 승격 판정용 분리 집계(P1-D): promotion set(판정용)과 holdout(판정에 절대 안 씀) ──
+    # overall은 하위호환으로 전체(25태스크) 유지. promotion_gate는 아래 promotion/holdout을 쓴다.
+    from rsi import is_holdout
+
+    def _subset(keep) -> dict:
+        rs = [r for r in results if keep(r["code"])]
+        n = len(rs)
+        s = sum(1 for r in rs if r["success"])
+        cost = sum(r["cost"] for r in rs if r.get("cost") is not None)
+        el = sorted(r["elapsed_s"] for r in rs)
+        return {"runs": n, "successes": s, "success_rate": _pct(s, n),
+                "cost_per_success": round(cost / s, 6) if s else None,
+                "elapsed_p50": _percentile(el, 0.5)}
+
+    out["promotion"] = _subset(lambda c: not is_holdout(c))
+    out["holdout"] = _subset(is_holdout)
     return out
 
 

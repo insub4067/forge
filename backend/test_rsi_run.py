@@ -14,8 +14,11 @@ from rsi_run import FORGE_PREFIX, load_baseline, run_candidate_cmd, write_report
 
 
 def _agg(sr, cost, elapsed):
-    return {"overall": {"success_rate": sr, "cost_per_success": cost,
-                        "elapsed_p50": elapsed, "runs": 5, "successes": 5}}
+    # P1-D: promotion_gate가 표본 요건(min_samples)·Wilson 하한을 쓰므로 runs/successes를 충분히 준다.
+    runs = 50
+    ov = {"success_rate": sr, "cost_per_success": cost,
+          "elapsed_p50": elapsed, "runs": runs, "successes": round(sr * runs)}
+    return {"overall": ov, "promotion": ov, "holdout": {"success_rate": 1.0, "runs": 15}}
 
 
 def test_load_baseline_ok():
@@ -61,14 +64,10 @@ def test_write_report_reject():
 
 
 def test_promotion_gate_self_test():
-    # rsi.py의 내장 self-test와 동일한 6케이스가 통과하는지
-    base = {"success_rate": 1.0, "cost_per_success": 0.0060, "elapsed_p50": 20.0}
-    assert promotion_gate(base, {"success_rate": 0.8, "cost_per_success": 0.001, "elapsed_p50": 5})["decision"] == "REJECT"
-    assert promotion_gate(base, {"success_rate": 1.0, "cost_per_success": 0.0048, "elapsed_p50": 20})["decision"] == "PROMOTE"
-    assert promotion_gate(base, {"success_rate": 1.0, "cost_per_success": 0.0070, "elapsed_p50": 5})["decision"] == "REJECT"
-    assert promotion_gate(base, {"success_rate": 1.0, "cost_per_success": 0.0060, "elapsed_p50": 15})["decision"] == "PROMOTE"
-    assert promotion_gate(base, {"success_rate": 1.0, "cost_per_success": 0.0060, "elapsed_p50": 20})["decision"] == "REJECT"
-    assert promotion_gate(base, {"success_rate": 1.0, "cost_per_success": None, "elapsed_p50": 5})["decision"] == "REJECT"
+    # rsi.py의 내장 self-test(P1-D: 표본·holdout·Wilson·비용·elapsed)에 위임 — 중복 유지 대신
+    # authority 한 곳(rsi._self_test)에서 검증한다. 상세 케이스는 test_rsi_promotion.py.
+    import rsi
+    rsi._self_test()
 
 
 def test_forge_prefix_constant():

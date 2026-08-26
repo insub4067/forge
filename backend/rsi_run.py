@@ -166,6 +166,15 @@ def write_report(baseline: dict, candidate: dict, decision: dict, *, out: Path,
         f"| elapsed_p50 | {b.get('elapsed_p50')} | {c.get('elapsed_p50')} |",
         f"| runs | {b.get('runs')} | {c.get('runs')} |",
         "",
+        "## Holdout (RSI 판정에 안 쓰는 태스크 — 후퇴 시 비용 무관 REJECT)",
+        "",
+        "| 지표 | baseline | candidate |",
+        "|------|----------|-----------|",
+        f"| holdout success_rate | {baseline.get('holdout', {}).get('success_rate')} | "
+        f"{candidate.get('holdout', {}).get('success_rate')} |",
+        f"| holdout runs | {baseline.get('holdout', {}).get('runs')} | "
+        f"{candidate.get('holdout', {}).get('runs')} |",
+        "",
         "## 다음 단계 (사람 승인)",
         "",
         "- **PROMOTE**: `git worktree remove <candidate>` 후, candidate 변경을 main에 수동 merge.",
@@ -181,7 +190,7 @@ def main():
     ap.add_argument("--baseline", required=True, help="baseline 집계 JSON (bench.py --json 산출물)")
     ap.add_argument("--candidate-cmd", required=True,
                     help="candidate worktree에서 실행할 자기수정 명령. 'forge:<goal>'이면 FORGE 에이전트를 worktree 안에서 headless 구동, 그 외엔 셸 명령")
-    ap.add_argument("--repeat", type=int, default=1, help="benchmark task당 반복 횟수")
+    ap.add_argument("--repeat", type=int, default=3, help="benchmark task당 반복 횟수(P1-D: 통계 유의성 위해 기본 3)")
     ap.add_argument("--tier", default="auto", help="모델 티어: auto|flash|pro")
     ap.add_argument("--task", default="", help="특정 task만(쉼표 구분)")
     ap.add_argument("--complex", action="store_true", help="COMPLEX task만 실행")
@@ -218,7 +227,11 @@ def main():
                                   tier=args.tier, only=args.task, complex_only=args.complex)
         print(f"candidate 집계: success_rate={candidate['overall']['success_rate']}")
 
-        decision = promotion_gate(baseline["overall"], candidate["overall"])
+        decision = promotion_gate(
+            baseline.get("promotion", baseline["overall"]),
+            candidate.get("promotion", candidate["overall"]),
+            baseline_holdout=baseline.get("holdout"),
+            candidate_holdout=candidate.get("holdout"))
         print(f"판정: {decision['decision']} — {decision['reason']}")
 
         if args.report:
