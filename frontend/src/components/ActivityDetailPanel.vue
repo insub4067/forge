@@ -80,6 +80,12 @@ function onBodyTap(e) {
   if (e.target.closest('button, summary, details, a')) return
   props.phase.thinkOpen = false
 }
+// 펼친 도구 결과(<details>) 본문 탭 → 닫기. 링크·버튼 제외.
+function closeParentDetails(e) {
+  if (e.target.closest('a, button')) return
+  const d = e.target.closest('details')
+  if (d) d.open = false
+}
 function toggleThink() {
   props.phase.thinkOpen = !props.phase.thinkOpen
 }
@@ -134,10 +140,10 @@ const errorCount = computed(() => (props.phase.tools || []).filter((t) => t.stat
             <span class="adp-tool-args">{{ summarizeArgs(t.args) }}</span>
             <svg class="adp-tool-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
           </summary>
-          <div v-if="t.diff" class="diff adp-diff">
+          <div v-if="t.diff" class="diff adp-diff" @click="closeParentDetails">
             <div v-for="(line, li) in diffLines(t.diff)" :key="li" :class="diffClass(line)">{{ line || ' ' }}</div>
           </div>
-          <pre v-else class="adp-result">{{ t.status === 'running' ? '실행 중…' : (t.result || '(출력 없음)') }}</pre>
+          <pre v-else class="adp-result" @click="closeParentDetails">{{ t.status === 'running' ? '실행 중…' : (t.result || '(출력 없음)') }}</pre>
         </details>
       </section>
 

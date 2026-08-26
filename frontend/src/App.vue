@@ -406,6 +406,14 @@ function processNote(content) {
   return null
 }
 
+// 펼친 disclosure(<details>) 본문을 탭하면 닫는다 — process-note·도구 결과 등 공통.
+// 링크·버튼 탭은 제외(오작동 방지). 드래그 선택은 click을 안 내므로 텍스트 선택은 유지.
+function closeParentDetails(e) {
+  if (e.target.closest('a, button')) return
+  const d = e.target.closest('details')
+  if (d) d.open = false
+}
+
 // 상세 화면 없이도 "지금 무엇을" 한 줄로. 스트림 끊겨도 폴링으로 갱신.
 function liveActivityText() {
   const s = agentStatus.value
@@ -1736,7 +1744,7 @@ document.addEventListener('visibilitychange', () => {
                 <span v-if="processNote(m.content).state" class="proc-state">{{ processNote(m.content).state }}</span>
                 <svg class="proc-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
               </summary>
-              <div class="process-note-body">{{ m.content }}</div>
+              <div class="process-note-body" @click="closeParentDetails">{{ m.content }}</div>
             </details>
             <div v-else-if="m.queued" class="queue-badge">
               <span class="queue-dot"></span>대기큐<span class="queue-text">{{ m.content }}</span>
