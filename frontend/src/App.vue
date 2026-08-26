@@ -437,10 +437,24 @@ let mainStartY = 0
 let scrollLocked = false
 let scrollUnlockTimer = null
 let scrollRaf = null
+let startedInHScroll = false
+
+// 터치 시작 지점이 '가로로 실제 스크롤되는' 요소(코드블록·diff·표) 안인가. 그렇다면 우측
+// 스와이프는 그 안을 가로 스크롤하려는 의도이므로 드로어 열기로 오인하지 않는다(간섭 해소).
+function _inHorizontalScroller(el) {
+  for (let n = el; n && n !== chatEl.value; n = n.parentElement) {
+    if (n.scrollWidth > n.clientWidth + 2) {
+      const ox = getComputedStyle(n).overflowX
+      if (ox === 'auto' || ox === 'scroll') return true
+    }
+  }
+  return false
+}
 
 function onMainTouchStart(e) {
   mainStartX = e.touches[0].clientX
   mainStartY = e.touches[0].clientY
+  startedInHScroll = _inHorizontalScroller(e.target)
   // 사용자가 스크롤 조작하는 동안 auto-scroll 잠금(스트리밍이 위로 읽기를 방해하지 않게)
   scrollLocked = true
   if (scrollUnlockTimer) clearTimeout(scrollUnlockTimer)
@@ -453,8 +467,9 @@ function onMainTouchEnd(e) {
   scrollUnlockTimer = setTimeout(() => { scrollLocked = false }, 400)
   const dx = e.changedTouches[0].clientX - mainStartX
   const dy = e.changedTouches[0].clientY - mainStartY
-  // 세션방 어디서든 오른쪽 스와이프 → 드로어를 단순 슬라이드로 연다(따라오는 드래그 없음)
-  if (isOpenSwipe(dx, dy) && !showRooms.value) showRooms.value = true
+  // 세션방 어디서든 오른쪽 스와이프 → 드로어를 단순 슬라이드로 연다(따라오는 드래그 없음).
+  // 단, 횡스크롤 요소 안에서 시작한 스와이프는 가로 스크롤 의도이므로 드로어를 열지 않는다.
+  if (!startedInHScroll && isOpenSwipe(dx, dy) && !showRooms.value) showRooms.value = true
 }
 
 function formatTokens(n) {
