@@ -38,6 +38,7 @@ const messages = ref([])
 const input = ref('')
 const busy = ref(false)
 const isAtBottom = ref(true)
+const unseenCount = ref(0)   // 스크롤을 벗어난 동안 도착한 새 메시지 수 — jump-bottom 배지
 const autoApprove = ref(localStorage.getItem('forge_auto_approve') === '1')
 // 모델 티어(클로드식 선택) — auto: flash+think, 막히면 pro 승격 / pro: 항상 pro / flash: flash만
 const _savedTier = localStorage.getItem('forge_model_tier') || 'auto'
@@ -973,13 +974,19 @@ function maybeScrollBottom() {
 function jumpToBottom() {
   if (chatEl.value) chatEl.value.scrollTo({ top: chatEl.value.scrollHeight, behavior: 'smooth' })
   isAtBottom.value = true
+  unseenCount.value = 0
 }
 
 function onChatScroll() {
   const el = chatEl.value
   if (!el) return
   isAtBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  if (isAtBottom.value) unseenCount.value = 0   // 최신 위치로 오면 배지 리셋
 }
+// 스크롤을 벗어난 동안 새 메시지(턴)가 오면 배지 카운트 — 최신에 있으면 늘지 않는다.
+watch(() => messages.value.length, (n, old) => {
+  if (n > old && !isAtBottom.value) unseenCount.value += n - old
+})
 
 function newUser(text, images, queued = false) {
   messages.value.push({ role: 'user', content: text, images: images && images.length ? images : null, queued })
@@ -2008,8 +2015,9 @@ document.addEventListener('visibilitychange', () => {
         </div>
       </div>
     </main>
-      <button v-if="!isAtBottom" class="jump-bottom" @click="jumpToBottom" aria-label="맨 아래로">
+      <button v-if="!isAtBottom" class="jump-bottom" @click="jumpToBottom" :aria-label="unseenCount ? `새 메시지 ${unseenCount}개, 맨 아래로` : '맨 아래로'">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+        <span v-if="unseenCount" class="jump-badge">{{ unseenCount > 9 ? '9+' : unseenCount }}</span>
       </button>
     </div>
 
@@ -2024,7 +2032,7 @@ document.addEventListener('visibilitychange', () => {
     </div>
 
     <footer>
-      <div v-if="taskBar" class="task-bar" @click="showKanban = true; loadTasks()">
+      <div v-if="taskBar" class="task-bar" :class="{ idle: !(busy || sessionRunning) }" @click="showKanban = true; loadTasks()">
         <span class="task-bar-dot" :class="{ running: busy || sessionRunning }"></span>
         <span class="task-bar-title">{{ taskBar.title }}</span>
         <span class="task-bar-count">{{ taskBar.pos }}/{{ taskBar.total }}</span>

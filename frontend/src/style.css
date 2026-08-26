@@ -1795,11 +1795,10 @@ footer .image-preview-row {
 }
 .jump-bottom {
   /* chat-area 바닥에 고정 — footer 바깥이라 task-bar 유무·footer 높이와 무관하게 항상
-     입력창 바로 위에 뜬다. main 스크롤에도 함께 움직이지 않는다. */
+     입력창 바로 위에 뜬다. 본문 중앙을 가리지 않게 우측 하단으로(req 7). */
   position: absolute;
   bottom: 8px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: 12px;
   width: 40px;
   height: 40px;
   border-radius: 50%;
@@ -4686,3 +4685,26 @@ button {
 .al-chevron.open { transform: rotate(90deg); }
 .activity-body { margin-top: 2px; }
 .activity-body .result-warn:first-child { margin-top: 2px; }
+
+/* jump-bottom 새 메시지 배지 (req 7) */
+.jump-bottom { position: relative; }
+.jump-badge {
+  position: absolute; top: -4px; right: -4px;
+  min-width: 17px; height: 17px; padding: 0 4px;
+  border-radius: 9px; background: var(--accent); color: #fff;
+  font-size: 10.5px; font-weight: 700; line-height: 17px; text-align: center;
+}
+/* 44pt 최소 터치 영역 (req 6·접근성) — 시각 크기는 유지하되 hit-area 확보. */
+.attach-btn, .composer-send { min-width: 44px; min-height: 44px; }
+.mode-chip { min-height: 44px; }
+
+/* 작업 완료(idle) 후 진행바 축소 — 실행 중이 아니면 작은 한 줄로(req 6). */
+.task-bar.idle {
+  padding: 4px 10px;
+  min-height: 26px;
+  font-size: 12px;
+  color: var(--muted);
+  background: none;
+  border-color: transparent;
+}
+.task-bar.idle .task-bar-title { color: var(--muted); }
