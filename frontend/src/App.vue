@@ -23,6 +23,12 @@ import {
   runningTool,
 } from './lib/message'
 import { isOpenSwipe } from './lib/drawerDrag.js'
+import {
+  attachedImages, attachedText, dragActive, viewerImages, viewerIndex, imgScale, imgTx, imgTy,
+  openViewer, closeViewer, viewerNext, viewerPrev, viewerTouchStart, viewerTouchMove,
+  viewerTouchEnd, removeImage, removeText, clearAttachments, handleFiles, onFileChange,
+  onDragOver, onDragLeave, onDrop,
+} from './stores/attachments'
 
 // 단일 줄바꿈도 <br>로 — 답변 줄바꿈을 적극 반영
 marked.setOptions({ breaks: true, gfm: true })
@@ -196,55 +202,6 @@ function goTopUp() {
   window.open(url, '_blank', 'noopener')
   showTopUpConfirm.value = false
 }
-const attachedImages = ref([]) // 여러 장 첨부
-const viewerImages = ref([]) // 전체화면 뷰어 이미지 목록
-const viewerIndex = ref(0)
-const imgScale = ref(1)
-const imgTx = ref(0)
-const imgTy = ref(0)
-function resetImgZoom() { imgScale.value = 1; imgTx.value = 0; imgTy.value = 0 }
-function openViewer(images, index = 0) {
-  viewerImages.value = Array.isArray(images) ? images : [images]
-  viewerIndex.value = index
-  resetImgZoom()
-}
-function closeViewer() { viewerImages.value = [] }
-function viewerNext() { if (viewerIndex.value < viewerImages.value.length - 1) { viewerIndex.value++; resetImgZoom() } }
-function viewerPrev() { if (viewerIndex.value > 0) { viewerIndex.value--; resetImgZoom() } }
-let viewerTouchX = 0
-// 두 손가락 사이 거리(핀치 배율 계산용) — 정의가 없어 핀치 시 ReferenceError로 뷰어 줌이
-// 통째로 깨져 있었다. PdfViewer.vue에 같은 헬퍼가 있다(각자 로컬 유지).
-function _touchDist(t) {
-  return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
-}
-let _imgPinchDist = 0, _imgPinchScale = 1
-let _imgPanX = 0, _imgPanY = 0, _imgStartTx = 0, _imgStartTy = 0
-function viewerTouchStart(e) {
-  if (e.touches.length === 2) {
-    _imgPinchDist = _touchDist(e.touches)
-    _imgPinchScale = imgScale.value
-  } else if (e.touches.length === 1) {
-    viewerTouchX = e.touches[0].clientX
-    _imgPanX = e.touches[0].clientX; _imgPanY = e.touches[0].clientY
-    _imgStartTx = imgTx.value; _imgStartTy = imgTy.value
-  }
-}
-function viewerTouchMove(e) {
-  if (e.touches.length === 2 && _imgPinchDist) {
-    e.preventDefault()
-    imgScale.value = Math.max(1, Math.min(5, _imgPinchScale * (_touchDist(e.touches) / _imgPinchDist)))
-  } else if (e.touches.length === 1 && imgScale.value > 1) {
-    e.preventDefault()
-    imgTx.value = _imgStartTx + (e.touches[0].clientX - _imgPanX)
-    imgTy.value = _imgStartTy + (e.touches[0].clientY - _imgPanY)
-  }
-}
-function viewerTouchEnd(e) {
-  if (imgScale.value > 1) return // 줌 중엔 스와이프 내비게이션 안 함(팬 우선)
-  const dx = e.changedTouches[0].clientX - viewerTouchX
-  if (Math.abs(dx) > 40) { dx < 0 ? viewerNext() : viewerPrev() }
-}
-const attachedText = ref(null) // { name, content, truncated }
 const fileInput = ref(null)
 // 레거시 status를 신뢰성 4단계로 정규화는 KanbanPanel 내부에서 처리.
 let runningPoll = null
@@ -1399,9 +1356,7 @@ async function send() {
   const assistant = newAssistant()
   isAtBottom.value = true
   scrollBottom()
-  attachedImages.value.forEach(_revokePreview)
-  attachedImages.value = []
-  attachedText.value = null
+  clearAttachments()
 
   try {
     const roomId = await ensureRoom(text || (att ? att.name : '이미지 분석'))
@@ -1507,75 +1462,14 @@ watch(input, (v) => {
   })
 })
 
-// 파일(이미지/텍스트) 처리 공통 경로 — 파일 선택(onFileChange)과 드래그앤드롭(onDrop)이 함께 사용
-async function handleFiles(files) {
-  for (const file of files) {
-    if (file.type.startsWith('image/')) {
-      // 이미지 → 로컬 프리뷰를 즉시 붙이고(선택 즉시 표시), 서버 업로드는 뒤에서 진행한다.
-      // 예전엔 업로드→서버 URL을 <img>가 다시 fetch할 때까지 프리뷰가 안 떠 늦게 보였다.
-      const entry = reactive({ previewUrl: URL.createObjectURL(file), url: null, name: file.name })
-      attachedImages.value.push(entry)
-      const formData = new FormData()
-      formData.append('file', file)
-      try {
-        const res = await fetch('/api/upload', { method: 'POST', body: formData })
-        if (res.ok) { const j = await res.json(); entry.url = j.url; entry.name = j.name }
-        else { _revokePreview(entry); attachedImages.value = attachedImages.value.filter((a) => a !== entry) }
-      } catch { _revokePreview(entry); attachedImages.value = attachedImages.value.filter((a) => a !== entry) }
-    } else {
-      // 텍스트/코드 파일 → 내용을 읽어 메시지에 포함(마지막 1개)
-      try {
-        let content = await file.text()
-        const MAX = 200000
-        const truncated = content.length > MAX
-        if (truncated) content = content.slice(0, MAX)
-        attachedText.value = { name: file.name, content, truncated }
-      } catch {}
-    }
-  }
-}
 
-async function onFileChange(e) {
-  await handleFiles(Array.from(e.target.files || []))
-  e.target.value = ''
-}
 
 // 드래그앤드롭 첨부
-const dragActive = ref(false)
-let dragCounter = 0
 
-function onDragOver(e) {
-  if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
-    e.preventDefault()
-    dragCounter++
-    dragActive.value = true
-  }
-}
 
-function onDragLeave() {
-  dragCounter = Math.max(0, dragCounter - 1)
-  if (dragCounter === 0) dragActive.value = false
-}
 
-async function onDrop(e) {
-  e.preventDefault()
-  dragCounter = 0
-  dragActive.value = false
-  const files = Array.from(e.dataTransfer?.files || [])
-  if (files.length) await handleFiles(files)
-}
 
-function _revokePreview(entry) {
-  if (entry && entry.previewUrl) { try { URL.revokeObjectURL(entry.previewUrl) } catch {} }
-}
-function removeImage(idx) {
-  _revokePreview(attachedImages.value[idx])
-  attachedImages.value.splice(idx, 1)
-}
 
-function removeText() {
-  attachedText.value = null
-}
 
 async function decide(approval, decision) {
   approvalError.value = ''
