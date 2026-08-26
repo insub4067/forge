@@ -1176,23 +1176,6 @@ function finalAnswer(m) {
   if (withText.length) return withText[withText.length - 1].text
   return m.doneMessage || ''
 }
-// 검증이 NOT_APPLICABLE인가(read-only 성공) — completed인데 gate 0개면 read-only로 추론한다.
-// (mutation completed는 반드시 gate passed>0이므로 gate 0 + completed = read-only.)
-function isVerificationNA(m, i) {
-  const s = resolveFinalStatus(m, i)
-  return s === 'completed' && verifyCounts().total === 0
-}
-// compact 상태줄에 붙는 검증 요약(NOT_APPLICABLE·검증 없음이면 빈 문자열).
-function verifySummary(m, i) {
-  if (isVerificationNA(m, i)) return ''
-  const v = verifyCounts()
-  if (!v.total) return ''
-  let s = `검증 ${v.passed} 통과`
-  if (v.failed) s += ` · ${v.failed} 실패`
-  if (v.unverified) s += ` · ${v.unverified} 미검증`
-  return s
-}
-
 // 완료 semantic을 타임라인 터미널 노드로 — backend 실제 상태를 왜곡하지 않는다.
 // completed_unverified를 ✓로 위장하지 않는다(검증 불완전은 !).
 const _COMPLETION_NODES = {
@@ -1908,7 +1891,7 @@ document.addEventListener('visibilitychange', () => {
             <div v-if="m.phases.length" class="activity">
               <button class="activity-line" :aria-expanded="logsShown(m, i) ? 'true' : 'false'" @click="toggleLogs(m, i)">
                 <span v-if="finalStatusInfo(m, i)" class="al-status" :class="finalStatusInfo(m, i).cls">
-                  <span class="al-glyph" aria-hidden="true">{{ finalStatusInfo(m, i).glyph }}</span>{{ finalStatusInfo(m, i).label }}<span v-if="verifySummary(m, i)"> · {{ verifySummary(m, i) }}</span>
+                  <span class="al-glyph" aria-hidden="true">{{ finalStatusInfo(m, i).glyph }}</span>{{ finalStatusInfo(m, i).label }}
                 </span>
                 <span class="al-counts"><span v-if="finalStatusInfo(m, i)"> · </span>실행 {{ logCounts(m).steps }}<span v-if="logCounts(m).think"> · 추론 {{ logCounts(m).think }}</span><span v-if="logCounts(m).tools"> · 도구 {{ logCounts(m).tools }}</span></span>
                 <svg class="al-chevron" :class="{ open: logsShown(m, i) }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
