@@ -72,6 +72,12 @@ function toolOpen(t) {
   return !t.diff && r.length <= 200 && r.split('\n').length <= 4
 }
 
+// 추론이 열린 상태에서 배경(버튼·도구·추론 자체가 아닌 빈 영역)을 탭하면 추론을 접는다.
+function onBodyTap(e) {
+  if (!props.phase.thinkOpen) return
+  if (e.target.closest('button, summary, details, a, .reasoning-body, .adp-reason-toggle')) return
+  props.phase.thinkOpen = false
+}
 function toggleThink() {
   props.phase.thinkOpen = !props.phase.thinkOpen
 }
@@ -89,7 +95,7 @@ const errorCount = computed(() => (props.phase.tools || []).filter((t) => t.stat
       <button class="adp-x" @click="$emit('close')" aria-label="닫기">✕</button>
     </header>
 
-    <div class="adp-body">
+    <div class="adp-body" @click="onBodyTap">
       <!-- 요약(핵심 결과) — phase의 응답 본문 원문 markdown. -->
       <section v-if="phase.text" class="detail-block">
         <div class="detail-label">요약</div>
