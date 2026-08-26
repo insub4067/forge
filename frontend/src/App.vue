@@ -1144,6 +1144,15 @@ function logCounts(m) {
   for (const p of ph) { if (p.thinking) think++; tools += (p.tools?.length || 0) }
   return { steps: ph.length, think, tools }
 }
+// Activity(타임라인) 펼침 여부 — 사용자가 명시 토글했으면(m.logsOpen 정의됨) 그 값이 우선,
+// 아니면 live 턴 기본(실행 중엔 열림). 이렇게 해야 실행 중 마지막 메시지에서도 토글이 먹는다.
+// (예전엔 isLiveTurn이 강제로 열어둬 토글이 무시됐다 — '될 때도 안 될 때도'의 원인.)
+function logsShown(m, i) {
+  return m.logsOpen !== undefined ? m.logsOpen : isLiveTurn(i)
+}
+function toggleLogs(m, i) {
+  m.logsOpen = !logsShown(m, i)
+}
 // 사용자-facing 최종 답변 — 개발자의 마지막 텍스트 phase(실제 결과). 없으면 doneMessage(프로세스
 // 요약) fallback. 이것을 채팅 본문 primary로 승격한다(Activity 로그에 묻지 않는다). 문자열 파싱이
 // 아니라 구조화된 phase 데이터를 쓴다(spec §6).
@@ -1882,14 +1891,14 @@ document.addEventListener('visibilitychange', () => {
             <div v-if="finalAnswer(m)" class="text answer" v-html="renderMarkdown(finalAnswer(m))"></div>
             <!-- 2. compact 상태 + Activity 토글 — 상태·검증요약·개수는 secondary. 탭하면 로그 펼침. -->
             <div v-if="m.phases.length" class="activity">
-              <button class="activity-line" :aria-expanded="m.logsOpen ? 'true' : 'false'" @click="m.logsOpen = !m.logsOpen">
+              <button class="activity-line" :aria-expanded="logsShown(m, i) ? 'true' : 'false'" @click="toggleLogs(m, i)">
                 <span v-if="finalStatusInfo(m, i)" class="al-status" :class="finalStatusInfo(m, i).cls">
                   <span class="al-glyph" aria-hidden="true">{{ finalStatusInfo(m, i).glyph }}</span>{{ finalStatusInfo(m, i).label }}<span v-if="verifySummary(m, i)"> · {{ verifySummary(m, i) }}</span>
                 </span>
                 <span class="al-counts"><span v-if="finalStatusInfo(m, i)"> · </span>실행 {{ logCounts(m).steps }}<span v-if="logCounts(m).think"> · 추론 {{ logCounts(m).think }}</span><span v-if="logCounts(m).tools"> · 도구 {{ logCounts(m).tools }}</span></span>
-                <svg class="al-chevron" :class="{ open: m.logsOpen }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+                <svg class="al-chevron" :class="{ open: logsShown(m, i) }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
               </button>
-              <div v-if="isLiveTurn(i) || m.logsOpen" class="activity-body">
+              <div v-if="logsShown(m, i)" class="activity-body">
               <!-- 검증 경고(미검증·실패)는 기본 숨김 — Activity 펼침(상세)에서만 노출. -->
               <div v-for="(w, wi) in resultWarnings(m)" :key="'w' + wi" class="result-warn" :class="w.kind === '실패' ? 'error' : 'warn'">
                 <div class="rw-head"><span class="rw-kind">{{ w.kind }}</span><span v-if="w.title" class="rw-title">· {{ w.title }}</span></div>
