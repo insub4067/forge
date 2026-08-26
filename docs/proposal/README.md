@@ -9,7 +9,7 @@
 | `browser-computer-use.md` | partial | local-only `browser_check`/self runtime smoke 구현. full browser/computer-use는 미구현. PWA 사람용 Mac input은 별도 기능으로 구현됨. |
 | `claude-code-cleanroom-adoption.md` | superseded/absorbed | task/permission/verification 아이디어 일부 흡수. 문서의 고정 Planner/Coder/Reviewer/Debugger 구조는 현재와 다름. |
 | `deepseek-harness-adoption.md` | absorbed | compaction, tool pruning, durable events, cancellation/recovery 등 다수 흡수. 당시 role pipeline은 현재와 다름. |
-| `durable-worker-resume.md` | partial | history-based Auto Resume + crash-loop guard 구현. independent durable worker/queue/checkpoint continuation은 미구현. |
+| `durable-worker-resume.md` | partial / 나머지 deferred | history-based Auto Resume + crash-loop guard 구현. 2026-08-26 side-effect 실행 장부(`tool_ledger`) 추가 — resume이 '실행 여부 불명' 부작용을 자동 재실행하지 않는다(started→completed, ambiguous면 1회 경고 후 진행). independent durable worker/queue/event-sourced continuation은 **의도적 deferred**: 현재 크래시 안전성(history 영속 + 실행 장부 + startup resume)이 단일 Mac·수동 재시작 배포엔 충분하고, 별도 워커·잡 큐·leasing의 복잡도 대비 이득이 낮다. multi-host/고throughput/무인 장기실행이 실제 요구가 되면 재검토. |
 | `ecc-adoption.md` | proposal | ECC 4대 축 중 3개(Hook enforcement/evidence memory/소수 skill)는 이미 구현 확인. 실질 net-new는 Security Workspace Preflight 하나. SELECTIVE_ADOPTION. |
 | `forge-mcp-agent-runtime.md` | partial | stdio `execute/status/result/cancel` 4 tools 구현. remote MCP/resources는 미구현. |
 | `evidence-axis-expansion.md` | partial (축 A) | 검증 축을 test/build 너머로 확장. 축 A(서버 생존/응답성)를 런타임 스모크에 추가 구현. 축 B(이음새 프로브 `probe.py`)는 별도 구현됨. 축 C(부하 회귀)는 미착수. |
@@ -18,7 +18,7 @@
 | `global-workspace-skills.md` | implemented/diverged | 실제는 Curated/Learned/Project 3-tier + selective retrieval. proposal의 2-tier 가정은 과거. |
 | `hermes-agent-adoption.md` | partial | Skills/context/scheduler/narrow core 아이디어 일부 반영. Tool Script, generic ExecutionBackend, subagents는 미구현. |
 | `home-camera-monitor.md` | PoC only | `imagesnap` polling Camera PoC. WebRTC/registry/RTSP/condition detection은 미구현. |
-| `intent-interpreter-task-ir.md` | proposal | 현재 Triage의 chat/work 분류를 보존하면서 자연어→Task IR 의미 정규화를 Shadow mode부터 실험. Interpreter는 WHAT만 구조화하고 HOW/verification/completion authority는 기존 Planner/Developer/Harness에 유지. |
+| `intent-interpreter-task-ir.md` | implemented | 2026-08-26 기본 ON(`TASK_IR_ENABLED=True`). Interpreter가 WHAT을 requirement(R1..)로 구조화하고, gate가 requirement_id로 추적된다. 미검증 requirement가 있으면 완료를 `completed`→`completed_unverified`로 강등(차단 아님). 인터프리터는 코드 경로에서만 실행(대화 턴 제외). 실측 n=3: verified_success 0.92→0.973, false_completion 0.04→0.027, verified당 비용 +6%. `docs/status/bench-baseline-2026-08-26.md`. |
 | `live-screen-preview.md` | implemented/diverged | 현재 screenshot JPEG polling + 사람용 mouse/keyboard input. proposal의 WebRTC view-only 구조는 구현되지 않음. |
 | `low-cost-model-routing.md` | rejected-experiment / future | current main은 DeepSeek only. Ox 제거, Ling/OpenRouter 실험도 repeated tool-call 문제로 revert. CPS 평가 틀만 유효. |
 | `onprem-inference-optimization.md` | deferred | OpenAI-compatible internal provider/vLLM/SGLang/speculative serving은 현재 미구현. 실제 사내 inference 요구/hardware가 생기면 재검토. |

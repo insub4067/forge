@@ -1,6 +1,21 @@
 # FORGE — Current Work Status
 
-> Source audit: 2026-08-24 `main`, memory-hardening commit `34626da1`까지 확인. 이 문서는 Current State authority이며 proposal/handoff보다 우선한다.
+> Source audit: 2026-08-26 `main` `143e378`까지 확인. 이 문서는 Current State authority이며 proposal/handoff보다 우선한다.
+
+## 2026-08-26 세션 업데이트 (신뢰성)
+
+- **Task IR 기본 ON**(`TASK_IR_ENABLED=True`). requirement(R1..)를 gate와 `requirement_id`로
+  대조해 미검증이면 완료를 `completed`→`completed_unverified`로 강등(차단 아님). 인터프리터는
+  코드 경로에서만 실행(대화 턴 제외). 실측 n=3(75 run): verified_success 0.92→0.973,
+  false_completion 0.04→0.027, 완전검증 완료 0→10, verified당 비용 +6%.
+  `bench-baseline-2026-08-26.md`.
+- **side-effect 실행 장부**(`tool_ledger`): 도구 실행 전 started, history 저장 후 completed.
+  resume이 '실행 여부 불명'(started 잔존) 부작용을 자동 재실행하지 않는다(1회 경고 후 진행).
+- **CI 상시 실패 해소**: pytest용 스키마 초기화(conftest) + gate 검증 `SANDBOX_MODE=host`.
+  이전엔 fresh postgres 스키마 없음 + docker 이미지 없음으로 계속 빨간색이었다. 지금 초록.
+- pytest **242 passed**(host mode), ruff 통과.
+- **다음 큰 건**: Persistent execution(independent durable worker/queue) — `durable-worker-resume`
+  partial. Provider independence는 index상 deferred/rejected-experiment이지 다음 P0가 아니다.
 
 ## 현재 한 줄 요약
 
@@ -115,9 +130,11 @@ Gate 존재 문제는 크게 줄었지만 시험 문제 자체는 여전히 모�
 
 Evidence binding은 거짓 durable memory를 크게 줄였지만 semantic proof engine은 아니다. token/source 기반 guard는 valid fact를 거절할 수도 있고 미묘한 의미 오류를 모두 증명하지 못한다. 저장량보다 정확성을 우선한다.
 
-### 3. Startup error visibility
+### 3. Startup error visibility — 해소됨(2026-08-26 확인)
 
-`main.py` lifespan의 DB migration/resume setup이 현재 broad `except Exception: pass`로 감싸져 있다. schema/startup 실패를 조용히 숨길 수 있으므로 운영 신뢰성 관점에서 개선 후보다.
+과거엔 lifespan이 broad `except Exception: pass`로 startup 실패를 숨길 수 있었으나, 현재는
+schema 초기화 실패 시 `ready=False` + `error_log.record("startup_db", …)`, orphan approval·
+resume·job 복구 블록도 각각 `error_log.record`로 남긴다(조용한 pass 없음). 조용한 먹통 위험 제거됨.
 
 ### 4. Auto Resume의 의미
 
