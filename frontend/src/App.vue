@@ -13,6 +13,7 @@ import MenuPanel from './components/MenuPanel.vue'
 import SessionDetailPanel from './components/SessionDetailPanel.vue'
 import FileBrowserPanel from './components/FileBrowserPanel.vue'
 import AgentCrewPanel from './components/AgentCrewPanel.vue'
+import FinalResultCard from './components/FinalResultCard.vue'
 import ActivityDetailPanel from './components/ActivityDetailPanel.vue'
 import FsIcon from './components/FsIcon.vue'
 import { balance as adminBalance, loadBalance } from './store'
@@ -1076,6 +1077,95 @@ function hasActivity(m) {
     (p) => (p.tools && p.tools.length) || p.thinking || (p.role && p.role !== 'chat'))
 }
 
+// ── 최종 결과 카드 — 상태·진행률·검증을 '별도 값'으로. 색만이 아니라 상태 텍스트를 함께. ──
+// 검증 개수는 요구사항 gate(현재 세션)에서 센다. passed/failed 외는 전부 미검증(unavailable 등).
+function verifyCounts() {
+  const g = gates.value || []
+  let passed = 0, failed = 0, unverified = 0
+  for (const x of g) {
+    if (x.status === 'passed') passed++
+    else if (x.status === 'failed') failed++
+    else unverified++
+  }
+  return { passed, failed, unverified, total: g.length }
+}
+// 상태 판정: 미검증 항목이 하나라도 있으면 completed여도 '부분 완료'. 색이 아니라 형태·텍스트.
+const _RESULT_STATUS = {
+  completed: { key: 'done', label: '완료', cls: 'done', glyph: '✓' },
+  completed_unverified: { key: 'partial', label: '부분 완료', cls: 'warn', glyph: '◐' },
+  verification_failed: { key: 'failed', label: '실패', cls: 'error', glyph: '✕' },
+  failed: { key: 'failed', label: '실패', cls: 'error', glyph: '✕' },
+  cancelled: { key: 'cancelled', label: '중단됨', cls: 'muted', glyph: '·' },
+  context_blocked: { key: 'partial', label: '부분 완료', cls: 'warn', glyph: '◐' },
+  budget_exceeded: { key: 'partial', label: '부분 완료', cls: 'warn', glyph: '◐' },
+}
+// live 'done' 이벤트는 m.finalStatus를 채운다. history 재구성엔 없으므로, 마지막 메시지는
+// 세션 final_status(room 객체)로 보완 — 리로드해도 카드가 유지된다. 실행 중엔 stale 방지로 미보완.
+function resolveFinalStatus(m, i) {
+  if (m.finalStatus) return m.finalStatus
+  if (i === messages.value.length - 1 && !busy.value && !sessionRunning.value) {
+    return currentRoom()?.final_status || ''
+  }
+  return ''
+}
+function finalStatusInfo(m, i) {
+  const st = resolveFinalStatus(m, i)
+  if (!st) return null
+  const base = _RESULT_STATUS[st]
+  if (!base) return null
+  // completed여도 검증 실패·미검증 gate가 있으면 '부분 완료'로 강등한다 — 상태와 본문(경고)이
+  // 모순되지 않게(핵심 문제 1: '완료 4/4'인데 미검증 존재). 완료는 모든 검증 통과일 때만.
+  if (base.key === 'done') {
+    const vc = verifyCounts()
+    if (vc.failed > 0 || vc.unverified > 0) return _RESULT_STATUS.completed_unverified
+  }
+  return base
+}
+// 실패·미검증 gate + 실행 오류를 '별도 경고 카드'로. 사유와 다음 행동을 함께.
+function resultWarnings(m) {
+  const out = []
+  for (const g of (gates.value || [])) {
+    if (g.status === 'failed') out.push({ kind: '실패', title: g.title, reason: g.failure_reason || '검증에 실패했습니다.' })
+    else if (g.status !== 'passed') out.push({ kind: '미검증', title: g.title, reason: g.failure_reason || '독립 검증을 수행하지 못했습니다.' })
+  }
+  for (const e of (m.state?.errors || [])) out.push({ kind: '오류', title: '실행 오류', reason: String(e) })
+  return out
+}
+// 접힌 로그 헤더용 개수 — 실행·추론·도구 호출.
+function logCounts(m) {
+  const ph = m.phases || []
+  let think = 0, tools = 0
+  for (const p of ph) { if (p.thinking) think++; tools += (p.tools?.length || 0) }
+  return { steps: ph.length, think, tools }
+}
+// 카드 요약 — 긴 응답 대신 두괄식 한 문장(없으면 goal). 140자 넘으면 말줄임.
+function resultSummary(m) {
+  let t = (m.doneMessage || m.state?.goal || '').trim()
+  if (!t) {  // 재구성엔 doneMessage가 없다 — 마지막 phase 텍스트로 보완.
+    const ph = (m.phases || []).filter((p) => p.text)
+    if (ph.length) t = ph[ph.length - 1].text.trim()
+  }
+  if (!t) return ''
+  const s = _firstSentence(t)
+  return s.length > 140 ? s.slice(0, 140) + '…' : s
+}
+// 진행률(task n/전체) — 상태와 별도 값. 현재 세션 task 기준.
+function taskProgress() {
+  const t = tasks.value || []
+  if (!t.length) return null
+  return { done: t.filter((x) => x.status === 'done').length, total: t.length }
+}
+// 카드는 activity(agent 작업)이고 done이며 마지막 메시지일 때만 — 순수 대화엔 안 띄운다.
+function showResultCard(m, i) {
+  return hasActivity(m) && !!finalStatusInfo(m, i) && i === messages.value.length - 1
+}
+// 경고 카드 '검증 상세' — 마지막 phase의 Detail Surface(검증 섹션 포함)를 연다.
+function openResultDetail(m) {
+  const ph = (m.phases || []).filter(phaseHasDetail)
+  if (ph.length) openDetail(m, ph[ph.length - 1])
+  else showGit.value = true
+}
+
 // 완료 semantic을 타임라인 터미널 노드로 — backend 실제 상태를 왜곡하지 않는다.
 // completed_unverified를 ✓로 위장하지 않는다(검증 불완전은 !).
 const _COMPLETION_NODES = {
@@ -1776,6 +1866,17 @@ document.addEventListener('visibilitychange', () => {
           </template>
 
           <template v-if="m.role === 'assistant'">
+            <!-- 최종 결과 카드 — 긴 응답보다 먼저 상태·검증을 빠르게. 실패·미검증은 별도 경고 카드. -->
+            <FinalResultCard
+              v-if="showResultCard(m, i)"
+              :status="finalStatusInfo(m, i)"
+              :summary="resultSummary(m)"
+              :files-count="m.state?.files_changed?.length || 0"
+              :verify="verifyCounts()"
+              :progress="taskProgress()"
+              :warnings="resultWarnings(m)"
+              @action="openResultDetail(m)"
+            />
             <!-- 순수 대화 답변(도구·추론 없음) — 상태 기호 없이 본문만. ✓는 Agent Activity 전용. -->
             <template v-if="!hasActivity(m)">
               <template v-for="(p, pi) in m.phases" :key="'txt' + pi">
@@ -1821,7 +1922,7 @@ document.addEventListener('visibilitychange', () => {
             </div>
             <!-- 완료 터미널 노드 — backend 실제 completion semantic. completed_unverified를
                  ✓로 위장하지 않는다(검증 불완전은 !). live done 이벤트에서만(재구성 시엔 요약 본문). -->
-            <div v-if="completionNode(m.finalStatus)" class="tl-node tl-terminal" :class="completionNode(m.finalStatus).cls">
+            <div v-if="completionNode(m.finalStatus) && !showResultCard(m, i)" class="tl-node tl-terminal" :class="completionNode(m.finalStatus).cls">
               <span class="tl-marker" :class="completionNode(m.finalStatus).cls" aria-hidden="true">{{ completionNode(m.finalStatus).glyph }}</span>
               <div class="tl-content">
                 <div class="tl-head"><span class="tl-agent">{{ completionNode(m.finalStatus).label }}</span></div>
