@@ -1653,10 +1653,10 @@ footer {
   /* in-flow flex child — main(flex:1) 아래에 자리를 차지한다. 오버랩·magic padding 없음. */
   position: relative;
   flex-shrink: 0;
-  /* 하단 안전영역(safe-area)을 footer 배경이 '쓴다' — 배경은 물리적 바닥까지 내려가고,
-     composer 카드는 safe-area inset만큼 위로 올라가 홈 인디케이터를 침범하지 않는다.
-     실제 컨트롤만 보호하고 빈 공간을 남기지 않는다. */
-  padding: 8px 12px calc(10px + env(safe-area-inset-bottom));
+  /* 배경 surface — 화면 바닥까지 배경(var--bg)이 이어지고,
+     카드 아래 safe-area 여백은 .composer-wrap이 담당한다.
+     홈 인디케이터 아래로 빈 공간을 남기지 않는다. */
+  padding: 8px 12px 0;
   border-top: none;
   background: var(--bg);
 }
@@ -1677,6 +1677,13 @@ footer .image-preview-row {
   border-radius: 20px;
   padding: 8px 12px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+}
+
+/* composer surface — 카드 아래 safe-area 여백을 담당한다.
+   footer 배경(var--bg)이 화면 바닥까지 이어지고, 카드는 이 여백만큼
+   홈 인디케이터 위에 떠 있어 실제 컨트롤을 보호한다. */
+.composer-wrap {
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .composer:focus-within {

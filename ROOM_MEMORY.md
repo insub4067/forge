@@ -25,3 +25,5 @@
 - `pkill`·`kill`·`uvicorn`은 BLOCKED_COMMANDS다 — 에이전트가 백엔드를 재시작할 수 없다
   (자기 세션 자멸 방지). 재시작이 필요하면 보고에 남긴다.
   - source: `backend/app/tools/registry.py`
+- 프로젝트 빌드 검증은 frontend 디렉토리에서 npm run build를 실행하고 'built in' 메시지로 성공 여부를 확인한다.
+  - source: `frontend/src/style.css` · verified: cd frontend && npm run build 2>&1 | grep -E 'built in' && echo 'BUILD_OK'
