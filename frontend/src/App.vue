@@ -575,6 +575,13 @@ async function loadMessages(isNew = false) {
           bubble = reactive({ role: 'assistant', phases: [], approval: null, context: null, state: null, doneMessage: '' })
           messages.value.push(bubble)
         }
+        // 완료 보고(format_completion_summary)는 phase가 아니라 doneMessage로 — 라이브 done
+        // 이벤트와 동일 취급. phase로 두면 마지막 텍스트 phase가 되어 실제 답변을 덮는다
+        // (사용자가 요청한 요약 대신 검증 장부가 본문에 뜨던 가독성 회귀의 원인).
+        if (!(m.tool_calls || []).length && isCompletionReport(m.content)) {
+          bubble.doneMessage = m.content
+          continue
+        }
         const phase = reactive({
           role: '', model: '', thinking: m.reasoning_content || '', text: m.content || '',
           tools: [], collapsed: true, running: false,
@@ -1172,9 +1179,16 @@ function toggleLogs(m, i) {
 // 요약) fallback. 이것을 채팅 본문 primary로 승격한다(Activity 로그에 묻지 않는다). 문자열 파싱이
 // 아니라 구조화된 phase 데이터를 쓴다(spec §6).
 function finalAnswer(m) {
-  const withText = (m.phases || []).filter((p) => p.text && p.text.trim())
+  // 완료 보고(doneMessage)와 같은 phase는 건너뛴다 — 실제 개발자 답변을 승격하고 검증 장부는
+  // 구조화 UI(al-status·미검증 카드·타임라인)에 맡긴다. 라이브 턴(meta가 phase로도 들어오는 경우)도 커버.
+  const withText = (m.phases || []).filter((p) => p.text && p.text.trim() && p.text !== m.doneMessage)
   if (withText.length) return withText[withText.length - 1].text
   return m.doneMessage || ''
+}
+// 완료 보고인가 — format_completion_summary의 고정 헤더로 판별(backend와 동기화 필수).
+function isCompletionReport(text) {
+  const t = (text || '').trim()
+  return t.startsWith('완료했습니다.') || t.startsWith('작업은 완료했습니다. 다만')
 }
 // 완료 semantic을 타임라인 터미널 노드로 — backend 실제 상태를 왜곡하지 않는다.
 // completed_unverified를 ✓로 위장하지 않는다(검증 불완전은 !).
