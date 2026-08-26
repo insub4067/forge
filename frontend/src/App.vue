@@ -1830,7 +1830,7 @@ document.addEventListener('visibilitychange', () => {
             </div>
 
             <div v-if="(m.state && (m.state.files_changed?.length || m.state.errors?.length)) || m.compacted" class="state-summary">
-              <span v-if="m.state?.files_changed?.length" class="state-chip">변경 파일 {{ m.state.files_changed.length }}</span>
+              <span v-if="m.state?.files_changed?.length" class="state-chip tappable" role="button" tabindex="0" @click="showGit = true" @keydown.enter="showGit = true">변경 파일 {{ m.state.files_changed.length }}</span>
               <span v-if="m.state?.errors?.length" class="state-chip err">오류 {{ m.state.errors.length }}</span>
               <span v-if="m.compacted" class="state-chip">컨텍스트 압축됨</span>
             </div>

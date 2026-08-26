@@ -12,7 +12,7 @@ const emit = defineEmits(['close'])
 
 const kanbanCols = [
   { key: 'todo', label: 'TODO' },
-  { key: 'working', label: 'IN PROCESS' },
+  { key: 'working', label: 'IN PROGRESS' },
   { key: 'testing', label: 'QA' },
   { key: 'done', label: 'DONE' },
 ]

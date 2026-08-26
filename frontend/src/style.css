@@ -3092,6 +3092,8 @@ button {
   color: var(--muted);
 }
 .state-chip.err { color: #f87171; }
+.state-chip.tappable { cursor: pointer; }
+.state-chip.tappable:active { background: var(--border); }
 .done-msg {
   margin-top: 8px;
   font-size: 13px;
@@ -3913,24 +3915,29 @@ button {
    구별하고 색은 보조로만 쓴다(다크모드 가독성). */
 .timeline { margin: 2px 0; }
 .tl-node { display: flex; gap: 10px; position: relative; }
-/* rail — 이 노드 마커에서 다음 노드로 잇는 선(마지막 노드는 잇지 않는다) */
+/* rail — 이 노드 마커에서 다음 노드 마커까지 잇는 선(마지막 노드는 잇지 않는다).
+   bottom을 다음 노드 마커 중심(~마커 top+8px)까지 내려, running ●(작은 점)에도 선이 닿게 한다.
+   -2px면 완료 ✓의 큰 글리프가 틈을 가려 보였지만 running ●에선 틈이 드러났다. */
 .tl-node:not(:last-child)::before {
   content: '';
   position: absolute;
   left: 8px;
   top: 20px;
-  bottom: -2px;
+  bottom: -10px;
   width: 1.5px;
   background: var(--border);
 }
 .tl-marker {
   flex: 0 0 17px;
+  align-self: flex-start;   /* 글리프 크기로 제한 — 아래 background가 rail을 마커에서만 cap하게 */
   display: flex;
   justify-content: center;
   padding-top: 3px;
+  padding-bottom: 3px;
   font-size: 11px;
   line-height: 1;
   color: var(--muted);
+  background: var(--bg);     /* rail이 마커 뒤로 깔끔히 들어가 '겹침' 없이 마커에서 끊겨 보인다 */
   z-index: 1;
 }
 .tl-marker.running { color: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
