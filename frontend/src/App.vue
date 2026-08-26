@@ -1883,9 +1883,21 @@ document.addEventListener('visibilitychange', () => {
                 <div v-if="p.text" class="text" v-html="renderMarkdown(p.text)"></div>
               </template>
             </template>
-            <!-- Agent Activity Timeline — 세로 rail이 시간축+인과를 나타낸다. 각 phase가 노드,
-                 상태는 형태(● 진행 / ✓ 성공 / ! 실패)로 구별한다(색은 보조). -->
-            <div v-else-if="m.phases.length" class="timeline">
+            <!-- Activity 메시지: 응답을 먼저, 실행 로그(타임라인)는 아래로 · 완료 후 기본 접힘(정보밀도↓).
+                 헤더에 종류·개수(실행 N · 추론 N · 도구 N). 실행 중엔 접기 없이 라이브로 펼쳐 둔다. -->
+            <template v-else>
+            <div v-if="m.doneMessage" class="done-msg">{{ m.doneMessage }}</div>
+            <div v-if="m.phases.length" class="logs">
+              <button
+                v-if="!isLiveTurn(i)"
+                class="logs-toggle"
+                :aria-expanded="m.logsOpen ? 'true' : 'false'"
+                @click="m.logsOpen = !m.logsOpen"
+              >
+                <span class="logs-label">실행 {{ logCounts(m).steps }}<span v-if="logCounts(m).think"> · 추론 {{ logCounts(m).think }}</span><span v-if="logCounts(m).tools"> · 도구 {{ logCounts(m).tools }}</span></span>
+                <svg class="logs-chevron" :class="{ open: m.logsOpen }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+              <div v-if="isLiveTurn(i) || m.logsOpen" class="timeline">
             <div v-for="(p, pi) in m.phases" :key="pi" class="tl-node" :class="phaseStatus(p)">
               <span class="tl-marker" :class="phaseStatus(p)" aria-hidden="true">{{ phaseGlyph(p) }}</span>
               <div class="tl-content">
@@ -1929,6 +1941,8 @@ document.addEventListener('visibilitychange', () => {
               </div>
             </div>
             </div>
+            </div>
+            </template>
 
             <div v-if="(m.state && (m.state.files_changed?.length || m.state.errors?.length)) || m.compacted" class="state-summary">
               <span v-if="m.state?.files_changed?.length" class="state-chip tappable" role="button" tabindex="0" @click="showGit = true" @keydown.enter="showGit = true">변경 파일 {{ m.state.files_changed.length }}</span>
@@ -1946,8 +1960,6 @@ document.addEventListener('visibilitychange', () => {
               </div>
               <div v-if="approvalError" class="approval-err">{{ approvalError }}</div>
             </div>
-
-            <div v-if="m.doneMessage" class="done-msg">{{ m.doneMessage }}</div>
 
             <div
               v-for="r in (i === messages.length - 1 ? refinements : [])"

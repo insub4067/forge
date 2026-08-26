@@ -4665,3 +4665,16 @@ button {
   background: var(--panel-2); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer;
 }
 .rw-action:active { background: var(--border); }
+
+/* ── 실행 로그(타임라인) 접기 (Phase B) — 완료 후 기본 접힘, 헤더에 개수. ── */
+.logs { margin-top: 4px; }
+.logs-toggle {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  min-height: 34px; padding: 6px 2px;
+  background: none; border: none; cursor: pointer;
+  color: var(--muted); font-size: 12.5px; font-weight: 600; text-align: left;
+}
+.logs-label { flex: 1; }
+.logs-chevron { color: var(--muted); transition: transform 0.15s ease; flex-shrink: 0; }
+.logs-chevron.open { transform: rotate(90deg); }
+.logs .timeline { margin-top: 2px; }
