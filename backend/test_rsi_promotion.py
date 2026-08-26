@@ -58,6 +58,16 @@ def test_cost_and_elapsed_gates_preserved():
     assert promotion_gate(BASE, _agg(50, 50))["decision"] == "REJECT"               # 전부 동률
 
 
+def test_sandbox_mode_mismatch_rejected():
+    """P1-E: baseline/candidate가 다른 sandbox 모드에서 측정됐으면 비교 불가 → REJECT."""
+    d = promotion_gate(BASE, _agg(50, 50, cost=0.001),
+                       baseline_sandbox="host", candidate_sandbox="docker")
+    assert d["decision"] == "REJECT" and "sandbox" in d["reason"]
+    # 같은 모드면 정상 판정(비용 하락 → PROMOTE)
+    assert promotion_gate(BASE, _agg(50, 50, cost=0.0048),
+                          baseline_sandbox="host", candidate_sandbox="host")["decision"] == "PROMOTE"
+
+
 def test_missing_cost_rejected():
     assert promotion_gate(BASE, {"runs": 50, "successes": 50, "success_rate": 1.0,
                                  "cost_per_success": None, "elapsed_p50": 5})["decision"] == "REJECT"

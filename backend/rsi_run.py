@@ -231,7 +231,9 @@ def main():
             baseline.get("promotion", baseline["overall"]),
             candidate.get("promotion", candidate["overall"]),
             baseline_holdout=baseline.get("holdout"),
-            candidate_holdout=candidate.get("holdout"))
+            candidate_holdout=candidate.get("holdout"),
+            baseline_sandbox=baseline.get("sandbox_mode"),
+            candidate_sandbox=candidate.get("sandbox_mode"))
         print(f"판정: {decision['decision']} — {decision['reason']}")
 
         if args.report:

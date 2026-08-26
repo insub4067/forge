@@ -41,8 +41,17 @@ def wilson_lower(successes: int, n: int, z: float = 1.96) -> float:
 def promotion_gate(baseline: dict, candidate: dict, *, min_samples: int = 40,
                    cost_rel_tol: float = 0.05, elapsed_rel_tol: float = 0.05,
                    baseline_holdout: dict | None = None,
-                   candidate_holdout: dict | None = None) -> dict:
+                   candidate_holdout: dict | None = None,
+                   baseline_sandbox: str | None = None,
+                   candidate_sandbox: str | None = None) -> dict:
     """결정과 이유를 돌려준다. baseline/candidate는 bench aggregate의 'overall'."""
+    # -1. 실행 경계(sandbox 모드) 대조 — 모드가 다르면(예: host vs docker) 성공률이 이전되지
+    # 않는다(네트워크·메모리·마운트가 다름). 비교 자체가 성립 안 하므로 판정을 거부한다(P1-E).
+    if baseline_sandbox and candidate_sandbox and baseline_sandbox != candidate_sandbox:
+        return {"decision": "REJECT",
+                "reason": f"sandbox 모드 불일치: baseline={baseline_sandbox}, candidate={candidate_sandbox} "
+                          "— 다른 실행 경계의 성공률은 비교 불가 (gate -1)"}
+
     # 0. 표본 요건 — repeat 집계 없이는 판정하지 않는다(단일 실행은 노이즈).
     b_n, c_n = baseline.get("runs", 0), candidate.get("runs", 0)
     if b_n < min_samples or c_n < min_samples:
@@ -108,6 +117,12 @@ def _self_test():
     assert promotion_gate(base, cand(50, cost=0.001),
                           baseline_holdout={"success_rate": 1.0},
                           candidate_holdout={"success_rate": 0.8})["decision"] == "REJECT"
+    # sandbox 모드 불일치 → 비교 불가 REJECT (P1-E)
+    assert promotion_gate(base, cand(50, cost=0.001),
+                          baseline_sandbox="host", candidate_sandbox="docker")["decision"] == "REJECT"
+    # 같은 모드면 정상 판정
+    assert promotion_gate(base, cand(50, cost=0.0048),
+                          baseline_sandbox="host", candidate_sandbox="host")["decision"] == "PROMOTE"
     # 비용 미측정 → REJECT
     assert promotion_gate(base, {"runs": 50, "successes": 50, "success_rate": 1.0,
                                  "cost_per_success": None, "elapsed_p50": 5})["decision"] == "REJECT"

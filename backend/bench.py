@@ -364,7 +364,11 @@ def main():
         _print_report(agg, variant)
         if args.json:
             import json
+            from app.config import settings
             agg["variant"] = variant
+            # P1-E: 측정 실행 경계를 기록한다 — 다른 sandbox 모드에서 잰 성공률은 이전되지 않으므로
+            # 승격 판정이 baseline/candidate의 모드를 대조해 다르면 거부할 수 있게 한다.
+            agg["sandbox_mode"] = settings.sandbox_mode
             Path(args.json).write_text(json.dumps(agg, indent=2), encoding="utf-8")
             print(f"→ 저장: {args.json}")
     else:
