@@ -217,7 +217,7 @@ async def verify_gates(ws: str, session_id: str, send: EventSink) -> tuple[str, 
           }, ensure_ascii=False)
           # 판정 우선순위: trivial → 검증이 대상 변경(P0-B) → 정상 classify.
           if trivial:
-              verdict, reason = "unavailable", "trivial 게이트 — 변경 이전 코드에서도 통과(판별력 없음). 검증으로 인정하지 않는다"
+              verdict, reason = "unavailable", "변경 전에도 통과하던 검증이라 실제 변경을 확인하지 못합니다 — 검증으로 인정하지 않음"
           elif (_wt_before is not None and _wt_after is not None and _wt_before != _wt_after):
               # P0-B: 검증 명령이 워크스페이스 소스를 바꿨으면(게이트 A가 게이트 B의 통과 조건을 만드는
               # 자기충족 경로) passed로 인정하지 않고 unavailable로 강등한다 — 검증은 대상을 관찰만 해야 한다.

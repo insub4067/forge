@@ -2622,8 +2622,12 @@ class AgentRuntime:
                      "abandoned": "포기"}.get(r.get("status"), "미검증")
             lines.append(f"! {r['title']} — {r.get('reason') or label}")
 
-        for r in s.get("untraced_requirements") or []:
-            lines.append(f"! {r.get('text') or r.get('id')} — 검증한 gate가 없습니다(미검증)")
+        # 실행 검증이 붙지 않은 요청 항목 — 여러 개면 한 줄로 묶는다(같은 사유가 반복돼 읽기 나빴다).
+        untraced = s.get("untraced_requirements") or []
+        if len(untraced) == 1:
+            lines.append(f"! {untraced[0].get('text') or untraced[0].get('id')} — 실행으로 검증할 방법이 없어 미검증")
+        elif untraced:
+            lines.append(f"! 요청 항목 {len(untraced)}개 — 실행으로 검증할 방법이 없어 미검증")
 
         if vstate == "passed":
             lines.append("✓ 기존 테스트·빌드 통과")
