@@ -16,6 +16,12 @@ import AgentCrewPanel from './components/AgentCrewPanel.vue'
 import ActivityDetailPanel from './components/ActivityDetailPanel.vue'
 import FsIcon from './components/FsIcon.vue'
 import { balance as adminBalance, loadBalance } from './store'
+import {
+  ROLE_LABELS, completionNode, phaseLabel, phaseStatus, phaseErrorCount, phaseGlyph,
+  phaseHasDetail, phaseSummary, hasActivity, assistantText, hasAssistantText,
+  isCompletionReport, shortModel, summarizeArgs, approvalBody, formatTokens, shortPath,
+  runningTool,
+} from './lib/message'
 import { isOpenSwipe } from './lib/drawerDrag.js'
 
 // 단일 줄바꿈도 <br>로 — 답변 줄바꿈을 적극 반영
@@ -472,11 +478,6 @@ function onMainTouchEnd(e) {
   if (!startedInHScroll && isOpenSwipe(dx, dy) && !showRooms.value) showRooms.value = true
 }
 
-function formatTokens(n) {
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
-  if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
-  return String(n || 0)
-}
 
 function openAdmin() {
   showAdmin.value = true
@@ -496,12 +497,6 @@ function currentRoom() {
   return rooms.value.find((r) => r.id === currentRoomId.value) || null
 }
 
-function shortPath(p) {
-  if (!p) return ''
-  const parts = p.split('/').filter(Boolean)
-  if (parts.length <= 2) return p
-  return parts.slice(-2).join('/')
-}
 
 function ctxPct(room) {
   const used = room?.used_tokens || 0
@@ -1038,12 +1033,6 @@ function newAssistant() {
   return m
 }
 
-const ROLE_LABELS = {
-  triage: '분류',
-  developer: '개발',
-  chat: '응답',
-  vision: '이미지 분석',
-}
 
 function startPhase(m, role = '', model = '') {
   m.phases.forEach((p) => {
@@ -1063,65 +1052,11 @@ function activePhase(m) {
   return m.phases[m.phases.length - 1]
 }
 
-function phaseLabel(p) {
-  if (p.role && ROLE_LABELS[p.role]) return ROLE_LABELS[p.role]
-  const names = p.tools.map((t) => t.name)
-  if (names.some((n) => n === 'write_file' || n === 'edit_file')) return '편집'
-  if (names.includes('bash')) return '실행'
-  if (names.some((n) => ['read_file', 'list_dir', 'grep'].includes(n))) return '탐색'
-  return '응답'
-}
 
-function phaseStatus(p) {
-  // Tool Failure ≠ Activity Failure. 코딩 에이전트에게 read_file ENOENT·grep no-match 등은
-  // 탐색의 정상 과정이다. 도구 하나가 실패했다고 Activity 전체를 '!'로 만들지 않는다.
-  // Activity 실패(!)는 검증 실패/완료 터미널(completionNode)에서만 온다. 도구 실패는 통계로.
-  if (p.running) return 'running'
-  return 'done'
-}
 
-// Timeline 노드에 "실패 N" — 실패한 도구 수(Activity 실패가 아니라 도구 통계). 상세는 Sheet.
-function phaseErrorCount(p) {
-  return (p.tools || []).filter((t) => t.status === 'error').length
-}
 
-// 상태를 색이 아니라 '형태'로 — 다크모드 가독성. ● 진행 / ✓ 성공 / ! 실패.
-function phaseGlyph(p) {
-  const s = phaseStatus(p)
-  return s === 'running' ? '●' : s === 'error' ? '!' : '✓'
-}
 
-// 첫 문장(두괄식 lead)만 — 마침표(.。!?)가 문장 끝일 때만 자른다(agent.py 같은 파일명 오분할 방지:
-// 마침표 뒤가 공백·끝·한글일 때만 문장 종료로 본다). 종료 못 찾으면(스트리밍 중 등) 원문.
-function _firstSentence(t) {
-  const m = t.match(/[.!?。](?=\s|$|[가-힣])/u)
-  return m ? t.slice(0, m.index + 1).trim() : t.trim()
-}
-// Timeline은 '흐름·요약만' — 상세(추론·도구)가 있는 phase는 두괄식 첫 문장만 보여주고 전문은
-// Detail Surface에서(탭). 장황한 진행 narration이 Timeline을 잠식하지 않게. running도 짧게 유지.
-// 순수 텍스트 phase(탭 상세 없음=최종 답변 등)는 자르지 않는다(전문 회수 경로가 없으므로).
-// 완료 phase는 미래·의도 종결("…하겠습니다")을 결과형으로 벗긴다(새 LLM 호출 없이).
-function phaseSummary(p) {
-  const t = (p.text || '').trim()
-  if (!t) return t
-  const lead = phaseHasDetail(p) ? _firstSentence(t) : t
-  if (p.running) return lead
-  const stripped = lead
-    .replace(/(하겠습니다|하겠어요|하려고\s*합니다|해\s*보겠습니다|아?\s*보겠습니다|겠습니다)\s*[.。]?\s*$/u, '')
-    .replace(/[.。\s]+$/u, '')
-    .trim()
-  return stripped || lead   // 통째로 비면(예: 문장 전체가 종결어미) lead 유지
-}
 
-// 이 assistant 메시지가 Agent 활동(도구·추론)을 포함하는가. ✓ 등 상태 기호는 Agent Activity
-// 전용이다 — 순수 대화 답변(도구 없는 텍스트)은 상태 기호 없이 본문만 보여준다.
-function hasActivity(m) {
-  // 도구·추론이 있거나, agent 작업 role(chat 아님)이면 Activity. 후자를 포함해야 developer/
-  // planner 등 phase가 시작되자마자(첫 도구 전에도) 라이브 타임라인에 '● 실행 중'으로 뜬다.
-  // 순수 대화(role 'chat' 또는 '')는 도구가 없으면 상태 기호 없이 본문만.
-  return (m.phases || []).some(
-    (p) => (p.tools && p.tools.length) || p.thinking || (p.role && p.role !== 'chat'))
-}
 
 // ── 최종 결과 카드 — 상태·진행률·검증을 '별도 값'으로. 색만이 아니라 상태 텍스트를 함께. ──
 // 검증 개수는 요구사항 gate(현재 세션)에서 센다. passed/failed 외는 전부 미검증(unavailable 등).
@@ -1203,48 +1138,10 @@ function finalAnswer(m) {
   if (withText.length) return withText[withText.length - 1].text
   return m.doneMessage || ''
 }
-// 완료 보고인가 — format_completion_summary의 고정 헤더로 판별(backend와 동기화 필수).
-function isCompletionReport(text) {
-  const t = (text || '').trim()
-  return t.startsWith('완료했습니다.') || t.startsWith('작업은 완료했습니다. 다만')
-}
-// 완료 semantic을 타임라인 터미널 노드로 — backend 실제 상태를 왜곡하지 않는다.
-// completed_unverified를 ✓로 위장하지 않는다(검증 불완전은 !).
-const _COMPLETION_NODES = {
-  completed: { glyph: '✓', label: '완료', cls: 'done' },
-  completed_unverified: { glyph: '!', label: '검증 불완전', cls: 'warn' },
-  verification_failed: { glyph: '!', label: '검증 실패', cls: 'error' },
-  context_blocked: { glyph: '!', label: '컨텍스트 한도 도달', cls: 'warn' },
-  budget_exceeded: { glyph: '!', label: '예산 초과', cls: 'warn' },
-  failed: { glyph: '!', label: '실패', cls: 'error' },
-  cancelled: { glyph: '·', label: '중단됨', cls: 'muted' },
-}
-function completionNode(status) {
-  return _COMPLETION_NODES[status] || null
-}
 
-// 작성 중 어떤 모델이 답하는지 한눈에 — 모델명을 짧은 배지로.
-function shortModel(m) {
-  if (!m) return ''
-  if (m.includes('pro')) return 'Pro'
-  if (m.includes('vision')) return 'Vision'
-  if (m.includes('flash')) return 'Flash'
-  return m.split('/').pop()
-}
 
-function runningTool(p) {
-  return p.tools.find((t) => t.status === 'running')
-}
 
-function assistantText(m) {
-  const parts = (m.phases || []).map((p) => p.text).filter(Boolean)
-  if (m.doneMessage) parts.push(m.doneMessage)
-  return parts.join('\n\n').trim()
-}
 
-function hasAssistantText(m) {
-  return assistantText(m).length > 0
-}
 
 async function copyMessage(m) {
   const text = assistantText(m)
@@ -1264,39 +1161,13 @@ async function copyMessage(m) {
   }
 }
 
-// 한 줄 요약 — 도구별로 의미 있는 필드만(경로·명령·패턴). 날 JSON 대신 읽기 좋게.
-function summarizeArgs(args) {
-  if (!args || typeof args !== 'object') return ''
-  if (typeof args.command === 'string') return args.command.split('\n')[0].slice(0, 80)
-  if (args.path) return String(args.path)
-  if (args.pattern) return String(args.pattern)
-  try {
-    const s = JSON.stringify(args)
-    return s.length > 80 ? s.slice(0, 80) + '…' : s
-  } catch {
-    return ''
-  }
-}
 
-// 승인 다이얼로그용 — 실제 내용을 진짜 줄바꿈으로(코드블록). 무엇을 쓰/실행하는지 검토 가능하게.
-function approvalBody(args) {
-  if (!args || typeof args !== 'object') return ''
-  if (typeof args.command === 'string') return args.command
-  if (typeof args.content === 'string') return args.content.slice(0, 2000)
-  if (typeof args.new_string === 'string') {
-    return '- ' + String(args.old_string || '').slice(0, 600) + '\n+ ' + args.new_string.slice(0, 600)
-  }
-  return ''
-}
 
 // Timeline 항목을 탭하면 여는 Detail Surface. 상세(추론·도구 결과·검증)는 여기서만 렌더한다.
 // detail = { phase, message, gates } 스냅샷. gates는 최신 메시지일 때만 실어 과거 메시지에 현재
 // 세션 게이트가 잘못 붙는 것을 막는다.
 const detail = ref(null)
 let detailReturnEl = null
-function phaseHasDetail(p) {
-  return !!((p.tools && p.tools.length) || p.thinking)
-}
 function openDetail(m, p) {
   if (!phaseHasDetail(p)) return
   detailReturnEl = document.activeElement
