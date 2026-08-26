@@ -9,7 +9,7 @@
   - Interpreter 실패가 전체 run을 실패시키지 않는다(예외를 삼키고 None).
 
 이 모듈은 순수 로직(데이터 모델·파싱·프롬프트 빌더)과, 주입된 adapter로 1회 flash 호출을 하는
-interpret()만 담는다. live routing에는 아직 연결하지 않는다(회귀 위험 분리 — A/B 후 통합).
+interpret()만 담는다. 2026-08-26부터 live routing에 연결됨(기본 ON, code route에서만 실행).
 """
 from __future__ import annotations
 
@@ -155,7 +155,7 @@ async def interpret(adapter, original_request: str) -> TaskIR | None:
     """주입된 adapter로 1회 호출해 Task IR을 만든다. 어떤 실패든 None(fallback).
 
     adapter는 기존 어댑터와 동일하게 async stream_chat(messages) -> async iterator[delta]를 갖는다.
-    live routing에는 아직 연결하지 않는다 — 호출측이 None이면 기존 경로를 탄다.
+    None이면 호출측이 기존 경로로 fallback한다(파싱 실패·비활성 시).
     """
     if not original_request or not str(original_request).strip():
         return None

@@ -524,7 +524,7 @@ class AgentRuntime:
         # summary가 all_messages[:covered]를 대체(모델 전송 시에만).
         self._compaction: dict[str, dict] = {}
         # 세션별 Task IR 요구사항(관찰용) — 완료 시 gate와 대조해 traceability를 낸다.
-        # ponytail: in-memory, resume 시 유실 허용(관찰 전용, 영속이 필요해지면 컬럼 추가).
+        # ponytail: in-memory, resume 시 유실 허용(완료 시 gate 대조에 쓰고 pop, 영속 불요).
         self._task_ir_reqs: dict[str, list] = {}
         # 세션별 라이브 상태 — 스트림이 끊겨도 언제나 조회 가능해야 한다.
         # {role, last_event, ts(monotonic), waiting_for, pending}
@@ -1092,7 +1092,8 @@ class AgentRuntime:
     async def _maybe_interpret(self, full_request: str, send: EventSink,
                                session_id: str = ""):
         """Task IR 인터프리터(Phase 1) — 기본 off. 켜져 있으면 저비용 flash로 원문을 Task IR로
-        정규화해 task_ir 이벤트로 관찰용 발행한다. 현재는 라우팅 결정을 바꾸지 않는다(관찰 전용).
+        정규화해 task_ir 이벤트로 발행하고, requirement를 완료 판정(traceability 강등)·gate 작성에 쓴다.
+        chat/code 라우팅 자체는 바꾸지 않는다(triage 소유). code route에서만 실행한다.
         실패/None이면 조용히 넘어간다(기존 경로 그대로). off면 어댑터 호출 자체가 없어 비용 0."""
         if not settings.task_ir_enabled or not full_request:
             return None
@@ -2588,7 +2589,7 @@ class AgentRuntime:
                         _n, state["files_changed"],
                         bool(state.get("gate_recovery_ran")), route_kind == "code"),
                 })
-                # Task IR requirement ↔ gate 대조(관찰 전용). Task IR이 있을 때만.
+                # Task IR requirement ↔ gate 대조. Task IR이 있을 때만(완료 판정에도 반영됨).
                 # false_completion(요구사항을 놓친 채 완료) 후보를 드러낸다.
                 _reqs = self._task_ir_reqs.pop(session_id, None)
                 if _reqs:

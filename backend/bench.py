@@ -242,7 +242,8 @@ async def _run_one(task: dict, idx: int, keep: bool, tier: str = "auto") -> dict
                   "forge_status": captured["status"], "approvals": captured["approvals"],
                   "prompt_tok": prompt_tok, "completion_tok": completion_tok,
                   "cache_hit": cache_hit, "cache_miss": cache_miss,
-                  "tool_calls": tool_calls, "pro_escalated": pro_escalated}
+                  "tool_calls": tool_calls, "pro_escalated": pro_escalated,
+                  "session_id": sid}  # keep=True일 때 실패 chain을 이 세션에서 조회한다.
     if not keep:
         await _cleanup_session(sid)
     return result

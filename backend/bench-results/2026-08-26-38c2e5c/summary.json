@@ -1,0 +1,238 @@
+{
+  "tasks": {
+    "A": {
+      "category": "단순 파일 수정",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0036376000000000004,
+      "elapsed_p50": 12.8,
+      "n": 5,
+      "success": 5
+    },
+    "B": {
+      "category": "단일 함수 bugfix",
+      "success_rate": 1.0,
+      "cost_per_success": 0.005283600000000001,
+      "elapsed_p50": 18.9,
+      "n": 5,
+      "success": 5
+    },
+    "B2": {
+      "category": "off-by-one bugfix",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0046302,
+      "elapsed_p50": 16.2,
+      "n": 5,
+      "success": 5
+    },
+    "C": {
+      "category": "여러 파일 기능 추가",
+      "success_rate": 1.0,
+      "cost_per_success": 0.007140400000000001,
+      "elapsed_p50": 22.7,
+      "n": 5,
+      "success": 5
+    },
+    "D": {
+      "category": "여러 파일에 걸친 bugfix",
+      "success_rate": 1.0,
+      "cost_per_success": 0.006786599999999999,
+      "elapsed_p50": 21.6,
+      "n": 5,
+      "success": 5
+    },
+    "E": {
+      "category": "탐색 후 수정",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0055826,
+      "elapsed_p50": 18.9,
+      "n": 5,
+      "success": 5
+    },
+    "F": {
+      "category": "작은 refactoring",
+      "success_rate": 1.0,
+      "cost_per_success": 0.014183600000000001,
+      "elapsed_p50": 48.5,
+      "n": 5,
+      "success": 5
+    },
+    "G": {
+      "category": "API 변경에 따른 호출부",
+      "success_rate": 1.0,
+      "cost_per_success": 0.008745,
+      "elapsed_p50": 39.6,
+      "n": 5,
+      "success": 5
+    },
+    "H": {
+      "category": "configuration 수정",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0037544,
+      "elapsed_p50": 16.8,
+      "n": 5,
+      "success": 5
+    },
+    "I": {
+      "category": "frontend 수정",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0031554,
+      "elapsed_p50": 14.2,
+      "n": 5,
+      "success": 5
+    },
+    "J": {
+      "category": "기존 helper 재사용",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0057866,
+      "elapsed_p50": 26.4,
+      "n": 5,
+      "success": 5
+    },
+    "K": {
+      "category": "새 코드 작성이 정답이 아님(YAGNI)",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0047047999999999994,
+      "elapsed_p50": 23.9,
+      "n": 5,
+      "success": 5
+    },
+    "L": {
+      "category": "잘못된 가정 검증",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0073269999999999984,
+      "elapsed_p50": 36.2,
+      "n": 5,
+      "success": 5
+    },
+    "M": {
+      "category": "dead code 제거",
+      "success_rate": 1.0,
+      "cost_per_success": 0.005468799999999999,
+      "elapsed_p50": 21.9,
+      "n": 5,
+      "success": 5
+    },
+    "N": {
+      "category": "입력 검증 추가",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0088962,
+      "elapsed_p50": 32.1,
+      "n": 5,
+      "success": 5
+    },
+    "O": {
+      "category": "여러 호출부 공유 상수",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0049868,
+      "elapsed_p50": 21.6,
+      "n": 5,
+      "success": 5
+    },
+    "P": {
+      "category": "JSON 파싱 수정",
+      "success_rate": 1.0,
+      "cost_per_success": 0.006588799999999999,
+      "elapsed_p50": 30.0,
+      "n": 5,
+      "success": 5
+    },
+    "Q": {
+      "category": "COMPLEX 다단계 파이프라인",
+      "success_rate": 0.8,
+      "cost_per_success": 0.020889,
+      "elapsed_p50": 69.1,
+      "n": 5,
+      "success": 4
+    },
+    "R": {
+      "category": "COMPLEX 상태머신 설계",
+      "success_rate": 1.0,
+      "cost_per_success": 0.007146,
+      "elapsed_p50": 23.1,
+      "n": 5,
+      "success": 5
+    },
+    "S": {
+      "category": "잘못된 import 수정",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0056316,
+      "elapsed_p50": 20.0,
+      "n": 5,
+      "success": 5
+    },
+    "T": {
+      "category": "재귀 base case bugfix",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0048372,
+      "elapsed_p50": 16.8,
+      "n": 5,
+      "success": 5
+    },
+    "U": {
+      "category": "failing-test 디버깅(예외 경로 추적)",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0079454,
+      "elapsed_p50": 29.7,
+      "n": 5,
+      "success": 5
+    },
+    "V": {
+      "category": "모호한 요구사항(테스트로 규칙 파악)",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0063762,
+      "elapsed_p50": 24.4,
+      "n": 5,
+      "success": 5
+    },
+    "W": {
+      "category": "long-running 상태 영속화",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0136032,
+      "elapsed_p50": 54.9,
+      "n": 5,
+      "success": 5
+    },
+    "X": {
+      "category": "frontend/backend 통합",
+      "success_rate": 1.0,
+      "cost_per_success": 0.0059404,
+      "elapsed_p50": 20.7,
+      "n": 5,
+      "success": 5
+    }
+  },
+  "overall": {
+    "success_rate": 0.992,
+    "cost_per_success": 0.00705,
+    "elapsed_p50": 23.1,
+    "planner_tokens": 73534,
+    "total_tokens": 7411105,
+    "runs": 125,
+    "successes": 124,
+    "verified_success_rate": 0.976,
+    "false_completion_rate": 0.0,
+    "cost_per_verified_task": 0.007166,
+    "false_failure_rate": 0.016,
+    "total_tasks": 125,
+    "verified_success": 122,
+    "false_completion": 0,
+    "false_failure": 2,
+    "completed": 24,
+    "completed_unverified": 98,
+    "verification_failed": 2,
+    "repair_rate": 0.0,
+    "repair_success_rate": 0.0,
+    "pro_escalation_rate": 0.0,
+    "context_block_rate": 0.0,
+    "human_interventions_per_task": 0.0,
+    "tool_calls_per_task": 8.25,
+    "elapsed_avg": 29.2,
+    "elapsed_p95": 69.1,
+    "prompt_tokens": 7138171,
+    "completion_tokens": 272934,
+    "cache_hit_tokens": 6742784,
+    "cache_miss_tokens": 377872,
+    "total_cost": 0.874248,
+    "cost_per_task": 0.006994
+  }
+}
