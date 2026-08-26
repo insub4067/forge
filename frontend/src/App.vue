@@ -1945,9 +1945,13 @@ document.addEventListener('visibilitychange', () => {
             </template>
 
             <div v-if="(m.state && (m.state.files_changed?.length || m.state.errors?.length)) || m.compacted" class="state-summary">
-              <span v-if="m.state?.files_changed?.length" class="state-chip tappable" role="button" tabindex="0" @click="showGit = true" @keydown.enter="showGit = true">변경 파일 {{ m.state.files_changed.length }}</span>
+              <span v-if="m.state?.files_changed?.length" class="state-chip tappable" role="button" tabindex="0" @click="m.filesOpen = !m.filesOpen" @keydown.enter="m.filesOpen = !m.filesOpen">변경 파일 {{ m.state.files_changed.length }}</span>
               <span v-if="m.state?.errors?.length" class="state-chip err">오류 {{ m.state.errors.length }}</span>
               <span v-if="m.compacted" class="state-chip">컨텍스트 압축됨</span>
+            </div>
+            <!-- 변경 파일 경로 칩 — 접힘 기본. 경로는 nowrap+말줄임(중간 줄바꿈 방지), 탭하면 diff(Git). -->
+            <div v-if="m.filesOpen && m.state?.files_changed?.length" class="file-chips">
+              <button v-for="(f, fi) in m.state.files_changed" :key="fi" class="path-chip" :title="f" @click="showGit = true">{{ f }}</button>
             </div>
 
             <div v-if="m.approval" class="approval">
