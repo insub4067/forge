@@ -20,6 +20,7 @@ from . import memory_guard
 from . import refine
 from . import change_guard
 from . import verification
+from . import memory
 from . import task_ir
 from . import traceability
 from ..security import preflight as security_preflight
@@ -1437,34 +1438,10 @@ class AgentRuntime:
         except Exception as err:  # 학습 실패가 run 결과를 바꾸면 안 된다.
             error_log.record("reflect", str(err))
 
-    # 검증(test/build)이 만든 잔존 파일이 이후 검증을 오염시키는 것을 막는다(멱등화).
-    # 예: state.json에 상태를 영속하는 stateful 테스트는 1회차 실행이 파일을 남기고,
-    # 2회차(integration)가 그 잔존 상태로 깨진다 — 코드는 정답인데 이중검증이 과차단.
-    # generic·integration이 모두 _verify를 타므로 여기 한 곳에서 막으면 전 경로가 멱등.
-    _VERIFY_SNAPSHOT_SKIP = {".git", ".venv", "node_modules",
-                             "__pycache__", ".pytest_cache", ".mypy_cache"}
-
-    @classmethod
-    def _verify_snapshot(cls, ws: str) -> set:
-        """검증 실행 직전 워크스페이스 파일 집합 스냅샷. 무겁고/건드리면 안 되는
-        디렉터리(.git/.venv/node_modules 등)는 제외 — 정리 대상도 아니다."""
-        seen = set()
-        for root, dirs, files in os.walk(ws):
-            dirs[:] = [d for d in dirs if d not in cls._VERIFY_SNAPSHOT_SKIP]
-            for f in files:
-                seen.add(os.path.join(root, f))
-        return seen
-
-    @classmethod
-    def _verify_cleanup(cls, ws: str, before: set) -> None:
-        """검증이 **새로 만든** 파일만 제거해 워크스페이스를 검증 전 상태로 되돌린다.
-        스냅샷에 이미 있던 파일(구현 산출물)은 건드리지 않는다 — 판정에는 관여 안 함
-        (state/report 확정 후 실행). 실제 실패 탐지도 약화되지 않는다(파일만 청소)."""
-        for path in cls._verify_snapshot(ws) - before:
-            try:
-                os.remove(path)
-            except OSError:  # 이미 없거나 권한 문제면 무시 — 청소 실패가 결과를 바꾸면 안 됨
-                pass
+    # 검증 스냅샷/클린업은 verification 모듈로 분리(모듈 함수). 아래 staticmethod 바인딩으로
+    # 기존 AgentRuntime._verify_snapshot/_verify_cleanup 인터페이스를 유지한다.
+    _verify_snapshot = staticmethod(verification.verify_snapshot)
+    _verify_cleanup = staticmethod(verification.verify_cleanup)
 
     async def _verify(self, ws: str, send: EventSink,
                       stage: str = "generic") -> tuple[str, str]:
@@ -1624,22 +1601,7 @@ class AgentRuntime:
     async def _gates_report(self, session_id: str) -> str:
         """미완료 gate 최종 보고 — verification 모듈로 위임(로직 분리, 인터페이스 유지)."""
         return await verification.gates_report(session_id)
-
-    @staticmethod
-    def _merge_memory_facts(existing: str, facts: list[str], cap: int = 4000) -> str | None:
-        """ROOM_MEMORY에 새 durable 사실을 dedup·상한 적용해 병합한다(순수).
-        추가할 게 없거나(중복) 상한을 넘으면 None(무한 성장·중복 방지)."""
-        add = [f.strip() for f in facts
-               if f.strip() and f.strip().lstrip("-").strip() not in existing]
-        if not add:
-            return None
-        header = "" if "## 학습된 프로젝트 지식" in existing \
-            else "\n## 학습된 프로젝트 지식 (FORGE 자동 적립)\n"
-        sep = "" if (not existing or existing.endswith("\n")) else "\n"
-        block = sep + header + "\n".join(add) + "\n"
-        if len(existing) + len(block) > cap:
-            return None
-        return existing + block
+    _merge_memory_facts = staticmethod(memory.merge_memory_facts)
 
     async def _extract_project_memory(self, session_id: str, ws: str, goal: str,
                                       files_changed: list, send: EventSink) -> None:
@@ -1737,48 +1699,8 @@ class AgentRuntime:
             await send("project_memory_saved", {"count": len(accepted)})
         except Exception as err:
             error_log.record("project_memory", str(err), session_id)
-
-    @staticmethod
-    def _relative_changed(ws: str, files_changed: list) -> list[str]:
-        """변경 파일을 워크스페이스 기준 상대 경로로 정규화한다(중복 제거)."""
-        out: list[str] = []
-        for raw in files_changed or []:
-            q = str(raw or "").strip()
-            if not q:
-                continue
-            if os.path.isabs(q):
-                try:
-                    q = os.path.relpath(q, ws)
-                except ValueError:
-                    continue
-            q = os.path.normpath(q)
-            if q.startswith("..") or q in out:
-                continue
-            out.append(q)
-        return out
-
-    @staticmethod
-    def _parse_memory_candidates(text: str) -> list[dict]:
-        """모델 출력에서 candidate JSON 배열만 뽑는다. 형식이 깨지면 빈 목록(저장 안 함)."""
-        t = (text or "").strip()
-        if not t:
-            return []
-        m = re.search(r"\[.*\]", t, re.S)
-        if not m:
-            return []
-        try:
-            data = json.loads(m.group(0))
-        except Exception:
-            return []
-        if not isinstance(data, list):
-            return []
-        out = []
-        for it in data[:3]:
-            if isinstance(it, dict) and it.get("fact"):
-                out.append({"fact": str(it.get("fact", "")),
-                            "source": str(it.get("source", "")),
-                            "evidence": str(it.get("evidence", ""))})
-        return out
+    _relative_changed = staticmethod(memory.relative_changed)
+    _parse_memory_candidates = staticmethod(memory.parse_memory_candidates)
 
     @staticmethod
     def _effective_thinking(thinking, counters) -> bool:

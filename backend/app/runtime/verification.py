@@ -7,6 +7,7 @@ agent.py는 thin delegator로 기존 이름·동작을 유지한다(외부 인�
 """
 import asyncio
 import json
+import os
 from typing import Awaitable, Callable
 
 from ..db import store
@@ -176,3 +177,30 @@ async def gates_report(session_id: str) -> str:
             if g.get("evidence"):
                 lines.append(f"  Evidence: {str(g.get('evidence'))[:300]}")
     return "\n".join(lines)
+
+
+# 검증 실행 전 워크스페이스 스냅샷/클린업 — agent.py에서 분리(모듈 함수, 인스턴스 상태 무관).
+# 무겁고/건드리면 안 되는 디렉터리(.git/.venv/node_modules 등)는 제외 — 정리 대상도 아니다.
+VERIFY_SNAPSHOT_SKIP = {".git", ".venv", "node_modules",
+                        "__pycache__", ".pytest_cache", ".mypy_cache"}
+
+
+def verify_snapshot(ws: str) -> set:
+    """검증 실행 직전 워크스페이스 파일 집합 스냅샷."""
+    seen = set()
+    for root, dirs, files in os.walk(ws):
+        dirs[:] = [d for d in dirs if d not in VERIFY_SNAPSHOT_SKIP]
+        for f in files:
+            seen.add(os.path.join(root, f))
+    return seen
+
+
+def verify_cleanup(ws: str, before: set) -> None:
+    """검증이 **새로 만든** 파일만 제거해 워크스페이스를 검증 전 상태로 되돌린다.
+    스냅샷에 이미 있던 파일(구현 산출물)은 건드리지 않는다 — 판정에는 관여 안 함
+    (state/report 확정 후 실행). 실제 실패 탐지도 약화되지 않는다(파일만 청소)."""
+    for path in verify_snapshot(ws) - before:
+        try:
+            os.remove(path)
+        except OSError:  # 이미 없거나 권한 문제면 무시 — 청소 실패가 결과를 바꾸면 안 됨
+            pass
