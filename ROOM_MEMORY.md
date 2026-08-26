@@ -27,3 +27,9 @@
   - source: `backend/app/tools/registry.py`
 - 프로젝트 빌드 검증은 frontend 디렉토리에서 npm run build를 실행하고 'built in' 메시지로 성공 여부를 확인한다.
   - source: `frontend/src/style.css` · verified: cd frontend && npm run build 2>&1 | grep -E 'built in' && echo 'BUILD_OK'
+- 파일 분리 대상 파일은 backend/app/runtime/agent.py로 식별됨
+  - source: `docs/file-split-plan.md` · verified: grep -q 'backend/app/runtime/agent.py' docs/file-split-plan.md
+- 프롬프트 분리 후에도 전체 테스트 스위트가 253개 테스트를 통과한다.
+  - source: `backend/app/runtime/prompts.py` · verified: cd backend && ./.venv/bin/python3 -m pytest -q 2>&1 | tail -1 | grep -o '253 passed'
+- backend/app/runtime/agent.py에서 검증·메모리 메서드가 모듈 위임으로 교체됨
+  - source: `backend/app/runtime/agent.py` · verified: 분리 후 전체 테스트 스위트 통과
