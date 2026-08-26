@@ -29,6 +29,10 @@ import {
   viewerTouchEnd, removeImage, removeText, clearAttachments, handleFiles, onFileChange,
   onDragOver, onDragLeave, onDrop,
 } from './stores/attachments'
+import {
+  showHidden, fsPath, fsParent, fsEntries, fsFilter, fsVisible, homePath,
+  navigateFs, loadHomePath,
+} from './stores/fsBrowser'
 
 // 단일 줄바꿈도 <br>로 — 답변 줄바꿈을 적극 반영
 marked.setOptions({ breaks: true, gfm: true })
@@ -154,12 +158,7 @@ const gates = ref([])  // Acceptance Gate — 요구사항별 검증 상태(pass
 // 칸반 카드 상태 변경을 채팅에 알리기 위한 직전 상태 스냅샷(title→status).
 const showKanban = ref(false)
 const showWorkspacePicker = ref(false)
-const showHidden = ref(false)  // 리팩토링 중 선언이 유실돼 워크스페이스 피커가 빈 목록이었다(복구)
-const fsPath = ref('')
-const fsParent = ref(null)
-const fsEntries = ref([])
 const pickerRoomId = ref(null)
-const homePath = ref('')  // 홈 디렉터리 — 최초 세션이 workspace_path로 저장하는 값. 미설정 판별 기준.
 const needsWorkspace = computed(() => {
   // 서버에서 세션방 목록을 확인하기 전엔 단정하지 않는다(로드 실패 시 오표시 방지).
   if (!roomsLoaded.value) return false
@@ -174,15 +173,6 @@ const needsWorkspace = computed(() => {
   if (homePath.value && ws === homePath.value) return true
   return false
 })
-async function loadHomePath() {
-  try {
-    const res = await fetch('/api/fs/list?path=')
-    if (res.ok) {
-      const data = await res.json()
-      homePath.value = data.path || ''
-    }
-  } catch {}
-}
 const showGit = ref(false)
 const steerMode = ref('queue') // 'queue' = 작업큐 대기(기본), 'switch' = 중단 후 새로 시작
 const pendingSend = ref(null)
@@ -857,28 +847,7 @@ async function openWorkspacePicker(roomId) {
 }
 
 // 피커 검색 — 지금 보는 폴더 안에서 이름으로 거른다(디스크 전체 탐색 아님).
-const fsFilter = ref('')
-const fsVisible = computed(() => {
-  const q = fsFilter.value.trim().toLowerCase()
-  const list = q ? fsEntries.value.filter((e) => e.name.toLowerCase().includes(q)) : fsEntries.value
-  // 폴더 먼저(선택 가능한 것이 위로), 그다음 이름순.
-  return [...list].sort((a, b) => (Number(b.is_dir) - Number(a.is_dir)) || a.name.localeCompare(b.name))
-})
 
-async function navigateFs(path) {
-  fsFilter.value = ''
-  try {
-    const res = await fetch(
-      `/api/fs/list?path=${encodeURIComponent(path || '')}&show_hidden=${showHidden.value}`
-    )
-    if (res.ok) {
-      const data = await res.json()
-      fsPath.value = data.path
-      fsParent.value = data.parent
-      fsEntries.value = data.entries
-    }
-  } catch {}
-}
 
 async function pickCurrentPath() {
   if (pickerRoomId.value) {
