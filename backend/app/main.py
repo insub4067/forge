@@ -63,6 +63,23 @@ _COLUMN_PATCHES = [
 ]
 
 
+async def _resume_interrupted_runs(items, resume_fn):
+    """중단된 run을 순차 재개. 한 건 실패가 나머지 재개를 막지 않게 하고, 실패는 error_log로
+    가시화한다 — fire-and-forget task라 예외가 stderr로만 새어 조용히 사라지던 갭을 막는다."""
+    import os as _os
+    for it in items:
+        ws = it["workspace_path"]
+        # 재개 금지: resuming(재개 중 또 죽음, 크래시 루프 가드) / 잘못된 workspace.
+        if (it["final_status"] == "resuming" or not ws
+                or ws == "/" or not _os.path.isdir(ws)):
+            await store.mark_interrupted_note(it["id"])
+            continue
+        try:
+            await resume_fn(it["id"], ws)  # 순차 — 스파이크 방지
+        except Exception as err:
+            error_log.record("startup_resume", f"run {it['id']} 재개 실패(나머지는 계속): {err}", it["id"])
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 원격 운영 모드 fail-closed 게이트 — 인증 없이 외부에 노출되는 것을 기동 단계에서 막는다.
@@ -111,19 +128,7 @@ async def lifespan(app: FastAPI):
         if interrupted:
             if settings.auto_resume:
                 from .api.routes import resume_run
-                import os as _os
-
-                async def _resume_all(items):
-                    for it in items:
-                        ws = it["workspace_path"]
-                        # 재개 금지: resuming(재개 중 또 죽음, 크래시 루프 가드) / 잘못된 workspace.
-                        if (it["final_status"] == "resuming" or not ws
-                                or ws == "/" or not _os.path.isdir(ws)):
-                            await store.mark_interrupted_note(it["id"])
-                            continue
-                        await resume_run(it["id"], ws)  # 순차 — 스파이크 방지
-
-                asyncio.create_task(_resume_all(interrupted))
+                asyncio.create_task(_resume_interrupted_runs(interrupted, resume_run))
             else:
                 for it in interrupted:
                     await store.mark_interrupted_note(it["id"])
