@@ -22,9 +22,14 @@ def _run(code: str, env: dict) -> subprocess.CompletedProcess:
     for k in ("FORGE_AUTH_TOKEN", "AUTH_TOKEN", "FORGE_REQUIRE_AUTH", "REQUIRE_AUTH",
               "FORGE_ALLOWED_ORIGINS", "ALLOWED_ORIGINS"):
         e.pop(k, None)
+    # 이 헬퍼는 실제 app lifespan을 태운다. startup의 auto-resume이 켜져 있으면 테스트 DB에
+    # 남은 중단 run을 '진짜로' 재개해(LLM 호출·명령 실행) 서브프로세스가 끝나지 않는다 —
+    # 실제로 pytest가 19시간 매달렸다. 인증 검증에 필요 없는 startup 부작용은 꺼 둔다.
+    e.setdefault("AUTO_RESUME", "0")
     e.update(env)
+    # timeout 없이는 위 같은 행이 스위트 전체를 무한 대기시킨다. 멈추면 실패로 드러나게 한다.
     return subprocess.run([sys.executable, "-c", code], cwd=str(BACKEND),
-                          env=e, capture_output=True, text=True)
+                          env=e, capture_output=True, text=True, timeout=60)
 
 
 def _load(env: dict) -> dict:
