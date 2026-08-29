@@ -88,6 +88,7 @@ const agentStatus = ref(null)
 // 서버 도달 가능 여부 — 헬스 하트비트가 판정한다. 서버가 먹통이면 모든 fetch가 조용히
 // 실패해 화면이 빈 채로 멈추던 문제(실측)를 배너로 드러낸다.
 const serverDown = ref(false)
+const authExpired = ref(false)   // Access 세션 만료 — 백엔드 먹통과 구분해 재로그인을 안내
 let healthTimer = null
 const showSkills = ref(false)
 const skillOpen = ref({}) // 스킬 카드 펼침 상태(기본 닫힘)
@@ -281,11 +282,21 @@ async function pingHealth() {
   try {
     const ctrl = new AbortController()
     const t = setTimeout(() => ctrl.abort(), 4000)
-    const res = await fetch('/api/health', { signal: ctrl.signal, cache: 'no-store' })
+    // redirect:'manual' — Cloudflare Access 세션이 만료되면 /api/health가 로그인 페이지로
+    // 302된다. 따라가면 크로스오리진 CORS 실패라 '백엔드 먹통'과 구분이 안 되므로,
+    // 리다이렉트를 잡아 opaqueredirect로 받아 인증 만료로 판정한다.
+    const res = await fetch('/api/health', { signal: ctrl.signal, cache: 'no-store', redirect: 'manual' })
     clearTimeout(t)
+    if (res.type === 'opaqueredirect') {
+      // 리다이렉트는 명확한 신호다 — 연속 실패를 기다리지 않고 바로 띄운다.
+      authExpired.value = true
+      serverDown.value = true
+      return
+    }
     if (!res.ok) throw new Error('bad')
     const wasDown = serverDown.value
     healthFails = 0
+    authExpired.value = false
     serverDown.value = false
     if (wasDown) {
       // 서버가 방금 복구됨 — 방 목록을 다시 받아 랜딩을 보정한다. 최초 로드 실패로 지워졌거나
@@ -1523,9 +1534,15 @@ document.addEventListener('visibilitychange', () => {
 
 <template>
   <div class="app" :class="{ 'sidebar-pinned': isWide && pinnedSidebar }">
-    <div v-if="serverDown" class="server-down" @click="pingHealth()">
+    <div v-if="serverDown" class="server-down" @click="!authExpired && pingHealth()">
       <span class="server-down-dot"></span>
-      서버에 연결할 수 없습니다 — 백엔드가 재시작 중이거나 응답하지 않습니다. 자동으로 다시 시도합니다.
+      <template v-if="authExpired">
+        로그인 세션이 만료됐습니다.
+        <a href="/" class="server-down-link">다시 로그인</a>
+      </template>
+      <template v-else>
+        서버에 연결할 수 없습니다 — 백엔드가 재시작 중이거나 응답하지 않습니다. 자동으로 다시 시도합니다.
+      </template>
     </div>
     <header>
       <button v-if="!(isWide && pinnedSidebar)" class="icon-btn" @click="isWide ? togglePin() : (showRooms = true)" aria-label="세션 목록">

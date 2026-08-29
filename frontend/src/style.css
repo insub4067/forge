@@ -4301,6 +4301,12 @@ button {
   animation: sd-pulse 1.2s ease-in-out infinite;
 }
 @keyframes sd-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+.server-down-link {
+  color: #fff;
+  font-weight: 600;
+  text-decoration: underline;
+  white-space: nowrap;
+}
 
 /* ─────────────────────────────────────────────────────────────
    Agent Crew / Roster — 게임 캐릭터 선택 화면을 절제한 inspector UI
