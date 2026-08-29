@@ -28,7 +28,43 @@ def test_signature_normalizes_paths_and_line_numbers():
     assert refine.failure_signature(PYTEST_FAIL_A) == refine.failure_signature(PYTEST_FAIL_B)
     assert refine.failure_signature(PYTEST_FAIL_A) != refine.failure_signature(BUILD_FAIL)
     assert refine.failure_signature(PYTEST_FAIL_A).startswith("pytest (backend):")
-    assert refine.failure_signature("") == "verification: "
+    assert refine.failure_signature("") == f"verification: {refine.UNKNOWN}"
+
+
+# 실제 로그에서 17건 관측된 모양 — 출력이 잘려 원인 줄이 사라지고 인터프리터 내부
+# traceback 프레임만 남았다. 이걸 서명으로 쓰면 서로 다른 실패가 한 서명으로 뭉친다.
+TRUNCATED_TRACEBACK = """[pytest] 테스트 실패 (exit 1):
+/traceback.py", line 1058, in __init__
+    self.stack = StackSummary._extract_from_extended_frame_gen(
+  File "/opt/homebrew/lib/python3.14/traceback.py", line 505, in _extract_from_extended_frame_gen
+    f.line
+  File "/opt/homebrew/lib/python3.14/linecache.py", line 26,
+"""
+
+
+def test_traceback_frames_are_not_a_signature():
+    sig = refine.failure_signature(TRUNCATED_TRACEBACK)
+    assert sig == f"pytest: {refine.UNKNOWN}"
+    assert "linecache" not in sig
+
+
+def test_unknown_cause_never_becomes_a_candidate():
+    # 원인 불명이 서로 다른 run에서 반복돼도 배울 게 없다 — 문턱을 넘어도 후보 금지.
+    evs = _events(("verify_failed", TRUNCATED_TRACEBACK), ("done", ""),
+                  ("verify_failed", TRUNCATED_TRACEBACK), ("done", ""))
+    fails = refine.scan_failures(evs)
+    assert len({f["run"] for f in fails}) >= refine.MIN_EVIDENCE_RUNS
+    assert refine.propose("s1#1", fails) is None
+
+
+def test_evidence_spans_sessions():
+    # 같은 실패가 서로 다른 세션에서 1회씩 — 세션 안에서만 세면 영원히 문턱을 못 넘는다.
+    mine = [{"run": "s1#0", "signature": refine.failure_signature(PYTEST_FAIL_A),
+             "report": PYTEST_FAIL_A}]
+    other = [{"run": "s2#0", "signature": refine.failure_signature(PYTEST_FAIL_B),
+              "report": PYTEST_FAIL_B}]
+    assert refine.propose("s1#0", mine) is None
+    assert refine.propose("s1#0", mine + other) is not None
 
 
 def _events(*seq):

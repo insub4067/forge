@@ -20,23 +20,36 @@ def _label_of(report: str) -> str:
     return m.group(1).strip() if m else "verification"
 
 
+# traceback 프레임(`File "...", line N, in f`)은 실패의 원인이 아니라 경유지다.
+# 이걸 서명으로 쓰면 인터프리터 내부 파일(linecache.py 등)이 서명이 돼 학습이 오염된다.
+_FRAME = re.compile(r'^\s*File "[^"]*", line \d+')
+# 원인을 못 찾은 리포트의 서명 — propose가 이걸 근거로 삼지 않는다.
+UNKNOWN = "(원인 불명)"
+
+
 def failure_signature(report: str) -> str:
     """실패 리포트를 재발 비교용 서명으로 정규화한다.
 
     경로·줄번호·시간처럼 run마다 달라지는 값을 지워야 '같은 실패'를 셀 수 있다.
+    원인 줄을 못 고르면 아무 줄이나 집지 않고 UNKNOWN을 반환한다 — 잘린 리포트의
+    노이즈 프레임이 서명이 되면 서로 다른 실패가 한 서명으로 뭉친다.
     """
     label = _label_of(report)
+    body = [ln for ln in (report or "").splitlines()
+            if ln.strip() and not ln.strip().startswith("[") and not _FRAME.match(ln)]
     line = ""
-    for ln in (report or "").splitlines():
-        t = ln.strip()
-        if not t or t.startswith("["):
-            continue
-        if re.search(r"error|Error|ERROR|assert|Assertion|failed|FAIL|Traceback", t):
-            line = t
+    for ln in body:  # pytest 자체 요약이 있으면 그게 가장 정확하다
+        if ln.startswith(("FAILED ", "ERROR ", "E ")):
+            line = ln.strip()
             break
     if not line:
-        lines = [x.strip() for x in (report or "").splitlines() if x.strip()]
-        line = lines[-1] if lines else ""
+        for ln in body:
+            t = ln.strip()
+            if re.search(r"error|Error|ERROR|assert|Assertion|failed|FAIL", t):
+                line = t
+                break
+    if not line:
+        return f"{label}: {UNKNOWN}"
     line = re.sub(r"/\S*/", "", line)      # 절대경로 → 파일명만
     line = re.sub(r"\d+", "#", line)        # 줄번호·개수 등 변동값
     line = re.sub(r"\s+", " ", line).strip()
@@ -86,6 +99,8 @@ def propose(current_run: str, failures: list[dict], before: str = "",
     if not mine:
         return None
     sig = mine[-1]["signature"]
+    if sig.endswith(UNKNOWN):
+        return None  # 원인을 못 짚은 실패로는 배울 게 없다
     runs = sorted({f["run"] for f in failures if f["signature"] == sig})
     if len(runs) < MIN_EVIDENCE_RUNS:
         return None

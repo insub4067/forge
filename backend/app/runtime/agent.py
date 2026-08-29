@@ -1434,12 +1434,16 @@ class AgentRuntime:
             return
         try:
             events = eventlog.tail(session_id, limit=600)
-            failures = refine.scan_failures(events)
             # 이번 run은 아직 done을 보내기 전이다 → 지금까지의 done 수가 이번 run 번호.
             current = f"{session_id}#{sum(1 for e in events if e.get('type') == 'done')}"
-            mine = [f for f in failures if f["run"] == current]
+            mine = [f for f in refine.scan_failures(events) if f["run"] == current]
             if not mine:
                 return
+            # 재발 근거는 세션 경계를 넘는다. 같은 실패가 방을 바꿔가며 1회씩 나면 세션 안에서만
+            # 세는 한 문턱을 영원히 못 넘는다. run 키는 세션별이라 다른 세션 것을 합쳐도 안전하다.
+            others = [f for f in refine.scan_failures(eventlog.tail("", limit=4000))
+                      if not f["run"].startswith(f"{session_id}#")]
+            failures = refine.scan_failures(events) + others
             runs = await store.session_agent_runs(session_id)
             cost, _priced, _total = metrics_calc.sum_cost(runs)
             evidence = {
