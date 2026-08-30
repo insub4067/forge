@@ -1284,7 +1284,6 @@ async function send() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: roomId, message: payloadMsg, image_urls: imageUrls, auto_approve: autoApprove.value, model_tier: modelTier.value, budget_usd: budgetUsd.value === '' ? null : Number(budgetUsd.value) }),
     })
-    console.log('[forge] 응답:', res.status, res.headers.get('content-type'))
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
     // 폴링·SSE 시작점: 이번 run 직전까지의 마지막 seq. 이 값부터 새 이벤트를 이어받는다.
     assistant.lastSeq = Number(res.headers.get('X-Last-Seq')) || 0
@@ -1295,7 +1294,6 @@ async function send() {
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
-    let chunkCount = 0
     let eventCount = 0
 
     while (true) {
@@ -1305,9 +1303,7 @@ async function send() {
         assistant.phases.forEach((p) => { p.running = false })
         break
       }
-      chunkCount++
       const decoded = decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
-      if (chunkCount <= 3) console.log('[forge] chunk', chunkCount, value.length, '바이트:', decoded.slice(0, 120))
       buffer += decoded
       let idx
       while ((idx = buffer.indexOf('\n\n')) !== -1) {
@@ -1324,7 +1320,6 @@ async function send() {
             const evt = JSON.parse(data)
             gotEvents = true
             if (evt.type === 'done') { sawDone = true; stopEventPolling() }
-            if (eventCount <= 5) console.log('[forge] 이벤트', eventCount, ':', evt.type)
             handleEvent({ seq: evt.seq, type: evt.type, data: evt.data }, assistant)
             debug.value = `이벤트 ${eventCount} · ${evt.type}`
           } catch (e) {
