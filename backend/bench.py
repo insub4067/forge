@@ -18,6 +18,7 @@
   python bench.py --run --task C,D    # 특정 task만
 """
 import argparse
+import json
 import asyncio
 import tempfile
 import time
@@ -145,6 +146,16 @@ def aggregate(results: list[dict]) -> dict:
     no_gate = sum(1 for r in fc if not (r.get("gates_total") or 0))
     g_total = sum(r.get("gates_total", 0) for r in results)
     g_traced = sum(r.get("gates_traced", 0) for r in results)
+    # P0-A: 게이트가 실제로 변경을 판별했는가. trivial_rate가 높으면 '통과'가 통과를 의미하지 않는다.
+    v_valid = sum(r.get("gate_valid", 0) for r in results)
+    v_trivial = sum(r.get("gate_trivial", 0) for r in results)
+    v_unknown = sum(r.get("gate_validity_unknown", 0) for r in results)
+    v_judged = v_valid + v_trivial
+    out["gate_validity"] = {
+        "valid": v_valid, "trivial": v_trivial, "unknown": v_unknown,
+        # 판별 가능했던 게이트 중 trivial 비율(unknown은 분모에서 제외 — 모르는 것으로 비율을 만들지 않는다)
+        "trivial_rate": _pct(v_trivial, v_judged),
+    }
     out["gate_diagnosis"] = {
         "false_completion": len(fc),
         "blind_pass": blind_pass,                  # gate 전부 통과했는데 실제 실패 = 게이트 맹점
@@ -198,6 +209,10 @@ def _print_report(agg: dict, variant: str):
     print(f"게이트 진단           = false_completion {gd.get('false_completion', 0)}건 중 "
           f"맹점(gate 전부 통과) {gd.get('blind_pass', 0)} · gate없음 {gd.get('no_gate', 0)} · "
           f"기타 {gd.get('other', 0)}  | gate 추적률 {gd.get('gate_coverage', 0)}")
+    gv = agg.get("gate_validity") or {}
+    print(f"게이트 판별력           = trivial {gv.get('trivial', 0)} / 판정가능 "
+          f"{gv.get('valid', 0) + gv.get('trivial', 0)} (비율 {gv.get('trivial_rate', 0)}) · "
+          f"probe불가 {gv.get('unknown', 0)}")
     print(f"cost_per_verified_task = {cpv}")
     print(f"false_failure_rate    = {o['false_failure_rate']}  (실제로 됐는데 실패로 판정 {o['false_failure']}건)")
     print(f"\n상태: completed={o['completed']} completed_unverified={o['completed_unverified']} "
@@ -273,6 +288,16 @@ async def _run_one(task: dict, idx: int, keep: bool, tier: str = "auto") -> dict
         gates_total = len(gate_rows)
         gates_passed = sum(1 for g in gate_rows if g["status"] == "passed")
         gates_traced = sum(1 for g in gate_rows if g.get("requirement_id"))
+        # P0-A telemetry: 각 gate가 변경을 실제로 판별했는가(evidence.gate_validity).
+        # trivial = 변경 전에도 통과(판별력 없음), unknown = probe를 못 돌려 모름.
+        validity = {"valid": 0, "trivial": 0, "unknown": 0}
+        for g in gate_rows:
+            try:
+                v = json.loads(g.get("evidence") or "{}").get("gate_validity")
+            except Exception:
+                v = None
+            if v in validity:
+                validity[v] += 1
         planner_tok = sum(r["prompt_tokens"] + r["completion_tokens"] for r in rows if r["role"] == "planner")
         total_tok = sum(r["prompt_tokens"] + r["completion_tokens"] for r in rows)
         prompt_tok = sum(r.get("prompt_tokens", 0) for r in rows)
@@ -290,6 +315,8 @@ async def _run_one(task: dict, idx: int, keep: bool, tier: str = "auto") -> dict
                   "cache_hit": cache_hit, "cache_miss": cache_miss,
                   "tool_calls": tool_calls, "pro_escalated": pro_escalated,
                   "gates_total": gates_total, "gates_passed": gates_passed, "gates_traced": gates_traced,
+                  "gate_valid": validity["valid"], "gate_trivial": validity["trivial"],
+                  "gate_validity_unknown": validity["unknown"],
                   "session_id": sid}  # keep=True일 때 실패 chain을 이 세션에서 조회한다.
     if not keep:
         await _cleanup_session(sid)
@@ -363,6 +390,17 @@ def _self_test():
     assert o["false_failure"] == 1 and o["false_failure_rate"] == 0.25, o
     assert o["completed"] == 2 and o["completed_unverified"] == 1 and o["verification_failed"] == 1, o
     # 게이트 진단: 유일한 false_completion이 gate 전부 통과 = 맹점 1건, gate없음 0건.
+    # 게이트 판별력(P0-A): unknown은 비율 분모에서 빠진다 — 모르는 것으로 비율을 만들지 않는다.
+    gv = aggregate([
+        {"code": "V", "category": "c", "success": True, "cost": 0.01, "elapsed_s": 1.0,
+         "forge_status": "completed", "gate_valid": 3, "gate_trivial": 1, "gate_validity_unknown": 2},
+    ])["gate_validity"]
+    assert gv == {"valid": 3, "trivial": 1, "unknown": 2, "trivial_rate": 0.25}, gv
+    # 판정 가능한 게이트가 하나도 없으면 비율은 0(0으로 나누지 않는다)
+    gv0 = aggregate([{"code": "V", "category": "c", "success": True, "cost": 0.0, "elapsed_s": 1.0,
+                      "forge_status": "completed", "gate_validity_unknown": 4}])["gate_validity"]
+    assert gv0["trivial_rate"] == 0.0 and gv0["unknown"] == 4, gv0
+
     gd = conf["gate_diagnosis"]
     assert gd["false_completion"] == 1 and gd["blind_pass"] == 1 and gd["no_gate"] == 0, gd
     assert gd["gate_coverage"] == 1.0, gd   # 추적 2 / 총 2

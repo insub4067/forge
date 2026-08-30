@@ -207,13 +207,16 @@ async def verify_gates(ws: str, session_id: str, send: EventSink) -> tuple[str, 
           # 못하는 trivial 게이트다(예: echo hello/expected hello). probe 불가(None)면 판정 안 함.
           probe_res = await _probe(method)
           trivial = probe_res is not None and classify_gate(probe_res[0], probe_res[1], expected)[0] == "passed"
+          # 판별력 라벨은 3값이다. probe를 못 돌린 경우(git 없음·워크트리 실패)를 'valid'로 적으면
+          # 검증 유효성을 과대평가한다 — 모르는 것은 모른다고 남긴다(P0-A telemetry).
+          validity = "unknown" if probe_res is None else ("trivial" if trivial else "valid")
 
           _wt_before = await _worktree_git_hash(ws)
           rc, out = await _sh(method, ws)
           _wt_after = await _worktree_git_hash(ws)
           evidence = json.dumps({
               "command": method, "exit_code": rc,
-              "output_tail": out[-1500:], "expected": expected, "gate_validity": "trivial" if trivial else "valid",
+              "output_tail": out[-1500:], "expected": expected, "gate_validity": validity,
           }, ensure_ascii=False)
           # 판정 우선순위: trivial → 검증이 대상 변경(P0-B) → 정상 classify.
           if trivial:

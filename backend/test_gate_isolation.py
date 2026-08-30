@@ -91,3 +91,20 @@ if __name__ == "__main__":
         if name.startswith("test_") and callable(fn):
             fn()
     print("PASS — gate verification isolation (P0-A + P0-B)")
+
+
+# ── P0-A telemetry: 판별력 라벨은 3값 ───────────────────────────────────────
+def _validity(probe_res, expected="OK", probe_out="OK"):
+    """verify_gates가 붙이는 gate_validity 라벨 규칙(그 자리의 식과 동일).
+    probe를 못 돌렸으면(None) 'valid'가 아니라 'unknown'이다."""
+    from app.runtime.verification import classify_gate
+    trivial = probe_res is not None and classify_gate(probe_res[0], probe_res[1], expected)[0] == "passed"
+    return "unknown" if probe_res is None else ("trivial" if trivial else "valid")
+
+
+def test_gate_validity_label_is_three_valued():
+    """probe 불가를 'valid'로 적으면 검증 유효성을 과대평가한다 — 모르는 것은 모른다고 남긴다."""
+    assert _validity(None) == "unknown"                 # git 아님·워크트리 실패
+    assert _validity((0, "OK")) == "trivial"            # 변경 전에도 통과 = 판별력 없음
+    assert _validity((1, "boom")) == "valid"            # 변경 전엔 실패 = 변경을 판별함
+    assert _validity((0, "다른 출력")) == "valid"        # exit 0이어도 기대 문자열 없으면 통과 아님
