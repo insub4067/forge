@@ -188,11 +188,11 @@ README는 backend 테스트 116개 통과라고 적고 있으나, 저장소의 �
 |---|---|---|
 | **P0-A** trivial 게이트 탐지 | ✅ | `verification.make_prechange_worktree` — HEAD 격리 워크트리에서 게이트를 먼저 실행, 변경 전에도 passed면 `unavailable` 강등. `test_gate_isolation` |
 | **P0-B** 검증 격리(임시조치) | ✅ | 게이트 명령 전후 `_worktree_git_hash` 비교 → 검증이 소스 바꾸면 `unavailable`. 본체(사본 검증)는 후속 |
-| **P0-C** bind/README | ✅(부분) | README·실행 서버 `127.0.0.1`. `require_auth` 기본 반전은 운영자(Cloudflare Access 앞단) 결정으로 False 유지. #3(경로 화이트리스트)·#4(신뢰경계 문서) 후속 |
+| **P0-C** bind/README | ✅ | README·실행 서버 `127.0.0.1`. `require_auth` 기본 반전은 운영자(Cloudflare Access 앞단) 결정으로 False 유지. **#3 완료** — host bash를 `sandbox-exec` 쓰기 화이트리스트로 감쌈(`app/sandbox/host_guard.py`, `test_host_write_guard.py`). **#4 완료** — `docs/core/trust-boundary.md` |
 | **P1-D** RSI 통계 유의성 | ✅ | `rsi.wilson_lower`·`HOLDOUT_CODES`·`min_samples`. `bench.aggregate`가 promotion/holdout 분리. `test_rsi_promotion` |
 | **P1-E** 벤치/운영 모드 대조 | ✅ | `bench --json`에 `sandbox_mode` 기록, `promotion_gate`가 모드 다르면 REJECT. config 기본 docker vs 운영 host 일치는 배포 결정으로 별도 |
 | **P1-F** Reviewer 검출력 harness | ✅ | `reviewer_eval.py`(R 시리즈) — `--self-test` 무료, `--run` LLM 실측. 실제 검출률 수치는 `--run` 후 존치/승급/제거 결정 |
 | **P2-H** 문서 수치 | ✅ | README→리포트 링크, `work-status.md` 287 passed |
 
-**후속(미착수)**: P0-A/B 본체(`gate_validity` telemetry 지표·사본 기반 검증), P0-C #3·4, P2-G(`run()` 분해).
+**후속(미착수)**: P0-A/B 본체(`gate_validity` telemetry 지표·사본 기반 검증), P2-G(`run()` 분해).
 **실측 대기**: `reviewer_eval.py --run`(검출률), `gate_coverage` trivial 비율(P0-A 도입 후 관측).

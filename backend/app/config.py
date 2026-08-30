@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # bash 실행 모드. "docker"(기본, 격리·안전) | "host"(호스트 직접 실행 — 자기검증·
     # 풀파워 가능하지만 에이전트가 맥 전체에 접근. 신뢰하는 개인 환경에서만 옵트인).
     sandbox_mode: str = "docker"
+    # host 모드 bash의 쓰기 경계 — 워크스페이스 밖 쓰기를 OS(sandbox-exec)로 차단한다.
+    # docker 격리가 없는 host 모드의 유일한 방벽이 정규식 블랙리스트뿐이던 문제(P0-C #3).
+    # 끄려면 HOST_WRITE_GUARD=0. macOS가 아니면 자동으로 무동작.
+    host_write_guard: bool = True
     # 앱 레벨 토큰 게이트(defense-in-depth). 설정 시 모든 /api 요청에 토큰 요구.
     # 미설정이면 무동작 — Cloudflare Access + 127.0.0.1 바인딩에만 의존(auth.py 참고).
     # 문서·기동 메시지가 FORGE_ 접두사를 안내하므로 FORGE_AUTH_TOKEN을 우선 읽되, 기존

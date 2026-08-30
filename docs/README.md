@@ -15,6 +15,7 @@ FORGE는 특정 모델의 wrapper가 아니라 **검증 가능한 autonomous cod
 5. [`status/features.md`](status/features.md) — 구현 matrix
 6. [`core/db-schema.md`](core/db-schema.md) — persistence schema
 7. [`core/skills.md`](core/skills.md) — Curated/Learned/Project Skills
+8. [`core/trust-boundary.md`](core/trust-boundary.md) — 신뢰 경계: 무엇을 신뢰하지 않는가, 실행·쓰기 경계는 어디서 강제되는가
 
 Current State 문서가 코드와 다르면 **코드가 authority**이며 문서를 즉시 고친다.
 

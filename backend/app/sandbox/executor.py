@@ -2,6 +2,7 @@ import asyncio
 import re
 
 from ..config import settings
+from . import host_guard
 
 # 파괴적/위험 명령 차단(특히 host 모드에서 자동 승인 시 안전장치).
 # 개인 Mac을 되돌릴 수 없게 망가뜨리는 패턴만 최소로 막는다.
@@ -71,12 +72,19 @@ class DockerSandbox:
             raise
         return stdout.decode(errors="replace")
 
+    def _guarded(self, real_cmd: str) -> str:
+        """host 모드 bash를 쓰기 경계 안에서 실행한다(P0-C #3). 설정으로 끌 수 있고,
+        macOS가 아니거나 sandbox-exec이 없으면 원본 그대로 — 방어를 더할 뿐 막지 않는다."""
+        if not settings.host_write_guard:
+            return real_cmd
+        return host_guard.wrap(real_cmd, self.workspace)
+
     async def _run_host(self, command: str, timeout: int) -> str:
         """호스트에서 직접 실행. 에이전트가 학습한 /workspace 경로를 실제 워크스페이스로 치환.
         ponytail: 문자열 치환은 단순하지만 에이전트가 /workspace를 일관되게 쓰므로 충분."""
         import os
         import signal
-        real_cmd = command.replace("/workspace", self.workspace)
+        real_cmd = self._guarded(command.replace("/workspace", self.workspace))
         proc = await asyncio.create_subprocess_shell(
             real_cmd,
             cwd=self.workspace,
@@ -147,7 +155,7 @@ class DockerSandbox:
         실행해 타임아웃·취소 시 자식까지 정리한다."""
         import os
         import signal
-        real_cmd = command.replace("/workspace", self.workspace)
+        real_cmd = self._guarded(command.replace("/workspace", self.workspace))
         proc = await asyncio.create_subprocess_shell(
             real_cmd, cwd=self.workspace,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
