@@ -42,6 +42,26 @@ def summarize(rows: list[dict]) -> dict:
     }
 
 
+def summarize_validity(rows: list[dict]) -> dict:
+    """gate_validity 이벤트 → 판별력 집계(순수 함수).
+
+    trivial = 변경 전에도 통과하던 게이트(판별력 없음). unknown = probe를 못 돌려 모름
+    (git repo가 아닌 워크스페이스). unknown은 비율 분모에서 뺀다 — 모르는 것으로 비율을
+    만들면 판별력을 과대·과소 어느 쪽으로든 왜곡한다.
+    """
+    valid = sum(r.get("valid", 0) for r in rows)
+    trivial = sum(r.get("trivial", 0) for r in rows)
+    unknown = sum(r.get("unknown", 0) for r in rows)
+    judged = valid + trivial
+    return {
+        "runs": len(rows), "valid": valid, "trivial": trivial, "unknown": unknown,
+        "judged": judged,
+        "trivial_rate": round(trivial / judged, 3) if judged else None,
+        # probe가 아예 못 돈 비율 — 높으면 P0-A 보호가 사실상 꺼져 있다는 뜻이다
+        "unknown_rate": round(unknown / (judged + unknown), 3) if (judged + unknown) else None,
+    }
+
+
 def is_real_session(session_id: str) -> bool:
     """실제 세션 id는 uuid4().hex(32자 hex)다. 그 형식이 아니면 테스트·합성 run이다
     (예전 테스트가 session_id="s1"로 운영 로그에 가짜 run을 쌓아 뒀다 — 지금은 막혔지만
@@ -50,7 +70,7 @@ def is_real_session(session_id: str) -> bool:
     return len(sid) == 32 and all(c in "0123456789abcdef" for c in sid)
 
 
-def load(logs_dir: str, since: str) -> list[dict]:
+def load(logs_dir: str, since: str, event_type: str = "gate_coverage") -> list[dict]:
     rows = []
     for path in sorted(glob.glob(os.path.join(logs_dir, "events-*.jsonl"))):
         with open(path, encoding="utf-8", errors="replace") as f:
@@ -59,7 +79,7 @@ def load(logs_dir: str, since: str) -> list[dict]:
                     e = json.loads(line)
                 except ValueError:
                     continue
-                if e.get("type") != "gate_coverage":
+                if e.get("type") != event_type:
                     continue
                 if not is_real_session(e.get("session_id", "")):
                     continue
@@ -88,6 +108,17 @@ def main():
           f"  비율 {s['generic_only_rate']}")
     print(f"status 분포: {s['by_status']}")
     print(f"gate 0 run의 status: {s['generic_only_by_status']}")
+
+    # ── 게이트 판별력 (P0-A) ──
+    v = summarize_validity(load(args.logs, args.since, "gate_validity"))
+    if not v["runs"]:
+        print("\ngate_validity 이벤트 없음 — 계측 도입 이후의 run이 필요합니다.")
+        return
+    print(f"\n게이트 판별력: run {v['runs']}개 · 게이트 {v['judged'] + v['unknown']}개")
+    print(f"  trivial(변경 전에도 통과) {v['trivial']} / 판정가능 {v['judged']}"
+          f"  비율 {v['trivial_rate']}")
+    print(f"  probe 불가(git repo 아님 등) {v['unknown']}  비율 {v['unknown_rate']}"
+          "  ← 높으면 trivial 탐지가 사실상 꺼져 있다")
 
 
 if __name__ == "__main__":

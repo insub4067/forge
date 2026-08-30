@@ -184,6 +184,7 @@ async def verify_gates(ws: str, session_id: str, send: EventSink) -> tuple[str, 
 
     labels: list[str] = []
     resolved: list[str] = []
+    validity_counts = {"valid": 0, "trivial": 0, "unknown": 0}
     try:
       for g in gates:
           status = g.get("status", "pending")
@@ -210,6 +211,7 @@ async def verify_gates(ws: str, session_id: str, send: EventSink) -> tuple[str, 
           # 판별력 라벨은 3값이다. probe를 못 돌린 경우(git 없음·워크트리 실패)를 'valid'로 적으면
           # 검증 유효성을 과대평가한다 — 모르는 것은 모른다고 남긴다(P0-A telemetry).
           validity = "unknown" if probe_res is None else ("trivial" if trivial else "valid")
+          validity_counts[validity] += 1
 
           _wt_before = await _worktree_git_hash(ws)
           rc, out = await _sh(method, ws)
@@ -232,6 +234,10 @@ async def verify_gates(ws: str, session_id: str, send: EventSink) -> tuple[str, 
           resolved.append(verdict)
           await send("gates_update", {"gates": await store.list_gates(session_id)})
 
+      # P0-A telemetry — 이 run의 게이트가 실제로 변경을 판별했는가. DB gate는 세션 삭제와 함께
+      # 사라지므로 durable한 이벤트 로그에 남긴다(gate_coverage.py가 집계한다).
+      if any(validity_counts.values()):
+          await send("gate_validity", dict(validity_counts))
     finally:
       await remove_prechange_worktree(ws, probe_dir)
     report = "요구사항 게이트 검증: " + ", ".join(labels)

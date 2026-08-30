@@ -380,6 +380,26 @@ def test_reviewer_context_is_fresh_and_minimal():
 
 
 
+def test_gate_validity_summarize():
+    """P0-A 판별력 집계 — unknown(probe 불가)을 trivial 비율 분모에 넣지 않는다.
+
+    벤치 실측에서 게이트 60개가 전부 unknown이었다(워크스페이스가 git repo가 아니라
+    pre-change probe가 아예 못 돔). unknown을 valid로 세거나 분모에 넣으면 "판별력 있음"
+    으로 오독돼, 꺼져 있는 보호가 켜져 있는 것처럼 보인다.
+    """
+    from gate_coverage import summarize_validity
+
+    v = summarize_validity([{"valid": 3, "trivial": 1, "unknown": 2},
+                            {"valid": 1, "trivial": 0, "unknown": 0}])
+    assert v["runs"] == 2 and v["judged"] == 5
+    assert v["trivial_rate"] == 0.2, "trivial 1 / 판정가능 5"
+    assert v["unknown_rate"] == round(2 / 7, 3)
+    # 전부 probe 불가 — 비율을 0.0으로 단정하지 않고 None(판정 불가)으로 남긴다
+    v0 = summarize_validity([{"unknown": 4}])
+    assert v0["trivial_rate"] is None and v0["unknown_rate"] == 1.0, v0
+    assert summarize_validity([])["runs"] == 0
+
+
 def test_gate_coverage_summarize():
     """G0 집계 — 코드 변경이 있는 run만 분모로 삼는다. 대화·조회 run을 섞으면
     비율이 희석돼 "대체로 괜찮다"로 오독된다."""
@@ -532,6 +552,7 @@ if __name__ == "__main__":
     test_project_memory_needs_process_evidence()
     test_reviewer_context_is_fresh_and_minimal()
     test_gate_coverage_summarize()
+    test_gate_validity_summarize()
     test_model_tier_reaches_pro()
     test_runtime_smoke_fails_on_dead_backend()
     print("\n전체 통과")
