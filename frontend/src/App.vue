@@ -33,6 +33,13 @@ import {
   showHidden, fsPath, fsParent, fsEntries, fsFilter, fsVisible, homePath,
   navigateFs, loadHomePath,
 } from './stores/fsBrowser'
+import * as S from './stores/session'
+const { tasks, gates, refinements, verifyCounts, resultWarnings } = S
+// 방 식별자만 넘겨 주는 얇은 래퍼 — store는 rooms 상태를 모른다.
+const loadTasks = () => S.loadTasks(currentRoomId.value)
+const loadGates = () => S.loadGates(currentRoomId.value)
+const loadRefinements = () => S.loadRefinements(currentRoomId.value)
+const decideRefinement = (r, decision) => S.decideRefinement(r, decision, currentRoomId.value)
 
 // 단일 줄바꿈도 <br>로 — 답변 줄바꿈을 적극 반영
 marked.setOptions({ breaks: true, gfm: true })
@@ -154,8 +161,6 @@ function togglePin() {
 const showCreateRoom = ref(false)
 const newRoomName = ref('')
 const newRoomPath = ref('')
-const tasks = ref([])
-const gates = ref([])  // Acceptance Gate — 요구사항별 검증 상태(passed는 프로세스 소유)
 // 칸반 카드 상태 변경을 채팅에 알리기 위한 직전 상태 스냅샷(title→status).
 const showKanban = ref(false)
 const showWorkspacePicker = ref(false)
@@ -729,54 +734,10 @@ const taskBar = computed(() => {
 })
 
 // 학습 후보(RefinementCandidate) — 실행 근거로 만들어진 개선안. 승인해도 자동 적용은 없다.
-const refinements = ref([])
 
-async function loadRefinements() {
-  const id = currentRoomId.value
-  if (!id) {
-    refinements.value = []
-    return
-  }
-  try {
-    const res = await fetch(`/api/rooms/${id}/refinements`)
-    if (res.ok) refinements.value = (await res.json()).refinements || []
-  } catch {}
-}
 
-async function decideRefinement(r, decision) {
-  try {
-    await fetch(`/api/refinements/${r.id}/decide`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decision }),
-    })
-    await loadRefinements()
-  } catch {}
-}
 
-async function loadTasks() {
-  const id = currentRoomId.value
-  if (!id) {
-    tasks.value = []
-    return
-  }
-  try {
-    const res = await fetch(`/api/rooms/${id}/tasks`)
-    if (res.ok) tasks.value = await res.json()
-  } catch {}
-}
 
-async function loadGates() {
-  const id = currentRoomId.value
-  if (!id) {
-    gates.value = []
-    return
-  }
-  try {
-    const res = await fetch(`/api/sessions/${id}/gates`)
-    if (res.ok) gates.value = await res.json()
-  } catch {}
-}
 
 async function createRoom() {
   const name = newRoomName.value.trim() || 'New Session'
@@ -1000,18 +961,6 @@ function activePhase(m) {
 
 
 
-// ── 최종 결과 카드 — 상태·진행률·검증을 '별도 값'으로. 색만이 아니라 상태 텍스트를 함께. ──
-// 검증 개수는 요구사항 gate(현재 세션)에서 센다. passed/failed 외는 전부 미검증(unavailable 등).
-function verifyCounts() {
-  const g = gates.value || []
-  let passed = 0, failed = 0, unverified = 0
-  for (const x of g) {
-    if (x.status === 'passed') passed++
-    else if (x.status === 'failed') failed++
-    else unverified++
-  }
-  return { passed, failed, unverified, total: g.length }
-}
 // 상태 판정: 미검증 항목이 하나라도 있으면 completed여도 '부분 완료'. 색이 아니라 형태·텍스트.
 const _RESULT_STATUS = {
   completed: { key: 'done', label: '완료', cls: 'done', glyph: '✓' },
@@ -1043,16 +992,6 @@ function finalStatusInfo(m, i) {
     if (vc.failed > 0 || vc.unverified > 0) return _RESULT_STATUS.completed_unverified
   }
   return base
-}
-// 실패·미검증 gate + 실행 오류를 '별도 경고 카드'로. 사유와 다음 행동을 함께.
-function resultWarnings(m) {
-  const out = []
-  for (const g of (gates.value || [])) {
-    if (g.status === 'failed') out.push({ kind: '실패', title: g.title, reason: g.failure_reason || '검증에 실패했습니다.' })
-    else if (g.status !== 'passed') out.push({ kind: '미검증', title: g.title, reason: g.failure_reason || '독립 검증을 수행하지 못했습니다.' })
-  }
-  for (const e of (m.state?.errors || [])) out.push({ kind: '오류', title: '실행 오류', reason: String(e) })
-  return out
 }
 // 접힌 로그 헤더용 개수 — 실행·추론·도구 호출.
 function logCounts(m) {
