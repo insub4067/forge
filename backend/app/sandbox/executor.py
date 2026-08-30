@@ -20,6 +20,21 @@ def _is_dangerous(command: str) -> bool:
     return any(re.search(p, command) for p in _DANGEROUS)
 
 
+# host 모드에서 bash가 호스트에 직접 닿으므로, FORGE를 실행 중인 백엔드 프로세스를
+# 스스로 죽이는 것을 막는다(자기 세션 자멸·완전 다운 방지). 백엔드 재시작은 FORGE가
+# 아니라 사람이/슈퍼바이저가 한다. 빌드는 build_frontend 도구를 쓴다. git push는 허용.
+# bash 도구(registry)와 gate 검증(run_verify)이 이 단일 목록을 공유한다.
+BLOCKED_COMMANDS = ["rm -rf", "sudo ", "chmod 777",
+                    "kill ", "killall", "pkill", "uvicorn"]
+
+
+def _blocked_reason(command: str) -> str | None:
+    for blocked in BLOCKED_COMMANDS:
+        if blocked in command:
+            return blocked
+    return None
+
+
 class DockerSandbox:
     def __init__(self, image: str | None = None, workspace: str | None = None):
         self.image = image or settings.sandbox_image
@@ -118,11 +133,16 @@ class DockerSandbox:
     async def run_verify(self, command: str, timeout: int = 120) -> tuple[int, str]:
         """acceptance gate 검증 명령 실행 — bash 도구와 '동일한' 안전 경계를 적용하고
         (exit_code, output)을 반환한다. gate가 host /bin/sh로 직접 나가 승인·sandbox·
-        dangerous-command 정책을 우회하던 구멍(P0-1)을 막는다: _is_dangerous 차단,
-        sandbox_mode 준수(docker면 컨테이너·network none·workspace 마운트, host면 그룹세션),
+        dangerous-command 정책을 우회하던 구멍(P0-1)을 막는다: _is_dangerous +
+        BLOCKED_COMMANDS 차단(bash 도구와 동일 목록 — 모델이 쓴 gate 명령이 자기종료·
+        권한상승으로 새지 않게), sandbox_mode 준수(docker면 컨테이너·network none·
+        workspace 마운트, host면 그룹세션),
         timeout, 취소 시 프로세스 그룹 정리. bash보다 높은 권한을 갖지 않는다."""
         if _is_dangerous(command):
             return 126, "(차단됨: 파괴적/위험 명령으로 판단되어 실행하지 않았습니다.)"
+        blocked = _blocked_reason(command)
+        if blocked is not None:
+            return 126, f"(차단된 명령입니다: {blocked})"
         if settings.sandbox_mode == "host":
             return await self._run_host_checked(command, timeout)
         args = [
