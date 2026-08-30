@@ -5,6 +5,7 @@ result_id만 컨텍스트에 남기고, 원본은 여기에 저장한다. 모델
 도구로 원본 일부를 다시 가져온다(공격적 압축을 해도 정보 손실이 복구 가능해지는 안전망).
 파일 기반이라 재시작에도 살아남는다.
 """
+import re
 import uuid
 import os
 from pathlib import Path
@@ -25,7 +26,7 @@ def save(text: str) -> str:
 
 def load(result_id: str, offset: int = 0, limit: int = 4000) -> str:
     """저장된 원본의 [offset:offset+limit] 구간을 반환한다. path traversal은 차단."""
-    if not result_id or "/" in result_id or "." in result_id.replace("tr_", "", 1):
+    if not re.fullmatch(r"tr_[0-9a-f]{10}", result_id or ""):
         return "오류: 잘못된 result_id"
     p = STORE_DIR / f"{result_id}.txt"
     if not p.is_file():
