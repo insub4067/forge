@@ -731,8 +731,9 @@ class AgentRuntime:
 
     async def _maybe_interpret(self, full_request: str, send: EventSink,
                                session_id: str = ""):
-        """Task IR 인터프리터(Phase 1) — 기본 off. 켜져 있으면 저비용 flash로 원문을 Task IR로
-        정규화해 task_ir 이벤트로 발행하고, requirement를 완료 판정(traceability 강등)·gate 작성에 쓴다.
+        """Task IR 인터프리터(Phase 1) — 기본 ON(config task_ir_enabled=True, TASK_IR_ENABLED=0로 끔).
+        저비용 flash로 원문을 Task IR로 정규화해 task_ir 이벤트로 발행하고, requirement를 완료
+        판정(traceability 강등)·gate 작성에 쓴다.
         chat/code 라우팅 자체는 바꾸지 않는다(triage 소유). code route에서만 실행한다.
         실패/None이면 조용히 넘어간다(기존 경로 그대로). off면 어댑터 호출 자체가 없어 비용 0."""
         if not settings.task_ir_enabled or not full_request:
@@ -2446,9 +2447,6 @@ class AgentRuntime:
         # 레거시 크러치였다. 질문·의견·이미 완료된 요청에도 재실행돼 돈을 낭비하고(실측),
         # 2차 넛지는 불필요한 편집까지 강요했다. 이제 "말로 완료"는 Acceptance Gate가 증거로
         # 판정하므로 맹목적 넛지는 불필요하다.
-        if status != "done":
-            await finish(_STATUS_CODES.get(status, "failed"), self._finish_message(status))
-            return all_messages
 
         # 이번 run의 실제 워크스페이스 변경을 Git evidence로 판정 — write/edit뿐 아니라 bash
         # sed·rm·mv·스크립트·포맷터 변경까지 잡는다(명령 문자열 분류 아님). 표시·autocommit용
