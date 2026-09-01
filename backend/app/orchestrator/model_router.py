@@ -61,10 +61,12 @@ class ModelRouter:
         planner/reviewer/triage는 의도적으로 flash 고정이라 티어를 보지 않는다(비용)."""
         base = dict(self._policy.get(agent_type, self._policy["developer"]))
 
-        # Developer + 이미지: 텍스트 모델(flash/pro)은 이미지를 못 받으므로(400) vision 모델로 실행.
+        # 이미지 턴: 텍스트 모델(flash/pro)은 이미지를 못 받으므로(400) vision 모델로 실행한다.
+        # developer(구현)뿐 아니라 chat(관상·사진 설명 등 대화로 분류된 이미지 요청)도 해당 —
+        # chat이 flash로 가면 이미지가 조용히 버려져 "이미지를 볼 수 없습니다"로 오답(실측 버그).
         # 승격 시에도 이미지를 잃는 text-pro로 넘기지 않는다 — vision 계열 pro 모델이 없어
         # 같은 vision 모델로 재시도한다(무한 루프·비용 폭주는 상한 루프가 막는다).
-        if agent_type == "developer" and has_image:
+        if has_image and agent_type in ("developer", "chat"):
             base.update(dict(self._policy["vision"]))
             return base
 

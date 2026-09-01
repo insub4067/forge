@@ -2301,9 +2301,12 @@ class AgentRuntime:
             route_kind, tp, tc = await self._triage(all_messages)
             await record("triage", tp, tc, {"model": self.router.triage_model, "model_calls": 1})
         if route_kind == "chat":
+            # 이미지 첨부 턴이 chat으로 분류되면 has_image를 넘겨 vision 모델 + 이미지 전송이
+            # 되게 한다(미전달 시 flash가 이미지를 버려 "이미지를 볼 수 없습니다"로 오답).
             status, p, c, route = await self._run_role(
                 "chat", all_messages, send, session_id, ws, state, recent_calls,
                 step_base, room_memory, tools=CHAT_TOOLS, skills=skills,
+                has_image=has_image,
             )
             await record("chat", p, c, route)
             # 자동 분류가 chat으로 오분류했는데 모델이 코드 변경을 시도했다면(wanted_mutation),
